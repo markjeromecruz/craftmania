@@ -1,0 +1,1050 @@
+            // Initialize inventory slots
+            document.querySelectorAll('.inventorySlot').forEach((slot, index) => {
+                slot.addEventListener('click', () => {
+                    gameState.inventory.selected = index;
+                    document.querySelectorAll('.inventorySlot').forEach((s, i) => {
+                        s.classList.toggle('selected', i === index);
+                    });
+                });
+            });<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CraftMania - By Sandy and Izaiah Adriano</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Courier New', monospace;
+            background: #87CEEB;
+            overflow: hidden;
+            image-rendering: pixelated;
+        }
+        
+        #gameCanvas {
+            display: block;
+            margin: 0 auto;
+            border: 4px solid #654321;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            image-rendering: pixelated;
+        }
+        
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            text-shadow: 2px 2px 0px #000;
+            font-size: 16px;
+            z-index: 10;
+            background: rgba(0,0,0,0.5);
+            padding: 10px;
+            border: 2px solid #333;
+        }
+        
+        #inventory {
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 5px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border: 2px solid #555;
+        }
+        
+        .inventorySlot {
+            width: 50px;
+            height: 50px;
+            border: 2px solid #888;
+            background: rgba(100,100,100,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            cursor: pointer;
+        }
+        
+        .inventorySlot.selected {
+            border-color: #FFD700;
+            box-shadow: 0 0 10px #FFD700;
+        }
+        
+        #characterSelect {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #8B4513;
+            padding: 20px;
+            border: 4px solid #654321;
+            text-align: center;
+            z-index: 20;
+            color: white;
+            box-shadow: 0 0 30px rgba(0,0,0,0.8);
+        }
+        
+        .characterOption {
+            display: inline-block;
+            margin: 10px;
+            padding: 15px;
+            border: 3px solid #FFD700;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: rgba(0,0,0,0.5);
+        }
+        
+        .characterOption:hover {
+            transform: scale(1.1);
+            box-shadow: 0 0 20px #FFD700;
+            background: rgba(0,0,0,0.7);
+        }
+        
+        button {
+            font-family: 'Courier New', monospace;
+            font-size: 18px;
+            padding: 10px 20px;
+            margin: 5px;
+            border: 2px solid #654321;
+            background: #228B22;
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-shadow: 1px 1px 0px #000;
+        }
+        
+        button:hover {
+            transform: scale(1.05);
+            background: #32CD32;
+            box-shadow: 0 0 15px rgba(0,255,0,0.6);
+        }
+        
+        #gameInfo {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border: 2px solid #333;
+            font-size: 14px;
+            color: white;
+            max-width: 200px;
+        }
+        
+        #errorMsg {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: red;
+            color: white;
+            padding: 20px;
+            display: none;
+            z-index: 100;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    
+    <div id="ui">
+        <div>❤️ Health: <span id="health">20</span>/20</div>
+        <div>🍖 Hunger: <span id="hunger">20</span>/20</div>
+        <div>💎 Diamonds: <span id="diamonds">0</span></div>
+        <div>🌍 Blocks: <span id="blocks">64</span></div>
+        <div>🗺️ Biome: <span id="biome">Plains</span></div>
+        <div>🐕 Pets: <span id="pets">0</span></div>
+    </div>
+    
+    <div id="inventory">
+        <div class="inventorySlot selected" data-slot="0">🪨</div>
+        <div class="inventorySlot" data-slot="1">🪵</div>
+        <div class="inventorySlot" data-slot="2">⛏️</div>
+        <div class="inventorySlot" data-slot="3">🗡️</div>
+        <div class="inventorySlot" data-slot="4">🍖</div>
+    </div>
+    
+    <div id="characterSelect">
+        <h2>⛏️ Welcome to CraftMania! ⛏️</h2>
+        <p style="color: #FFD700; font-size: 20px; margin: 10px 0;">Authors: Sandy and Izaiah Adriano</p>
+        <p>Choose your character:</p>
+        <div class="characterOption" onclick="selectCharacter('steve')">
+            <h3>🎮 Steve Style</h3>
+            <p>Classic miner with blue shirt!</p>
+        </div>
+        <div class="characterOption" onclick="selectCharacter('sandy')">
+            <h3>👧 Sandy</h3>
+            <p>Pink outfit, stylish and cool!</p>
+        </div>
+        <div class="characterOption" onclick="selectCharacter('wrestler')">
+            <h3>🤼 WWE Champion</h3>
+            <p>Yellow bow, black & yellow pants!</p>
+        </div>
+        <br>
+        <button onclick="startGame()">Start Mining!</button>
+    </div>
+    
+    <div id="gameInfo" style="display: none;">
+        <h3>Controls:</h3>
+        <p>⬆️⬇️⬅️➡️ Move/Jump</p>
+        <p>🖱️ Left Click: Break</p>
+        <p>🖱️ Right Click: Place</p>
+        <p>1-5: Select Item</p>
+        <p>E: Eat Food</p>
+        <p>🚗 V: Vehicle Mode</p>
+        <p>🐕 P: Tame Pet</p>
+    </div>
+    
+    <div id="errorMsg"></div>
+    
+    <script>
+        // Error handling wrapper
+        try {
+            const canvas = document.getElementById('gameCanvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = 960;
+            canvas.height = 640;
+            
+            // Block types
+            const BLOCKS = {
+                AIR: 0,
+                GRASS: 1,
+                DIRT: 2,
+                STONE: 3,
+                WOOD: 4,
+                LEAVES: 5,
+                DIAMOND: 6,
+                SAND: 7,
+                WATER: 8,
+                BEDROCK: 9
+            };
+            
+            const BLOCK_SIZE = 32;
+            const WORLD_WIDTH = 100;
+            const WORLD_HEIGHT = 50;
+            
+            // Game State
+            let gameState = {
+                world: [],
+                player: {
+                    x: WORLD_WIDTH * BLOCK_SIZE / 2,
+                    y: 200,
+                    vx: 0,
+                    vy: 0,
+                    width: 24,
+                    height: 48,
+                    character: 'steve',
+                    health: 20,
+                    hunger: 20,
+                    onGround: false,
+                    facing: 1,
+                    mining: false,
+                    miningProgress: 0,
+                    miningBlock: null,
+                    jumping: false,
+                    inVehicle: false
+                },
+                camera: {
+                    x: 0,
+                    y: 0
+                },
+                inventory: {
+                    selected: 0,
+                    items: [
+                        { type: 'stone', count: 64 },
+                        { type: 'wood', count: 32 },
+                        { type: 'pickaxe', count: 1 },
+                        { type: 'sword', count: 1 },
+                        { type: 'food', count: 16 }
+                    ]
+                },
+                pets: [],
+                mobs: [],
+                particles: [],
+                gameStarted: false,
+                mouseX: 0,
+                mouseY: 0,
+                diamonds: 0
+            };
+            
+            // Generate world safely
+            function generateWorld() {
+                try {
+                    gameState.world = [];
+                    
+                    // First, initialize all arrays
+                    for (let x = 0; x < WORLD_WIDTH; x++) {
+                        gameState.world[x] = [];
+                        for (let y = 0; y < WORLD_HEIGHT; y++) {
+                            gameState.world[x][y] = BLOCKS.AIR;
+                        }
+                    }
+                    
+                    // Then generate terrain
+                    for (let x = 0; x < WORLD_WIDTH; x++) {
+                        const height = Math.floor(WORLD_HEIGHT / 2 + Math.sin(x * 0.1) * 5 + Math.random() * 3);
+                        
+                        for (let y = 0; y < WORLD_HEIGHT; y++) {
+                            if (y === WORLD_HEIGHT - 1) {
+                                gameState.world[x][y] = BLOCKS.BEDROCK;
+                            } else if (y > height + 5) {
+                                if (Math.random() < 0.02 && y > height + 10) {
+                                    gameState.world[x][y] = BLOCKS.DIAMOND;
+                                } else {
+                                    gameState.world[x][y] = BLOCKS.STONE;
+                                }
+                            } else if (y > height) {
+                                gameState.world[x][y] = BLOCKS.DIRT;
+                            } else if (y === height) {
+                                gameState.world[x][y] = BLOCKS.GRASS;
+                            }
+                        }
+                    }
+                    
+                    // Finally, add trees (after all arrays are initialized)
+                    for (let x = 5; x < WORLD_WIDTH - 5; x++) {
+                        if (Math.random() < 0.1) {
+                            // Find ground level for this x position
+                            let groundY = 0;
+                            for (let y = 0; y < WORLD_HEIGHT; y++) {
+                                if (gameState.world[x][y] === BLOCKS.GRASS) {
+                                    groundY = y;
+                                    break;
+                                }
+                            }
+                            
+                            const treeHeight = 5 + Math.floor(Math.random() * 3);
+                            
+                            // Add trunk
+                            for (let i = 1; i <= treeHeight; i++) {
+                                if (groundY - i >= 0) {
+                                    gameState.world[x][groundY - i] = BLOCKS.WOOD;
+                                }
+                            }
+                            
+                            // Add leaves
+                            for (let dx = -2; dx <= 2; dx++) {
+                                for (let dy = -2; dy <= 1; dy++) {
+                                    if (Math.abs(dx) + Math.abs(dy) <= 3) {
+                                        const leafX = x + dx;
+                                        const leafY = groundY - treeHeight + dy - 1;
+                                        if (leafX >= 0 && leafX < WORLD_WIDTH && leafY >= 0 && leafY < WORLD_HEIGHT) {
+                                            if (gameState.world[leafX] && gameState.world[leafX][leafY] === BLOCKS.AIR) {
+                                                gameState.world[leafX][leafY] = BLOCKS.LEAVES;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error("Error generating world:", error);
+                    showError("Failed to generate world: " + error.message);
+                }
+            }
+            
+            // Safe world access function
+            function getBlock(x, y) {
+                if (x >= 0 && x < WORLD_WIDTH && y >= 0 && y < WORLD_HEIGHT) {
+                    if (gameState.world && gameState.world[x] && typeof gameState.world[x][y] !== 'undefined') {
+                        return gameState.world[x][y];
+                    }
+                }
+                return BLOCKS.AIR;
+            }
+            
+            // Safe world setting function
+            function setBlock(x, y, block) {
+                if (x >= 0 && x < WORLD_WIDTH && y >= 0 && y < WORLD_HEIGHT) {
+                    if (gameState.world && gameState.world[x]) {
+                        gameState.world[x][y] = block;
+                    }
+                }
+            }
+            
+            // Character drawing functions
+            function drawCharacter(x, y, character, facing) {
+                try {
+                    ctx.save();
+                    ctx.translate(Math.floor(x), Math.floor(y));
+                    if (facing === -1) {
+                        ctx.scale(-1, 1);
+                    }
+                    
+                    if (character === 'wrestler') {
+                        // WWE Wrestler
+                        ctx.fillStyle = '#FDBCB4';
+                        ctx.fillRect(-8, -48, 16, 16);
+                        
+                        ctx.fillStyle = '#FFD700';
+                        ctx.fillRect(-10, -48, 20, 6);
+                        ctx.fillRect(-6, -50, 12, 10);
+                        
+                        ctx.fillStyle = '#000';
+                        ctx.fillRect(-8, -48, 16, 4);
+                        ctx.fillRect(-5, -40, 3, 3);
+                        ctx.fillRect(2, -40, 3, 3);
+                        
+                        ctx.fillStyle = '#FF0000';
+                        ctx.fillRect(-8, -32, 16, 12);
+                        
+                        ctx.fillStyle = '#FFD700';
+                        ctx.fillRect(-10, -24, 20, 6);
+                        ctx.fillStyle = '#000';
+                        ctx.fillRect(-3, -22, 6, 2);
+                        
+                        ctx.fillStyle = '#FDBCB4';
+                        ctx.fillRect(-12, -32, 4, 12);
+                        ctx.fillRect(8, -32, 4, 12);
+                        
+                        ctx.fillStyle = '#FFD700';
+                        ctx.fillRect(-8, -20, 16, 10);
+                        ctx.fillStyle = '#000';
+                        ctx.fillRect(-8, -10, 16, 10);
+                        
+                        ctx.fillStyle = '#000';
+                        ctx.fillRect(-8, 0, 6, 4);
+                        ctx.fillRect(2, 0, 6, 4);
+                        
+                    } else if (character === 'sandy') {
+                        // Sandy's character
+                        ctx.fillStyle = '#FDBCB4';
+                        ctx.fillRect(-8, -48, 16, 16);
+                        
+                        ctx.fillStyle = '#8B4513';
+                        ctx.fillRect(-10, -50, 20, 8);
+                        ctx.fillRect(-8, -44, 16, 4);
+                        
+                        ctx.fillStyle = '#000';
+                        ctx.fillRect(-5, -40, 3, 3);
+                        ctx.fillRect(2, -40, 3, 3);
+                        
+                        ctx.fillStyle = '#FF69B4';
+                        ctx.fillRect(-8, -32, 16, 12);
+                        
+                        ctx.fillStyle = '#FDBCB4';
+                        ctx.fillRect(-12, -32, 4, 12);
+                        ctx.fillRect(8, -32, 4, 12);
+                        
+                        ctx.fillStyle = '#4169E1';
+                        ctx.fillRect(-8, -20, 16, 10);
+                        
+                        ctx.fillStyle = '#FDBCB4';
+                        ctx.fillRect(-8, -10, 6, 6);
+                        ctx.fillRect(2, -10, 6, 6);
+                        
+                        ctx.fillStyle = '#FFF';
+                        ctx.fillRect(-8, -4, 6, 4);
+                        ctx.fillRect(2, -4, 6, 4);
+                        
+                        ctx.fillStyle = '#FF0000';
+                        ctx.fillRect(-8, 0, 6, 4);
+                        ctx.fillRect(2, 0, 6, 4);
+                        
+                    } else {
+                        // Steve style
+                        ctx.fillStyle = '#FDBCB4';
+                        ctx.fillRect(-8, -48, 16, 16);
+                        
+                        ctx.fillStyle = '#4B2412';
+                        ctx.fillRect(-8, -48, 16, 6);
+                        
+                        ctx.fillStyle = '#000';
+                        ctx.fillRect(-5, -40, 3, 3);
+                        ctx.fillRect(2, -40, 3, 3);
+                        
+                        ctx.fillStyle = '#00BFFF';
+                        ctx.fillRect(-8, -32, 16, 12);
+                        
+                        ctx.fillStyle = '#FDBCB4';
+                        ctx.fillRect(-12, -32, 4, 12);
+                        ctx.fillRect(8, -32, 4, 12);
+                        
+                        ctx.fillStyle = '#0000CD';
+                        ctx.fillRect(-8, -20, 16, 20);
+                        
+                        ctx.fillStyle = '#696969';
+                        ctx.fillRect(-8, 0, 6, 4);
+                        ctx.fillRect(2, 0, 6, 4);
+                    }
+                    
+                    ctx.restore();
+                } catch (error) {
+                    console.error("Error drawing character:", error);
+                }
+            }
+            
+            // Block colors
+            function getBlockColor(block) {
+                switch(block) {
+                    case BLOCKS.GRASS: return '#228B22';
+                    case BLOCKS.DIRT: return '#8B4513';
+                    case BLOCKS.STONE: return '#808080';
+                    case BLOCKS.WOOD: return '#8B4513';
+                    case BLOCKS.LEAVES: return '#00FF00';
+                    case BLOCKS.DIAMOND: return '#00FFFF';
+                    case BLOCKS.SAND: return '#F4A460';
+                    case BLOCKS.WATER: return '#4169E1';
+                    case BLOCKS.BEDROCK: return '#1C1C1C';
+                    default: return null;
+                }
+            }
+            
+            // Draw block safely
+            function drawBlock(x, y, block) {
+                try {
+                    const color = getBlockColor(block);
+                    if (!color) return;
+                    
+                    ctx.fillStyle = color;
+                    ctx.fillRect(Math.floor(x), Math.floor(y), BLOCK_SIZE, BLOCK_SIZE);
+                    
+                    ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+                    ctx.strokeRect(Math.floor(x), Math.floor(y), BLOCK_SIZE, BLOCK_SIZE);
+                    
+                    if (block === BLOCKS.GRASS) {
+                        ctx.fillStyle = '#654321';
+                        ctx.fillRect(Math.floor(x), Math.floor(y) + BLOCK_SIZE - 8, BLOCK_SIZE, 8);
+                    } else if (block === BLOCKS.DIAMOND) {
+                        ctx.fillStyle = '#FFF';
+                        ctx.fillRect(Math.floor(x) + 10, Math.floor(y) + 10, 4, 4);
+                    }
+                } catch (error) {
+                    console.error("Error drawing block:", error);
+                }
+            }
+            
+            // Pet class
+            class Pet {
+                constructor(type, x, y) {
+                    this.type = type;
+                    this.x = x;
+                    this.y = y;
+                    this.vx = 0;
+                    this.vy = 0;
+                    this.width = 24;
+                    this.height = 24;
+                    this.onGround = false;
+                }
+                
+                update() {
+                    try {
+                        const dx = gameState.player.x - this.x;
+                        const distance = Math.abs(dx);
+                        
+                        if (distance > 100) {
+                            this.vx = dx > 0 ? 3 : -3;
+                        } else if (distance < 50) {
+                            this.vx *= 0.8;
+                        } else {
+                            this.vx = 0;
+                        }
+                        
+                        this.vy += 0.5;
+                        this.x += this.vx;
+                        this.y += this.vy;
+                        
+                        const gridX = Math.floor(this.x / BLOCK_SIZE);
+                        const gridY = Math.floor((this.y + this.height) / BLOCK_SIZE);
+                        
+                        if (getBlock(gridX, gridY) !== BLOCKS.AIR) {
+                            this.y = gridY * BLOCK_SIZE - this.height;
+                            this.vy = 0;
+                            this.onGround = true;
+                            
+                            if (Math.random() < 0.01 && Math.abs(this.vx) > 0.1) {
+                                this.vy = -8;
+                            }
+                        }
+                    } catch (error) {
+                        console.error("Error updating pet:", error);
+                    }
+                }
+                
+                draw() {
+                    try {
+                        const screenX = this.x - gameState.camera.x;
+                        const screenY = this.y - gameState.camera.y;
+                        
+                        ctx.fillStyle = '#808080';
+                        ctx.fillRect(screenX - 12, screenY - 12, 24, 16);
+                        ctx.fillRect(screenX - 16, screenY - 8, 8, 8);
+                        ctx.fillRect(screenX + 8, screenY - 8, 8, 4);
+                        
+                        ctx.fillStyle = '#696969';
+                        ctx.fillRect(screenX - 10, screenY + 4, 4, 8);
+                        ctx.fillRect(screenX - 2, screenY + 4, 4, 8);
+                        ctx.fillRect(screenX + 6, screenY + 4, 4, 8);
+                        
+                        ctx.fillStyle = '#FFF';
+                        ctx.fillRect(screenX - 14, screenY - 6, 2, 2);
+                        
+                        ctx.fillStyle = '#FF0000';
+                        ctx.fillRect(screenX - 8, screenY - 2, 12, 2);
+                    } catch (error) {
+                        console.error("Error drawing pet:", error);
+                    }
+                }
+            }
+            
+            // Mob class
+            class Mob {
+                constructor(type, x, y) {
+                    this.type = type;
+                    this.x = x;
+                    this.y = y;
+                    this.vx = 0;
+                    this.vy = 0;
+                    this.width = 24;
+                    this.height = 48;
+                    this.health = 20;
+                    this.onGround = false;
+                    this.direction = Math.random() > 0.5 ? 1 : -1;
+                }
+                
+                update() {
+                    try {
+                        const dx = gameState.player.x - this.x;
+                        const distance = Math.abs(dx);
+                        
+                        if (distance < 200) {
+                            this.vx = dx > 0 ? 1.5 : -1.5;
+                            this.direction = dx > 0 ? 1 : -1;
+                        } else {
+                            if (Math.random() < 0.02) {
+                                this.direction *= -1;
+                            }
+                            this.vx = this.direction * 0.5;
+                        }
+                        
+                        this.vy += 0.5;
+                        this.x += this.vx;
+                        this.y += this.vy;
+                        
+                        const gridX = Math.floor(this.x / BLOCK_SIZE);
+                        const gridY = Math.floor((this.y + this.height) / BLOCK_SIZE);
+                        
+                        if (getBlock(gridX, gridY) !== BLOCKS.AIR) {
+                            this.y = gridY * BLOCK_SIZE - this.height;
+                            this.vy = 0;
+                            this.onGround = true;
+                            
+                            const frontX = Math.floor((this.x + this.direction * 20) / BLOCK_SIZE);
+                            if (getBlock(frontX, gridY - 1) !== BLOCKS.AIR && this.onGround) {
+                                this.vy = -8;
+                            }
+                        }
+                        
+                        if (distance < 30 && Math.abs(gameState.player.y - this.y) < 40) {
+                            if (!gameState.player.inVehicle) {
+                                gameState.player.health -= 0.1;
+                                updateUI();
+                            }
+                        }
+                    } catch (error) {
+                        console.error("Error updating mob:", error);
+                    }
+                }
+                
+                draw() {
+                    try {
+                        const screenX = this.x - gameState.camera.x;
+                        const screenY = this.y - gameState.camera.y;
+                        
+                        ctx.fillStyle = '#228B22';
+                        ctx.fillRect(screenX - 8, screenY - 48, 16, 16);
+                        
+                        ctx.fillStyle = '#000';
+                        ctx.fillRect(screenX - 5, screenY - 42, 3, 3);
+                        ctx.fillRect(screenX + 2, screenY - 42, 3, 3);
+                        
+                        ctx.fillStyle = '#00BFFF';
+                        ctx.fillRect(screenX - 8, screenY - 32, 16, 12);
+                        
+                        ctx.fillStyle = '#228B22';
+                        ctx.fillRect(screenX - 12, screenY - 32, 4, 12);
+                        ctx.fillRect(screenX + 8, screenY - 32, 4, 12);
+                        
+                        ctx.fillStyle = '#0000CD';
+                        ctx.fillRect(screenX - 8, screenY - 20, 16, 20);
+                        
+                        ctx.fillStyle = '#FF0000';
+                        ctx.fillRect(screenX - 12, screenY - 58, 24, 4);
+                        ctx.fillStyle = '#00FF00';
+                        ctx.fillRect(screenX - 12, screenY - 58, (this.health / 20) * 24, 4);
+                    } catch (error) {
+                        console.error("Error drawing mob:", error);
+                    }
+                }
+            }
+            
+            window.selectCharacter = function(character) {
+                gameState.player.character = character;
+            }
+            
+            window.startGame = function() {
+                try {
+                    document.getElementById('characterSelect').style.display = 'none';
+                    document.getElementById('gameInfo').style.display = 'block';
+                    gameState.gameStarted = true;
+                    
+                    generateWorld();
+                    
+                    // Find spawn point safely
+                    let spawnFound = false;
+                    for (let x = Math.floor(WORLD_WIDTH / 2) - 10; x < Math.floor(WORLD_WIDTH / 2) + 10 && !spawnFound; x++) {
+                        for (let y = 0; y < WORLD_HEIGHT - 1; y++) {
+                            if (getBlock(x, y) === BLOCKS.AIR && getBlock(x, y + 1) !== BLOCKS.AIR) {
+                                gameState.player.x = x * BLOCK_SIZE;
+                                gameState.player.y = (y - 1) * BLOCK_SIZE;
+                                spawnFound = true;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // Fallback spawn position if no suitable spot found
+                    if (!spawnFound) {
+                        gameState.player.x = (WORLD_WIDTH / 2) * BLOCK_SIZE;
+                        gameState.player.y = 100;
+                    }
+                    
+                    // Spawn initial mobs
+                    for (let i = 0; i < 5; i++) {
+                        const x = Math.random() * WORLD_WIDTH * BLOCK_SIZE;
+                        gameState.mobs.push(new Mob('zombie', x, 0));
+                    }
+                    
+                    gameLoop();
+                } catch (error) {
+                    console.error("Error starting game:", error);
+                    showError("Failed to start game: " + error.message);
+                }
+            }
+            
+            // Input handling
+            const keys = {};
+            let mouseDown = false;
+            let rightMouseDown = false;
+            
+            window.addEventListener('keydown', (e) => {
+                keys[e.key] = true;
+                
+                if (e.key >= '1' && e.key <= '5') {
+                    gameState.inventory.selected = parseInt(e.key) - 1;
+                    document.querySelectorAll('.inventorySlot').forEach((slot, i) => {
+                        slot.classList.toggle('selected', i === gameState.inventory.selected);
+                    });
+                }
+                
+                if (e.key === 'v' || e.key === 'V') {
+                    gameState.player.inVehicle = !gameState.player.inVehicle;
+                }
+                
+                if (e.key === 'p' || e.key === 'P') {
+                    const wolf = new Pet('wolf', gameState.player.x + 50, gameState.player.y);
+                    gameState.pets.push(wolf);
+                    updateUI();
+                }
+            });
+            
+            window.addEventListener('keyup', (e) => {
+                keys[e.key] = false;
+            });
+            
+            canvas.addEventListener('mousedown', (e) => {
+                if (e.button === 0) mouseDown = true;
+                if (e.button === 2) rightMouseDown = true;
+            });
+            
+            canvas.addEventListener('mouseup', (e) => {
+                if (e.button === 0) {
+                    mouseDown = false;
+                    gameState.player.mining = false;
+                    gameState.player.miningProgress = 0;
+                    gameState.player.miningBlock = null;
+                }
+                if (e.button === 2) rightMouseDown = false;
+            });
+            
+            canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+            
+            canvas.addEventListener('mousemove', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                gameState.mouseX = e.clientX - rect.left;
+                gameState.mouseY = e.clientY - rect.top;
+            });
+            
+            function updatePlayer() {
+                try {
+                    // Movement
+                    if (keys['ArrowLeft'] || keys['a'] || keys['A']) {
+                        gameState.player.vx = gameState.player.inVehicle ? -8 : -4;
+                        gameState.player.facing = -1;
+                    } else if (keys['ArrowRight'] || keys['d'] || keys['D']) {
+                        gameState.player.vx = gameState.player.inVehicle ? 8 : 4;
+                        gameState.player.facing = 1;
+                    } else {
+                        gameState.player.vx *= 0.8;
+                    }
+                    
+                    if ((keys['ArrowUp'] || keys['w'] || keys['W'] || keys[' ']) && gameState.player.onGround) {
+                        gameState.player.vy = -10;
+                        gameState.player.jumping = true;
+                    }
+                    
+                    gameState.player.vy += 0.5;
+                    if (gameState.player.vy > 15) gameState.player.vy = 15;
+                    
+                    gameState.player.x += gameState.player.vx;
+                    gameState.player.y += gameState.player.vy;
+                    
+                    const gridX = Math.floor(gameState.player.x / BLOCK_SIZE);
+                    const gridY = Math.floor((gameState.player.y + gameState.player.height) / BLOCK_SIZE);
+                    
+                    gameState.player.onGround = false;
+                    
+                    if (getBlock(gridX, gridY) !== BLOCKS.AIR) {
+                        gameState.player.y = gridY * BLOCK_SIZE - gameState.player.height;
+                        gameState.player.vy = 0;
+                        gameState.player.onGround = true;
+                        gameState.player.jumping = false;
+                    }
+                    
+                    gameState.player.x = Math.max(0, Math.min((WORLD_WIDTH - 1) * BLOCK_SIZE, gameState.player.x));
+                    
+                    // Mining/Building
+                    if (mouseDown || rightMouseDown) {
+                        const worldX = gameState.mouseX + gameState.camera.x;
+                        const worldY = gameState.mouseY + gameState.camera.y;
+                        const blockX = Math.floor(worldX / BLOCK_SIZE);
+                        const blockY = Math.floor(worldY / BLOCK_SIZE);
+                        
+                        const dx = (blockX * BLOCK_SIZE + BLOCK_SIZE/2) - gameState.player.x;
+                        const dy = (blockY * BLOCK_SIZE + BLOCK_SIZE/2) - (gameState.player.y - gameState.player.height/2);
+                        const distance = Math.sqrt(dx * dx + dy * dy);
+                        
+                        if (distance < 150 && blockX >= 0 && blockX < WORLD_WIDTH && blockY >= 0 && blockY < WORLD_HEIGHT) {
+                            const currentBlock = getBlock(blockX, blockY);
+                            
+                            if (mouseDown && currentBlock !== BLOCKS.AIR && currentBlock !== BLOCKS.BEDROCK) {
+                                gameState.player.mining = true;
+                                
+                                if (gameState.player.miningBlock?.x === blockX && gameState.player.miningBlock?.y === blockY) {
+                                    gameState.player.miningProgress++;
+                                    
+                                    if (gameState.player.miningProgress > 30) {
+                                        if (currentBlock === BLOCKS.DIAMOND) {
+                                            gameState.diamonds++;
+                                        }
+                                        setBlock(blockX, blockY, BLOCKS.AIR);
+                                        gameState.player.miningProgress = 0;
+                                        gameState.player.miningBlock = null;
+                                        updateUI();
+                                    }
+                                } else {
+                                    gameState.player.miningBlock = { x: blockX, y: blockY };
+                                    gameState.player.miningProgress = 0;
+                                }
+                            } else if (rightMouseDown && currentBlock === BLOCKS.AIR && gameState.inventory.items[0].count > 0) {
+                                setBlock(blockX, blockY, BLOCKS.STONE);
+                                gameState.inventory.items[0].count--;
+                                updateUI();
+                            }
+                        }
+                    }
+                    
+                    gameState.camera.x = gameState.player.x - canvas.width / 2;
+                    gameState.camera.y = gameState.player.y - canvas.height / 2;
+                    
+                    gameState.player.hunger -= 0.002;
+                    if (gameState.player.hunger <= 0) {
+                        gameState.player.health -= 0.01;
+                        gameState.player.hunger = 0;
+                    }
+                    
+                    if (keys['e'] || keys['E']) {
+                        if (gameState.inventory.items[4].count > 0 && gameState.player.hunger < 20) {
+                            gameState.inventory.items[4].count--;
+                            gameState.player.hunger = Math.min(20, gameState.player.hunger + 8);
+                            updateUI();
+                        }
+                    }
+                    
+                    if (keys[' '] && gameState.inventory.selected === 3) {
+                        gameState.mobs.forEach(mob => {
+                            const dx = mob.x - gameState.player.x;
+                            const dy = mob.y - gameState.player.y;
+                            const distance = Math.sqrt(dx * dx + dy * dy);
+                            
+                            if (distance < 60) {
+                                mob.health -= 0.5;
+                                mob.x += dx / distance * 10;
+                            }
+                        });
+                    }
+                    
+                    gameState.mobs = gameState.mobs.filter(mob => mob.health > 0);
+                } catch (error) {
+                    console.error("Error updating player:", error);
+                }
+            }
+            
+            function updateUI() {
+                try {
+                    document.getElementById('health').textContent = Math.floor(gameState.player.health);
+                    document.getElementById('hunger').textContent = Math.floor(gameState.player.hunger);
+                    document.getElementById('diamonds').textContent = gameState.diamonds;
+                    document.getElementById('blocks').textContent = gameState.inventory.items[0].count;
+                    document.getElementById('pets').textContent = gameState.pets.length;
+                } catch (error) {
+                    console.error("Error updating UI:", error);
+                }
+            }
+            
+            function drawWorld() {
+                try {
+                    const startX = Math.floor(gameState.camera.x / BLOCK_SIZE) - 1;
+                    const endX = Math.ceil((gameState.camera.x + canvas.width) / BLOCK_SIZE) + 1;
+                    const startY = Math.floor(gameState.camera.y / BLOCK_SIZE) - 1;
+                    const endY = Math.ceil((gameState.camera.y + canvas.height) / BLOCK_SIZE) + 1;
+                    
+                    for (let x = Math.max(0, startX); x < Math.min(WORLD_WIDTH, endX); x++) {
+                        for (let y = Math.max(0, startY); y < Math.min(WORLD_HEIGHT, endY); y++) {
+                            const block = getBlock(x, y);
+                            if (block !== BLOCKS.AIR) {
+                                const screenX = x * BLOCK_SIZE - gameState.camera.x;
+                                const screenY = y * BLOCK_SIZE - gameState.camera.y;
+                                drawBlock(screenX, screenY, block);
+                            }
+                        }
+                    }
+                    
+                    if (gameState.player.mining && gameState.player.miningBlock) {
+                        const screenX = gameState.player.miningBlock.x * BLOCK_SIZE - gameState.camera.x;
+                        const screenY = gameState.player.miningBlock.y * BLOCK_SIZE - gameState.camera.y;
+                        
+                        ctx.strokeStyle = '#000';
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE);
+                        
+                        const progress = gameState.player.miningProgress / 30;
+                        if (progress > 0.3) {
+                            ctx.strokeStyle = '#333';
+                            ctx.beginPath();
+                            ctx.moveTo(screenX + 10, screenY + 5);
+                            ctx.lineTo(screenX + 15, screenY + 15);
+                            ctx.stroke();
+                        }
+                        if (progress > 0.6) {
+                            ctx.beginPath();
+                            ctx.moveTo(screenX + 20, screenY + 10);
+                            ctx.lineTo(screenX + 25, screenY + 25);
+                            ctx.stroke();
+                        }
+                    }
+                    
+                    const worldX = gameState.mouseX + gameState.camera.x;
+                    const worldY = gameState.mouseY + gameState.camera.y;
+                    const blockX = Math.floor(worldX / BLOCK_SIZE);
+                    const blockY = Math.floor(worldY / BLOCK_SIZE);
+                    
+                    if (blockX >= 0 && blockX < WORLD_WIDTH && blockY >= 0 && blockY < WORLD_HEIGHT) {
+                        const screenX = blockX * BLOCK_SIZE - gameState.camera.x;
+                        const screenY = blockY * BLOCK_SIZE - gameState.camera.y;
+                        
+                        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE);
+                    }
+                } catch (error) {
+                    console.error("Error drawing world:", error);
+                }
+            }
+            
+            function showError(message) {
+                const errorDiv = document.getElementById('errorMsg');
+                if (errorDiv) {
+                    errorDiv.textContent = message;
+                    errorDiv.style.display = 'block';
+                    setTimeout(() => {
+                        errorDiv.style.display = 'none';
+                    }, 5000);
+                }
+            }
+            
+            function gameLoop() {
+                try {
+                    if (!gameState.gameStarted) return;
+                    
+                    ctx.fillStyle = '#87CEEB';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    
+                    updatePlayer();
+                    
+                    gameState.pets.forEach(pet => pet.update());
+                    gameState.mobs.forEach(mob => mob.update());
+                    
+                    drawWorld();
+                    
+                    gameState.mobs.forEach(mob => mob.draw());
+                    gameState.pets.forEach(pet => pet.draw());
+                    
+                    const screenX = gameState.player.x - gameState.camera.x;
+                    const screenY = gameState.player.y - gameState.camera.y;
+                    
+                    if (gameState.player.inVehicle) {
+                        ctx.fillStyle = '#696969';
+                        ctx.fillRect(screenX - 20, screenY - 20, 40, 20);
+                        ctx.fillStyle = '#000';
+                        ctx.fillRect(screenX - 15, screenY - 5, 10, 10);
+                        ctx.fillRect(screenX + 5, screenY - 5, 10, 10);
+                        drawCharacter(screenX, screenY - 10, gameState.player.character, gameState.player.facing);
+                    } else {
+                        drawCharacter(screenX, screenY, gameState.player.character, gameState.player.facing);
+                    }
+                    
+                    if (Math.random() < 0.005 && gameState.mobs.length < 10) {
+                        const x = Math.random() > 0.5 ? 
+                            gameState.camera.x - 100 : 
+                            gameState.camera.x + canvas.width + 100;
+                        gameState.mobs.push(new Mob('zombie', x, 0));
+                    }
+                    
+                    if (gameState.player.health <= 0) {
+                        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+                        ctx.fillStyle = '#FF0000';
+                        ctx.font = '48px Courier New';
+                        ctx.fillText('YOU DIED!', canvas.width/2 - 120, canvas.height/2);
+                        ctx.fillStyle = '#FFF';
+                        ctx.font = '24px Courier New';
+                        ctx.fillText('Score: ' + gameState.diamonds + ' Diamonds', canvas.width/2 - 140, canvas.height/2 + 40);
+                        return;
+                    }
+                    
+                    updateUI();
+                    requestAnimationFrame(gameLoop);
+                } catch (error) {
+                    console.error("Game loop error:", error);
+                    showError("Game error: " + error.message);
+                }
+            }
+            
+        } catch (error) {
+            console.error("Main initialization error:", error);
+            console.error("Error stack:", error.stack);
+            const errorDiv = document.getElementById('errorMsg');
+            if (errorDiv) {
+                errorDiv.textContent = "Failed to initialize game: " + error.message;
+                errorDiv.style.display = 'block';
+            } else {
+                alert("Failed to initialize game: " + error.message);
+            }
+        }
+    </script>
+</body>
+</html>
