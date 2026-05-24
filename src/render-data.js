@@ -14,6 +14,10 @@ export const BLOCKS = {
   SAND: 7,
   WATER: 8,
   BEDROCK: 9,
+  CACTUS: 10,
+  SNOW: 11,
+  ICE: 12,
+  PINE_LEAVES: 13,
 };
 
 const BLOCK_COLORS = {
@@ -26,6 +30,10 @@ const BLOCK_COLORS = {
   [BLOCKS.SAND]: '#F4A460',
   [BLOCKS.WATER]: '#4169E1',
   [BLOCKS.BEDROCK]: '#1C1C1C',
+  [BLOCKS.CACTUS]: '#2E8B57',
+  [BLOCKS.SNOW]: '#F0F8FF',
+  [BLOCKS.ICE]: '#A5F2F3',
+  [BLOCKS.PINE_LEAVES]: '#0B6623',
 };
 
 export function getBlockColor(block) {
