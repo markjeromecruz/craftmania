@@ -146,8 +146,9 @@
         <div>❤️ Health: <span id="health">20</span>/20</div>
         <div>🍖 Hunger: <span id="hunger">20</span>/20</div>
         <div>💎 Diamonds: <span id="diamonds">0</span></div>
-        <div>🌍 Blocks: <span id="blocks">64</span></div>
-        <div>🗺️ Biome: <span id="biome">Plains</span></div>
+        <div>🪨 Stone: <span id="stone">64</span></div>
+        <div>🌍 Blocks: <span id="blocks">0</span></div>
+        <div>🗺️ Biome: <span id="biome">Plains</span> | <span id="phase">🌞 Day</span></div>
         <div>🐕 Pets: <span id="pets">0</span></div>
     </div>
     
@@ -182,12 +183,13 @@
     <div id="gameInfo" style="display: none;">
         <h3>Controls:</h3>
         <p>⬆️⬇️⬅️➡️ Move/Jump</p>
-        <p>🖱️ Left Click: Break</p>
+        <p>🖱️ Left: Break / 🗡️ Attack</p>
         <p>🖱️ Right Click: Place</p>
         <p>1-5: Select Item</p>
-        <p>E: Eat Food</p>
+        <p>E: Eat (tap)</p>
         <p>🚗 V: Vehicle Mode</p>
         <p>🐕 P: Tame Pet</p>
+        <p>R: Respawn (when dead)</p>
     </div>
     
     <div id="errorMsg"></div>
@@ -200,7 +202,7 @@
             canvas.width = 960;
             canvas.height = 640;
             
-            // Block types
+            // Block types — mirror of src/render-data.js BLOCKS (id values must match).
             const BLOCKS = {
                 AIR: 0,
                 GRASS: 1,
@@ -211,8 +213,16 @@
                 DIAMOND: 6,
                 SAND: 7,
                 WATER: 8,
-                BEDROCK: 9
+                BEDROCK: 9,
+                CACTUS: 10,
+                SNOW: 11,
+                ICE: 12,
+                PINE_LEAVES: 13
             };
+
+            // Lazy ref to the module bridge (window.CraftLogic). Populated in
+            // startGame() once the deferred <script type="module"> has resolved.
+            let CL = null;
             
             const BLOCK_SIZE = 32;
             const WORLD_WIDTH = 100;
@@ -259,80 +269,27 @@
                 gameStarted: false,
                 mouseX: 0,
                 mouseY: 0,
-                diamonds: 0
+                diamonds: 0,
+                // --- Phase 3 additions ---
+                tick: 0,                          // increments each gameLoop frame (day/night)
+                worldSeed: 0,                     // set in startGame; also reused on respawn
+                blocksMinedTotal: 0,              // separate counter from stone-slot (bug 10)
+                tod: null,                        // most recent getTimeOfDay() result (mobs read this)
+                keysJustPressed: new Set(),       // edge-triggered keys (bug 2 eat)
+                lastFrameTick: null               // tracks frame-to-frame delta
             };
+
+            // Exposed for devtools inspection (Playwright + manual debugging).
+            // Inert in production — game logic never reads window.gameState.
+            window.gameState = gameState;
             
             // Generate world safely
+            // World generation is delegated to src/world.js (via CraftLogic).
+            // Biomes, transitions, snow caps, and tree variants live there.
             function generateWorld() {
                 try {
-                    gameState.world = [];
-                    
-                    // First, initialize all arrays
-                    for (let x = 0; x < WORLD_WIDTH; x++) {
-                        gameState.world[x] = [];
-                        for (let y = 0; y < WORLD_HEIGHT; y++) {
-                            gameState.world[x][y] = BLOCKS.AIR;
-                        }
-                    }
-                    
-                    // Then generate terrain
-                    for (let x = 0; x < WORLD_WIDTH; x++) {
-                        const height = Math.floor(WORLD_HEIGHT / 2 + Math.sin(x * 0.1) * 5 + Math.random() * 3);
-                        
-                        for (let y = 0; y < WORLD_HEIGHT; y++) {
-                            if (y === WORLD_HEIGHT - 1) {
-                                gameState.world[x][y] = BLOCKS.BEDROCK;
-                            } else if (y > height + 5) {
-                                if (Math.random() < 0.02 && y > height + 10) {
-                                    gameState.world[x][y] = BLOCKS.DIAMOND;
-                                } else {
-                                    gameState.world[x][y] = BLOCKS.STONE;
-                                }
-                            } else if (y > height) {
-                                gameState.world[x][y] = BLOCKS.DIRT;
-                            } else if (y === height) {
-                                gameState.world[x][y] = BLOCKS.GRASS;
-                            }
-                        }
-                    }
-                    
-                    // Finally, add trees (after all arrays are initialized)
-                    for (let x = 5; x < WORLD_WIDTH - 5; x++) {
-                        if (Math.random() < 0.1) {
-                            // Find ground level for this x position
-                            let groundY = 0;
-                            for (let y = 0; y < WORLD_HEIGHT; y++) {
-                                if (gameState.world[x][y] === BLOCKS.GRASS) {
-                                    groundY = y;
-                                    break;
-                                }
-                            }
-                            
-                            const treeHeight = 5 + Math.floor(Math.random() * 3);
-                            
-                            // Add trunk
-                            for (let i = 1; i <= treeHeight; i++) {
-                                if (groundY - i >= 0) {
-                                    gameState.world[x][groundY - i] = BLOCKS.WOOD;
-                                }
-                            }
-                            
-                            // Add leaves
-                            for (let dx = -2; dx <= 2; dx++) {
-                                for (let dy = -2; dy <= 1; dy++) {
-                                    if (Math.abs(dx) + Math.abs(dy) <= 3) {
-                                        const leafX = x + dx;
-                                        const leafY = groundY - treeHeight + dy - 1;
-                                        if (leafX >= 0 && leafX < WORLD_WIDTH && leafY >= 0 && leafY < WORLD_HEIGHT) {
-                                            if (gameState.world[leafX] && gameState.world[leafX][leafY] === BLOCKS.AIR) {
-                                                gameState.world[leafX][leafY] = BLOCKS.LEAVES;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    if (!CL) throw new Error('CraftLogic not loaded');
+                    gameState.world = CL.generateWorld(gameState.worldSeed);
                 } catch (error) {
                     console.error("Error generating world:", error);
                     showError("Failed to generate world: " + error.message);
@@ -470,7 +427,8 @@
                 }
             }
             
-            // Block colors
+            // Block colors — extended for biome blocks. Falls back to CraftLogic
+            // (the source of truth) for any block id we didn't list here.
             function getBlockColor(block) {
                 switch(block) {
                     case BLOCKS.GRASS: return '#228B22';
@@ -482,7 +440,11 @@
                     case BLOCKS.SAND: return '#F4A460';
                     case BLOCKS.WATER: return '#4169E1';
                     case BLOCKS.BEDROCK: return '#1C1C1C';
-                    default: return null;
+                    case BLOCKS.CACTUS: return '#2E8B57';
+                    case BLOCKS.SNOW: return '#F0F8FF';
+                    case BLOCKS.ICE: return '#A5F2F3';
+                    case BLOCKS.PINE_LEAVES: return '#0B6623';
+                    default: return CL ? CL.getBlockColor(block) : null;
                 }
             }
             
@@ -504,6 +466,19 @@
                     } else if (block === BLOCKS.DIAMOND) {
                         ctx.fillStyle = '#FFF';
                         ctx.fillRect(Math.floor(x) + 10, Math.floor(y) + 10, 4, 4);
+                    } else if (block === BLOCKS.SNOW) {
+                        // Lighter top crust to read as snow even against pale fill.
+                        ctx.fillStyle = '#FFFFFF';
+                        ctx.fillRect(Math.floor(x), Math.floor(y), BLOCK_SIZE, 4);
+                    } else if (block === BLOCKS.CACTUS) {
+                        // Vertical spine detail.
+                        ctx.fillStyle = '#1E5631';
+                        ctx.fillRect(Math.floor(x) + 14, Math.floor(y) + 4, 4, BLOCK_SIZE - 8);
+                    } else if (block === BLOCKS.ICE) {
+                        // Sparkle highlight.
+                        ctx.fillStyle = '#FFFFFF';
+                        ctx.fillRect(Math.floor(x) + 6, Math.floor(y) + 6, 2, 2);
+                        ctx.fillRect(Math.floor(x) + 18, Math.floor(y) + 20, 2, 2);
                     }
                 } catch (error) {
                     console.error("Error drawing block:", error);
@@ -540,17 +515,17 @@
                         this.x += this.vx;
                         this.y += this.vy;
                         
+                        // Bug 5 — pet collision uses footOffset=12 (legs end at y+12).
+                        const petFootOffset = 12;
                         const gridX = Math.floor(this.x / BLOCK_SIZE);
-                        const gridY = Math.floor((this.y + this.height) / BLOCK_SIZE);
-                        
-                        if (getBlock(gridX, gridY) !== BLOCKS.AIR) {
-                            this.y = gridY * BLOCK_SIZE - this.height;
-                            this.vy = 0;
-                            this.onGround = true;
-                            
-                            if (Math.random() < 0.01 && Math.abs(this.vx) > 0.1) {
-                                this.vy = -8;
-                            }
+                        const gridY = Math.floor((this.y + petFootOffset) / BLOCK_SIZE);
+                        const blockBelow = getBlock(gridX, gridY);
+                        const snap = CL.computeCollisionSnap(this.y, this.vy, petFootOffset, gridY, blockBelow !== BLOCKS.AIR);
+                        this.y = snap.y;
+                        this.vy = snap.vy;
+                        this.onGround = snap.onGround;
+                        if (snap.onGround && Math.random() < 0.01 && Math.abs(this.vx) > 0.1) {
+                            this.vy = -8;
                         }
                     } catch (error) {
                         console.error("Error updating pet:", error);
@@ -617,25 +592,32 @@
                         this.x += this.vx;
                         this.y += this.vy;
                         
+                        // Bug 5 — mob collision uses footOffset=0 (drawing ends at y=0).
+                        const mobFootOffset = 0;
                         const gridX = Math.floor(this.x / BLOCK_SIZE);
-                        const gridY = Math.floor((this.y + this.height) / BLOCK_SIZE);
-                        
-                        if (getBlock(gridX, gridY) !== BLOCKS.AIR) {
-                            this.y = gridY * BLOCK_SIZE - this.height;
-                            this.vy = 0;
-                            this.onGround = true;
-                            
+                        const gridY = Math.floor((this.y + mobFootOffset) / BLOCK_SIZE);
+                        const blockBelow = getBlock(gridX, gridY);
+                        const snap = CL.computeCollisionSnap(this.y, this.vy, mobFootOffset, gridY, blockBelow !== BLOCKS.AIR);
+                        this.y = snap.y;
+                        this.vy = snap.vy;
+                        this.onGround = snap.onGround;
+                        if (snap.onGround) {
                             const frontX = Math.floor((this.x + this.direction * 20) / BLOCK_SIZE);
-                            if (getBlock(frontX, gridY - 1) !== BLOCKS.AIR && this.onGround) {
+                            if (getBlock(frontX, gridY - 1) !== BLOCKS.AIR) {
                                 this.vy = -8;
                             }
                         }
-                        
+
                         if (distance < 30 && Math.abs(gameState.player.y - this.y) < 40) {
                             if (!gameState.player.inVehicle) {
                                 gameState.player.health -= 0.1;
                                 updateUI();
                             }
+                        }
+
+                        // Bug 4 — zombies burn in sunlight (day & ramped sunrise).
+                        if (gameState.tod && gameState.tod.sunlightDamage > 0) {
+                            this.health -= gameState.tod.sunlightDamage;
                         }
                     } catch (error) {
                         console.error("Error updating mob:", error);
@@ -680,42 +662,100 @@
             
             window.startGame = function() {
                 try {
+                    // Wait for the deferred module bridge.
+                    if (!window.CraftLogic) {
+                        showError("Still loading — please wait a moment and try again.");
+                        return;
+                    }
+                    CL = window.CraftLogic;
+
                     document.getElementById('characterSelect').style.display = 'none';
                     document.getElementById('gameInfo').style.display = 'block';
                     gameState.gameStarted = true;
-                    
+                    gameState.tick = 0;
+                    gameState.blocksMinedTotal = 0;
+                    gameState.worldSeed = Math.floor(Math.random() * 1e9);
+
                     generateWorld();
-                    
-                    // Find spawn point safely
+
+                    // Find spawn point safely — feet rest on top of the first solid
+                    // block (bug 5 spawn fix: y = (solidY * 32) - footOffset(4)).
                     let spawnFound = false;
                     for (let x = Math.floor(WORLD_WIDTH / 2) - 10; x < Math.floor(WORLD_WIDTH / 2) + 10 && !spawnFound; x++) {
                         for (let y = 0; y < WORLD_HEIGHT - 1; y++) {
                             if (getBlock(x, y) === BLOCKS.AIR && getBlock(x, y + 1) !== BLOCKS.AIR) {
                                 gameState.player.x = x * BLOCK_SIZE;
-                                gameState.player.y = (y - 1) * BLOCK_SIZE;
+                                gameState.player.y = (y + 1) * BLOCK_SIZE - 4;
                                 spawnFound = true;
                                 break;
                             }
                         }
                     }
-                    
+
                     // Fallback spawn position if no suitable spot found
                     if (!spawnFound) {
                         gameState.player.x = (WORLD_WIDTH / 2) * BLOCK_SIZE;
                         gameState.player.y = 100;
                     }
-                    
-                    // Spawn initial mobs
-                    for (let i = 0; i < 5; i++) {
-                        const x = Math.random() * WORLD_WIDTH * BLOCK_SIZE;
-                        gameState.mobs.push(new Mob('zombie', x, 0));
-                    }
-                    
+
+                    // No initial mobs — startGame begins on day, so spawns wait
+                    // for night (Bug 4). The first nightfall populates them.
+                    gameState.mobs = [];
+
                     gameLoop();
                 } catch (error) {
                     console.error("Error starting game:", error);
                     showError("Failed to start game: " + error.message);
                 }
+            }
+
+            // Bug 3 — respawn. Reuses the same worldSeed so the player
+            // wakes up in the same generated world. Restores starting inventory.
+            function respawn() {
+                gameState.player.health = 20;
+                gameState.player.hunger = 20;
+                gameState.player.vx = 0;
+                gameState.player.vy = 0;
+                gameState.player.inVehicle = false;
+                gameState.player.mining = false;
+                gameState.player.miningProgress = 0;
+                gameState.player.miningBlock = null;
+                gameState.mobs = [];
+                gameState.tick = 0;
+                gameState.blocksMinedTotal = 0;
+                gameState.diamonds = 0;
+                gameState.inventory = {
+                    selected: 0,
+                    items: [
+                        { type: 'stone', count: 64 },
+                        { type: 'wood', count: 32 },
+                        { type: 'pickaxe', count: 1 },
+                        { type: 'sword', count: 1 },
+                        { type: 'food', count: 16 }
+                    ]
+                };
+                document.querySelectorAll('.inventorySlot').forEach((slot, i) => {
+                    slot.classList.toggle('selected', i === 0);
+                });
+                // Regenerate world (same seed → same terrain) and re-find spawn.
+                generateWorld();
+                let spawnFound = false;
+                for (let x = Math.floor(WORLD_WIDTH / 2) - 10; x < Math.floor(WORLD_WIDTH / 2) + 10 && !spawnFound; x++) {
+                    for (let y = 0; y < WORLD_HEIGHT - 1; y++) {
+                        if (getBlock(x, y) === BLOCKS.AIR && getBlock(x, y + 1) !== BLOCKS.AIR) {
+                            gameState.player.x = x * BLOCK_SIZE;
+                            gameState.player.y = (y + 1) * BLOCK_SIZE - 4;
+                            spawnFound = true;
+                            break;
+                        }
+                    }
+                }
+                if (!spawnFound) {
+                    gameState.player.x = (WORLD_WIDTH / 2) * BLOCK_SIZE;
+                    gameState.player.y = 100;
+                }
+                updateUI();
+                gameLoop();
             }
             
             // Input handling
@@ -734,23 +774,31 @@
             });
 
             window.addEventListener('keydown', (e) => {
+                // Edge-trigger: only record a key as "just pressed" on the
+                // initial press, not on auto-repeat (bug 2 — eating).
+                if (!keys[e.key]) gameState.keysJustPressed.add(e.key);
                 keys[e.key] = true;
-                
+
                 if (e.key >= '1' && e.key <= '5') {
                     gameState.inventory.selected = parseInt(e.key) - 1;
                     document.querySelectorAll('.inventorySlot').forEach((slot, i) => {
                         slot.classList.toggle('selected', i === gameState.inventory.selected);
                     });
                 }
-                
+
                 if (e.key === 'v' || e.key === 'V') {
                     gameState.player.inVehicle = !gameState.player.inVehicle;
                 }
-                
+
                 if (e.key === 'p' || e.key === 'P') {
                     const wolf = new Pet('wolf', gameState.player.x + 50, gameState.player.y);
                     gameState.pets.push(wolf);
                     updateUI();
+                }
+
+                // Bug 3 — R respawns when dead.
+                if ((e.key === 'r' || e.key === 'R') && gameState.player.health <= 0) {
+                    respawn();
                 }
             });
             
@@ -759,7 +807,23 @@
             });
             
             canvas.addEventListener('mousedown', (e) => {
-                if (e.button === 0) mouseDown = true;
+                if (e.button === 0) {
+                    mouseDown = true;
+                    // Bug 8 — sword swings on left-click (was spacebar, which
+                    // conflicted with jump). One swing per click; damages all
+                    // mobs within ~60 px of the player.
+                    if (gameState.inventory.selected === 3) {
+                        gameState.mobs.forEach(mob => {
+                            const dx = mob.x - gameState.player.x;
+                            const dy = mob.y - gameState.player.y;
+                            const dist = Math.sqrt(dx * dx + dy * dy);
+                            if (dist < 60) {
+                                mob.health -= 5;
+                                if (dist > 0) mob.x += (dx / dist) * 12;
+                            }
+                        });
+                    }
+                }
                 if (e.button === 2) rightMouseDown = true;
             });
             
@@ -804,45 +868,70 @@
                     
                     gameState.player.x += gameState.player.vx;
                     gameState.player.y += gameState.player.vy;
-                    
+
+                    // Bug 5 — collision snaps the visual *feet* (footOffset=4)
+                    // to the top of the block below. The old formula treated
+                    // player.height (48) as the foot distance, leaving a 44 px gap.
+                    const playerFootOffset = 4;
                     const gridX = Math.floor(gameState.player.x / BLOCK_SIZE);
-                    const gridY = Math.floor((gameState.player.y + gameState.player.height) / BLOCK_SIZE);
-                    
-                    gameState.player.onGround = false;
-                    
-                    if (getBlock(gridX, gridY) !== BLOCKS.AIR) {
-                        gameState.player.y = gridY * BLOCK_SIZE - gameState.player.height;
-                        gameState.player.vy = 0;
-                        gameState.player.onGround = true;
-                        gameState.player.jumping = false;
-                    }
-                    
+                    const gridY = Math.floor((gameState.player.y + playerFootOffset) / BLOCK_SIZE);
+                    const blockBelow = getBlock(gridX, gridY);
+                    const snap = CL.computeCollisionSnap(
+                        gameState.player.y,
+                        gameState.player.vy,
+                        playerFootOffset,
+                        gridY,
+                        blockBelow !== BLOCKS.AIR
+                    );
+                    gameState.player.y = snap.y;
+                    gameState.player.vy = snap.vy;
+                    gameState.player.onGround = snap.onGround;
+                    if (snap.onGround) gameState.player.jumping = false;
+
                     gameState.player.x = Math.max(0, Math.min((WORLD_WIDTH - 1) * BLOCK_SIZE, gameState.player.x));
                     
-                    // Mining/Building
+                    // Mining/Building — bug 7 (collect drops), bug 8 (sword can't mine),
+                    // bug 9 (tool-aware speed via CraftLogic.applyMiningTick).
                     if (mouseDown || rightMouseDown) {
                         const worldX = gameState.mouseX + gameState.camera.x;
                         const worldY = gameState.mouseY + gameState.camera.y;
                         const blockX = Math.floor(worldX / BLOCK_SIZE);
                         const blockY = Math.floor(worldY / BLOCK_SIZE);
-                        
+
                         const dx = (blockX * BLOCK_SIZE + BLOCK_SIZE/2) - gameState.player.x;
                         const dy = (blockY * BLOCK_SIZE + BLOCK_SIZE/2) - (gameState.player.y - gameState.player.height/2);
                         const distance = Math.sqrt(dx * dx + dy * dy);
-                        
+
+                        const selSlot = gameState.inventory.selected;
+                        const tool = CL.getToolFromSlot(selSlot);
+
                         if (distance < 150 && blockX >= 0 && blockX < WORLD_WIDTH && blockY >= 0 && blockY < WORLD_HEIGHT) {
                             const currentBlock = getBlock(blockX, blockY);
-                            
-                            if (mouseDown && currentBlock !== BLOCKS.AIR && currentBlock !== BLOCKS.BEDROCK) {
+
+                            // Sword (slot 3) never mines — left-click is an attack only.
+                            if (mouseDown && selSlot !== 3 && currentBlock !== BLOCKS.AIR && currentBlock !== BLOCKS.BEDROCK) {
                                 gameState.player.mining = true;
-                                
+
                                 if (gameState.player.miningBlock?.x === blockX && gameState.player.miningBlock?.y === blockY) {
-                                    gameState.player.miningProgress++;
-                                    
-                                    if (gameState.player.miningProgress > 30) {
-                                        if (currentBlock === BLOCKS.DIAMOND) {
-                                            gameState.diamonds++;
+                                    const tickResult = CL.applyMiningTick(
+                                        gameState.player.miningProgress,
+                                        currentBlock,
+                                        tool
+                                    );
+                                    gameState.player.miningProgress = tickResult.progress;
+
+                                    if (tickResult.completed) {
+                                        const drop = CL.getBlockDrop(currentBlock);
+                                        if (drop) {
+                                            if (drop.item === 'diamond') {
+                                                gameState.diamonds += drop.count;
+                                            } else {
+                                                gameState.inventory = CL.addToInventory(
+                                                    gameState.inventory, drop.item, drop.count
+                                                );
+                                            }
                                         }
+                                        gameState.blocksMinedTotal++;
                                         setBlock(blockX, blockY, BLOCKS.AIR);
                                         gameState.player.miningProgress = 0;
                                         gameState.player.miningBlock = null;
@@ -863,33 +952,27 @@
                     gameState.camera.x = gameState.player.x - canvas.width / 2;
                     gameState.camera.y = gameState.player.y - canvas.height / 2;
                     
-                    gameState.player.hunger -= 0.002;
-                    if (gameState.player.hunger <= 0) {
-                        gameState.player.health -= 0.01;
-                        gameState.player.hunger = 0;
+                    // Hunger drain + starvation health drain (delegated to survival.js).
+                    const survival = CL.applyHungerTick(gameState.player.hunger, gameState.player.health, 1);
+                    gameState.player.hunger = survival.hunger;
+                    gameState.player.health = survival.health;
+
+                    // Bug 2 — eat is edge-triggered: only fires on the initial 'e' press.
+                    const ePressed = gameState.keysJustPressed.has('e') || gameState.keysJustPressed.has('E');
+                    const eat = CL.tryEat(
+                        gameState.inventory.items[4].count,
+                        gameState.player.hunger,
+                        ePressed
+                    );
+                    if (eat.ate) {
+                        gameState.inventory.items[4].count = eat.foodCount;
+                        gameState.player.hunger = eat.hunger;
+                        updateUI();
                     }
-                    
-                    if (keys['e'] || keys['E']) {
-                        if (gameState.inventory.items[4].count > 0 && gameState.player.hunger < 20) {
-                            gameState.inventory.items[4].count--;
-                            gameState.player.hunger = Math.min(20, gameState.player.hunger + 8);
-                            updateUI();
-                        }
-                    }
-                    
-                    if (keys[' '] && gameState.inventory.selected === 3) {
-                        gameState.mobs.forEach(mob => {
-                            const dx = mob.x - gameState.player.x;
-                            const dy = mob.y - gameState.player.y;
-                            const distance = Math.sqrt(dx * dx + dy * dy);
-                            
-                            if (distance < 60) {
-                                mob.health -= 0.5;
-                                mob.x += dx / distance * 10;
-                            }
-                        });
-                    }
-                    
+
+                    // (Sword-on-spacebar removed — Bug 8. Attack lives in the
+                    // mousedown handler when slot 3 is selected.)
+
                     gameState.mobs = gameState.mobs.filter(mob => mob.health > 0);
                 } catch (error) {
                     console.error("Error updating player:", error);
@@ -901,8 +984,28 @@
                     document.getElementById('health').textContent = Math.floor(gameState.player.health);
                     document.getElementById('hunger').textContent = Math.floor(gameState.player.hunger);
                     document.getElementById('diamonds').textContent = gameState.diamonds;
-                    document.getElementById('blocks').textContent = gameState.inventory.items[0].count;
+                    // Bug 10 — split: #stone shows the stone slot, #blocks shows total mined.
+                    document.getElementById('stone').textContent = gameState.inventory.items[0].count;
+                    document.getElementById('blocks').textContent = gameState.blocksMinedTotal;
                     document.getElementById('pets').textContent = gameState.pets.length;
+                    // Bug 6 — biome label updates as the player walks across zones.
+                    if (CL) {
+                        const playerCol = Math.floor(gameState.player.x / BLOCK_SIZE);
+                        const biome = CL.getBiomeAt(playerCol, gameState.worldSeed);
+                        document.getElementById('biome').textContent =
+                            biome.charAt(0).toUpperCase() + biome.slice(1);
+                    }
+                    // Bug 4 — phase indicator (🌞 Day / 🌅 Sunset / 🌙 Night / 🌄 Sunrise).
+                    if (gameState.tod) {
+                        const phaseLabels = {
+                            day: '🌞 Day',
+                            sunset: '🌅 Sunset',
+                            night: '🌙 Night',
+                            sunrise: '🌄 Sunrise',
+                        };
+                        document.getElementById('phase').textContent =
+                            phaseLabels[gameState.tod.phase] || gameState.tod.phase;
+                    }
                 } catch (error) {
                     console.error("Error updating UI:", error);
                 }
@@ -979,13 +1082,82 @@
                 }
             }
             
+            // Pre-computed star positions so they don't twinkle/jitter each frame.
+            const STAR_POSITIONS = (() => {
+                const arr = [];
+                // Deterministic placement — seeded by hand for repeatability.
+                let s = 0x9e3779b9;
+                for (let i = 0; i < 60; i++) {
+                    s = (s * 1664525 + 1013904223) >>> 0;
+                    const x = s % 960;
+                    s = (s * 1664525 + 1013904223) >>> 0;
+                    const y = s % 340;  // upper portion of sky only
+                    arr.push([x, y]);
+                }
+                return arr;
+            })();
+
+            function drawCelestialBody(tod) {
+                // Sun during day & sunrise tail, moon during night & sunset tail.
+                // Position arcs across the top half of canvas as the cycle progresses.
+                const cx = canvas.width - 60;
+                const cy = 40;
+                ctx.save();
+                if (tod.phase === 'day' || tod.phase === 'sunrise') {
+                    ctx.fillStyle = '#FFE066';
+                    ctx.beginPath();
+                    ctx.arc(cx, cy, 14, 0, Math.PI * 2);
+                    ctx.fill();
+                } else {
+                    ctx.fillStyle = '#E8E8F0';
+                    ctx.beginPath();
+                    ctx.arc(cx, cy, 12, 0, Math.PI * 2);
+                    ctx.fill();
+                    // Crater detail
+                    ctx.fillStyle = '#B8B8C8';
+                    ctx.beginPath();
+                    ctx.arc(cx - 3, cy - 2, 2, 0, Math.PI * 2);
+                    ctx.arc(cx + 4, cy + 3, 1.5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.restore();
+            }
+
+            function drawStars(tod) {
+                if (tod.phase !== 'night' && tod.phase !== 'sunset') return;
+                // Fade in stars as we get deeper into night.
+                let alpha = 0;
+                if (tod.phase === 'night') alpha = 1;
+                else {
+                    // sunset — fade in over the second half
+                    // (approximate using sky-color darkness as proxy)
+                    alpha = 0.5;
+                }
+                ctx.save();
+                ctx.globalAlpha = alpha;
+                ctx.fillStyle = '#FFFFFF';
+                for (const [x, y] of STAR_POSITIONS) {
+                    ctx.fillRect(x, y, 2, 2);
+                }
+                ctx.restore();
+            }
+
             function gameLoop() {
                 try {
                     if (!gameState.gameStarted) return;
-                    
-                    ctx.fillStyle = '#87CEEB';
+
+                    // Advance the day/night clock once per frame.
+                    gameState.tick++;
+                    const tod = CL.getTimeOfDay(gameState.tick);
+                    gameState.tod = tod;
+
+                    // Bug 4 — sky color follows the time-of-day curve.
+                    ctx.fillStyle = tod.skyColor;
                     ctx.fillRect(0, 0, canvas.width, canvas.height);
-                    
+
+                    drawStars(tod);
+                    drawCelestialBody(tod);
+
                     updatePlayer();
                     
                     gameState.pets.forEach(pet => pet.update());
@@ -1010,13 +1182,14 @@
                         drawCharacter(screenX, screenY, gameState.player.character, gameState.player.facing);
                     }
                     
-                    if (Math.random() < 0.005 && gameState.mobs.length < 10) {
-                        const x = Math.random() > 0.5 ? 
-                            gameState.camera.x - 100 : 
+                    // Bug 4 — zombies spawn only at night, gated by getTimeOfDay.
+                    if (CL.shouldSpawnZombie(tod, gameState.mobs.length) && Math.random() < 0.01) {
+                        const x = Math.random() > 0.5 ?
+                            gameState.camera.x - 100 :
                             gameState.camera.x + canvas.width + 100;
                         gameState.mobs.push(new Mob('zombie', x, 0));
                     }
-                    
+
                     if (gameState.player.health <= 0) {
                         ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
                         ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -1026,10 +1199,18 @@
                         ctx.fillStyle = '#FFF';
                         ctx.font = '24px Courier New';
                         ctx.fillText('Score: ' + gameState.diamonds + ' Diamonds', canvas.width/2 - 140, canvas.height/2 + 40);
+                        // Bug 3 — respawn prompt.
+                        ctx.fillStyle = '#FFD700';
+                        ctx.font = '28px Courier New';
+                        ctx.fillText('Press R to respawn', canvas.width/2 - 150, canvas.height/2 + 90);
+                        // Clear edge-trigger so the R press that respawns isn't
+                        // also consumed by some other handler next frame.
+                        gameState.keysJustPressed.clear();
                         return;
                     }
-                    
+
                     updateUI();
+                    gameState.keysJustPressed.clear();
                     requestAnimationFrame(gameLoop);
                 } catch (error) {
                     console.error("Game loop error:", error);
