@@ -1,6 +1,7 @@
-node_modules
-coverage
-.DS_Store
-phase3-*.png
-.playwright-mcp/
 
+.DS_Store
+.playwright-mcp/
+biome-*.png
+coverage
+node_modules
+phase3-*.png

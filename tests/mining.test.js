@@ -141,6 +141,87 @@ describe('getBlockDrop', () => {
   });
 });
 
+// --- Biome expansion (Phase 3): new blocks 14-40 -----------------------------
+// Source-of-truth table. (id, name, pickSpeed, handSpeed, swordSpeed, drop)
+const BIOME_BLOCK_TABLE = [
+  [14, 'TALL_GRASS',        1,   1,   0.5, null],
+  [15, 'FLOWER_RED',        1,   1,   0.5, null],
+  [16, 'FLOWER_YELLOW',     1,   1,   0.5, null],
+  [17, 'FLOWER_PINK',       1,   1,   0.5, null],
+  [18, 'DARK_OAK_WOOD',     1,   1,   0.5, { item: 'wood',  count: 1 }],
+  [19, 'DARK_OAK_LEAVES',   1,   1,   0.5, null],
+  [20, 'MUSHROOM',          1,   1,   0.5, null],
+  [21, 'SPRUCE_WOOD',       1,   1,   0.5, { item: 'wood',  count: 1 }],
+  [22, 'PODZOL',            1,   1,   0.5, { item: 'stone', count: 1 }],
+  [23, 'MOSS_BLOCK',        1,   1,   0.5, { item: 'stone', count: 1 }],
+  [24, 'JUNGLE_WOOD',       1,   1,   0.5, { item: 'wood',  count: 1 }],
+  [25, 'JUNGLE_LEAVES',     1,   1,   0.5, null],
+  [26, 'VINE',              1,   1,   0.5, null],
+  [27, 'BAMBOO',            1,   1.5, 0.5, { item: 'wood',  count: 1 }],
+  [28, 'CHERRY_WOOD',       1,   1,   0.5, { item: 'wood',  count: 1 }],
+  [29, 'CHERRY_LEAVES',     1,   1,   0.5, null],
+  [30, 'PALE_OAK_WOOD',     1,   1,   0.5, { item: 'wood',  count: 1 }],
+  [31, 'PALE_LEAVES',       1,   1,   0.5, null],
+  [32, 'HANGING_MOSS',      1,   1,   0.5, null],
+  [33, 'GRAVEL',            1,   0.5, 0.5, { item: 'stone', count: 1 }],
+  [34, 'AZALEA_LEAVES',     1,   1,   0.5, null],
+  [35, 'GLOW_BERRIES',      1,   1,   0.5, null],
+  [36, 'CLAY',              1,   0.5, 0.5, { item: 'stone', count: 1 }],
+  [37, 'DRIPSTONE',         2,   0.3, 0.3, { item: 'stone', count: 1 }],
+  [38, 'POINTED_DRIPSTONE', 2,   0.3, 0.3, { item: 'stone', count: 1 }],
+  [39, 'SCULK',             2,   0.3, 0.3, null],
+  [40, 'ECHO_BLOCK',        2,   0.3, 0.3, null],
+];
+
+describe('biome expansion: getMiningSpeed for new blocks 14-40', () => {
+  for (const [id, name, pickSpeed, handSpeed, swordSpeed] of BIOME_BLOCK_TABLE) {
+    test(`pickaxe on ${name}(${id}) = ${pickSpeed}`, () => {
+      expect(getMiningSpeed('pickaxe', id)).toBe(pickSpeed);
+    });
+    test(`hand on ${name}(${id}) = ${handSpeed}`, () => {
+      expect(getMiningSpeed('hand', id)).toBe(handSpeed);
+    });
+    test(`sword on ${name}(${id}) = ${swordSpeed}`, () => {
+      expect(getMiningSpeed('sword', id)).toBe(swordSpeed);
+    });
+  }
+});
+
+describe('biome expansion: getBlockDrop for new blocks 14-40', () => {
+  for (const [id, name, , , , drop] of BIOME_BLOCK_TABLE) {
+    test(`${name}(${id}) drops ${drop ? `${drop.count}x ${drop.item}` : 'null'}`, () => {
+      if (drop === null) {
+        expect(getBlockDrop(id)).toBeNull();
+      } else {
+        expect(getBlockDrop(id)).toEqual(drop);
+      }
+    });
+  }
+});
+
+describe('biome expansion: coverage', () => {
+  test('every new BLOCKS id 14-40 is covered in SPEED for at least one tool', () => {
+    for (let id = 14; id <= 40; id++) {
+      const maxSpeed = Math.max(
+        getMiningSpeed('pickaxe', id),
+        getMiningSpeed('hand', id),
+        getMiningSpeed('sword', id)
+      );
+      expect(maxSpeed, `block id ${id} has no mining tool entry`).toBeGreaterThan(0);
+    }
+  });
+
+  test('BAMBOO(27) breaks faster with hand than pickaxe', () => {
+    // bamboo snaps easily — hand is fastest
+    expect(getMiningSpeed('hand', 27)).toBeGreaterThan(getMiningSpeed('pickaxe', 27));
+  });
+
+  test('SCULK(39) and ECHO_BLOCK(40) drop nothing — deep dark is eerie', () => {
+    expect(getBlockDrop(39)).toBeNull();
+    expect(getBlockDrop(40)).toBeNull();
+  });
+});
+
 describe('addToInventory', () => {
   test('adding stone increments slot 0 and does not mutate original', () => {
     const inv = makeInventory();

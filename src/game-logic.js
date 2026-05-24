@@ -4,3 +4,4 @@ export * from './physics.js';
 export * from './survival.js';
 export * from './mining.js';
 export * from './time.js';
+export * from './block-visuals.js';
