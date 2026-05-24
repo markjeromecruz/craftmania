@@ -124,6 +124,100 @@ export function makeRng(seed) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Cave biome layer — biome-flavoured sprinkle of blocks into deep stone.
+// CAVE_BIOME_START_Y and DEEP_DARK_START_Y come from B (already exported).
+// ---------------------------------------------------------------------------
+export const CAVE_ZONE_WIDTH = 30;
+export const CAVE_BLOCK_SPRINKLE_CHANCE = 0.06;
+
+// Local mirror of new biome block ids (the parallel agents are also
+// adding these to src/render-data.js; for parallel-safety we use numerics).
+const MOSS_BLOCK = 23;
+const AZALEA_LEAVES = 34;
+const GLOW_BERRIES = 35;
+const CLAY = 36;
+const DRIPSTONE = 37;
+const POINTED_DRIPSTONE = 38;
+const SCULK = 39;
+const ECHO_BLOCK = 40;
+
+// Pure: same (x, y, seed) -> same return.
+// Returns 'lush' | 'dripstone' | 'deep_dark' | null. Cave biomes are zoned
+// horizontally (CAVE_ZONE_WIDTH cols each) and only exist below
+// CAVE_BIOME_START_Y. 'deep_dark' is gated behind DEEP_DARK_START_Y.
+export function getCaveBiomeAt(x, y, seed) {
+  if (y <= CAVE_BIOME_START_Y) return null;
+  const zoneIndex = Math.floor(x / CAVE_ZONE_WIDTH);
+  // Use distinct hash constants so cave zones don't correlate with surface.
+  const combined = ((seed >>> 0) * 2246822519 + zoneIndex * 3266489917) >>> 0;
+  const h = hash32(combined);
+  const r = h % 100;
+  if (y > DEEP_DARK_START_Y && r < 25) return 'deep_dark';
+  if (r < 35) return 'lush';
+  if (r < 70) return 'dripstone';
+  return null;
+}
+
+// Pure helper for the column-fill loop: returns a block to write or null
+// (caller writes rules.deep instead). Uses caller's rng (so per-cell
+// determinism is preserved across the whole generateWorld call).
+function pickCaveBlock(caveBiome, rng) {
+  if (caveBiome === 'lush') {
+    const v = rng();
+    if (v < 0.10) return GLOW_BERRIES;
+    if (v < 0.30) return AZALEA_LEAVES;
+    if (v < 0.55) return CLAY;
+    return MOSS_BLOCK;
+  }
+  if (caveBiome === 'dripstone') {
+    return rng() < 0.20 ? POINTED_DRIPSTONE : DRIPSTONE;
+  }
+  if (caveBiome === 'deep_dark') {
+    return rng() < 0.10 ? ECHO_BLOCK : SCULK;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// River + beach overlay — 3 deterministic cut-through rivers per world.
+// ---------------------------------------------------------------------------
+export const NUM_RIVERS = 3;
+export const RIVER_MIN_WIDTH = 4;
+export const RIVER_MAX_WIDTH = 8;
+export const BEACH_WIDTH = 3;
+export const RIVER_DEPTH_BELOW = 3;
+
+// Pure: derives river plan from seed. Returns NUM_RIVERS objects of the
+// form { centerX, width }, each centered at least 40 cols from either edge.
+export function getRiverPlan(seed) {
+  const rivers = [];
+  for (let i = 0; i < NUM_RIVERS; i++) {
+    const h1 = hash32(((seed >>> 0) * 16777619 + i * 2166136261) >>> 0);
+    const h2 = hash32(((seed >>> 0) * 374761393 + i * 2654435761) >>> 0);
+    const safeSpan = WORLD_WIDTH - 80;  // 40-col margin each side
+    const centerX = 40 + (h1 % safeSpan);
+    const width = RIVER_MIN_WIDTH + (h2 % (RIVER_MAX_WIDTH - RIVER_MIN_WIDTH + 1));
+    rivers.push({ centerX, width });
+  }
+  return rivers;
+}
+
+// Pure: returns 'water' | 'beach' | null for col x given a river plan.
+// 'water' is the central band of width `r.width` (centered on r.centerX).
+// 'beach' is BEACH_WIDTH cols immediately to either side of the water band.
+export function riverColumnRole(x, plan) {
+  for (const r of plan) {
+    const halfW = Math.floor(r.width / 2);
+    const waterL = r.centerX - halfW;
+    const waterR = r.centerX + halfW;
+    if (x >= waterL && x <= waterR) return 'water';
+    if (x >= waterL - BEACH_WIDTH && x < waterL) return 'beach';
+    if (x > waterR && x <= waterR + BEACH_WIDTH) return 'beach';
+  }
+  return null;
+}
+
 // Cumulative-weight biome picker. Pure: depends only on (seed, zoneIndex).
 // Hashes (seed, zoneIndex) to a stable [0, totalWeight) integer and walks
 // BIOME_WEIGHTS in BIOMES order until it lands inside a bucket.
@@ -457,8 +551,12 @@ export function generateWorld(seed) {
       if (y === WORLD_HEIGHT - 1) {
         world[x][y] = BLOCKS.BEDROCK;
       } else if (y > height + 5) {
-        // CAVE-HOOK: Agent C inserts cave-biome sprinkle here. Default is rules.deep.
-        if (rng() < 0.02 && y > height + 10) {
+        // Cave-biome sprinkle FIRST so its rng pull happens before the diamond
+        // check — preserves determinism across the whole generateWorld call.
+        const caveBiome = getCaveBiomeAt(x, y, seed);
+        if (caveBiome && rng() < CAVE_BLOCK_SPRINKLE_CHANCE) {
+          world[x][y] = pickCaveBlock(caveBiome, rng);
+        } else if (rng() < 0.02 && y > height + 10) {
           world[x][y] = BLOCKS.DIAMOND;
         } else {
           world[x][y] = rules.deep;
@@ -475,12 +573,29 @@ export function generateWorld(seed) {
     }
   }
 
-  // RIVER-HOOK: Agent C inserts river+beach overlay here (before tree pass).
+  // River + beach overlay. Pure (no rng) — derives from seed via hash32.
+  const riverPlan = getRiverPlan(seed);
+  for (let x = 0; x < WORLD_WIDTH; x++) {
+    const role = riverColumnRole(x, riverPlan);
+    if (!role) continue;
+    const surfH = surfaceY[x];
+    if (role === 'water') {
+      for (let y = surfH; y <= surfH + RIVER_DEPTH_BELOW; y++) {
+        if (y < WORLD_HEIGHT - 1) world[x][y] = BLOCKS.WATER;
+      }
+      // Lower registered surface so the tree pass naturally skips
+      surfaceY[x] = surfH + RIVER_DEPTH_BELOW;
+    } else {
+      // beach — overwrite surface row + one below with sand
+      if (surfH < WORLD_HEIGHT) world[x][surfH] = BLOCKS.SAND;
+      if (surfH + 1 < WORLD_HEIGHT) world[x][surfH + 1] = BLOCKS.SAND;
+    }
+  }
 
-  // Tree pass — skip transition cols.
+  // Tree pass — skip transition cols and any river/beach column.
   for (let x = 5; x < WORLD_WIDTH - 5; x++) {
     if (isTransitionColumn(x, seed)) continue;
-    // RIVER-TREE-HOOK: Agent C also adds river-column skip here.
+    if (riverColumnRole(x, riverPlan) !== null) continue;
     const biome = getBiomeAt(x, seed);
     const rules = getBiomeRules(biome);
     if (rng() < rules.treeChance) {

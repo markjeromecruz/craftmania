@@ -19,7 +19,33 @@ import {
   getBiomeElevationDelta,
   makeRng,
   generateWorld,
+  // Phase 2C additions
+  CAVE_ZONE_WIDTH,
+  CAVE_BLOCK_SPRINKLE_CHANCE,
+  getCaveBiomeAt,
+  NUM_RIVERS,
+  RIVER_MIN_WIDTH,
+  RIVER_MAX_WIDTH,
+  BEACH_WIDTH,
+  RIVER_DEPTH_BELOW,
+  getRiverPlan,
+  riverColumnRole,
 } from '../src/world.js';
+
+// Numeric ids for new cave biome blocks (kept local-mirror to match world.js;
+// the canonical names will land in render-data.js via parallel Agent A).
+const MOSS_BLOCK = 23;
+const AZALEA_LEAVES = 34;
+const GLOW_BERRIES = 35;
+const CLAY = 36;
+const DRIPSTONE = 37;
+const POINTED_DRIPSTONE = 38;
+const SCULK = 39;
+const ECHO_BLOCK = 40;
+const CAVE_BLOCKS = new Set([
+  MOSS_BLOCK, AZALEA_LEAVES, GLOW_BERRIES, CLAY,
+  DRIPSTONE, POINTED_DRIPSTONE, SCULK, ECHO_BLOCK,
+]);
 
 describe('world constants', () => {
   test('exports WORLD_WIDTH=600, WORLD_HEIGHT=80', () => {
@@ -408,5 +434,241 @@ describe('generateWorld', () => {
       }
     }
     expect(surfaces.size).toBeGreaterThanOrEqual(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2C — cave biome sprinkle + cut-through rivers with beaches.
+// ---------------------------------------------------------------------------
+
+describe('cave constants', () => {
+  test('exports CAVE_ZONE_WIDTH=30 and CAVE_BLOCK_SPRINKLE_CHANCE=0.06', () => {
+    expect(CAVE_ZONE_WIDTH).toBe(30);
+    expect(CAVE_BLOCK_SPRINKLE_CHANCE).toBe(0.06);
+  });
+});
+
+describe('getCaveBiomeAt', () => {
+  test('returns null for any y <= CAVE_BIOME_START_Y across several x and seeds', () => {
+    const ys = [0, 1, 10, 25, CAVE_BIOME_START_Y - 1, CAVE_BIOME_START_Y];
+    const xs = [0, 17, 100, 250, 400, 599];
+    const seeds = [0, 1, 7, 42, 123];
+    for (const seed of seeds) {
+      for (const x of xs) {
+        for (const y of ys) {
+          expect(getCaveBiomeAt(x, y, seed)).toBeNull();
+        }
+      }
+    }
+  });
+
+  test('is deterministic: same (x, y, seed) -> same return', () => {
+    const pairs = [
+      [0, 55, 0], [37, 60, 7], [123, 66, 42],
+      [299, 70, 99], [500, 75, 13], [599, 79, 250],
+    ];
+    for (const [x, y, seed] of pairs) {
+      expect(getCaveBiomeAt(x, y, seed)).toBe(getCaveBiomeAt(x, y, seed));
+    }
+  });
+
+  test('never returns "deep_dark" for y in (CAVE_BIOME_START_Y, DEEP_DARK_START_Y]', () => {
+    for (let seed = 0; seed <= 30; seed++) {
+      for (let x = 0; x < WORLD_WIDTH; x += 13) {
+        for (let y = CAVE_BIOME_START_Y + 1; y <= DEEP_DARK_START_Y; y++) {
+          expect(getCaveBiomeAt(x, y, seed)).not.toBe('deep_dark');
+        }
+      }
+    }
+  });
+
+  test('returns "deep_dark" for at least one (x, seed) with y > DEEP_DARK_START_Y across seeds 0..50', () => {
+    let found = false;
+    outer: for (let seed = 0; seed <= 50 && !found; seed++) {
+      for (let x = 0; x < WORLD_WIDTH; x += 7) {
+        for (let y = DEEP_DARK_START_Y + 1; y < WORLD_HEIGHT; y++) {
+          if (getCaveBiomeAt(x, y, seed) === 'deep_dark') {
+            found = true;
+            break outer;
+          }
+        }
+      }
+    }
+    expect(found).toBe(true);
+  });
+
+  test('returns "lush" or "dripstone" for at least one (x, seed) in the shallow cave layer', () => {
+    let foundShallow = false;
+    outer: for (let seed = 0; seed <= 30 && !foundShallow; seed++) {
+      for (let x = 0; x < WORLD_WIDTH; x += 7) {
+        for (let y = CAVE_BIOME_START_Y + 1; y <= DEEP_DARK_START_Y; y++) {
+          const biome = getCaveBiomeAt(x, y, seed);
+          if (biome === 'lush' || biome === 'dripstone') {
+            foundShallow = true;
+            break outer;
+          }
+        }
+      }
+    }
+    expect(foundShallow).toBe(true);
+  });
+});
+
+describe('getRiverPlan', () => {
+  test('returns exactly NUM_RIVERS (=3) entries', () => {
+    for (const seed of [0, 7, 42, 123, 999]) {
+      const plan = getRiverPlan(seed);
+      expect(plan.length).toBe(NUM_RIVERS);
+      expect(NUM_RIVERS).toBe(3);
+    }
+  });
+
+  test('all centerX values within [40, WORLD_WIDTH - 40]', () => {
+    for (let seed = 0; seed < 50; seed++) {
+      for (const r of getRiverPlan(seed)) {
+        expect(r.centerX).toBeGreaterThanOrEqual(40);
+        expect(r.centerX).toBeLessThanOrEqual(WORLD_WIDTH - 40);
+      }
+    }
+  });
+
+  test('all width values within [RIVER_MIN_WIDTH, RIVER_MAX_WIDTH]', () => {
+    for (let seed = 0; seed < 50; seed++) {
+      for (const r of getRiverPlan(seed)) {
+        expect(r.width).toBeGreaterThanOrEqual(RIVER_MIN_WIDTH);
+        expect(r.width).toBeLessThanOrEqual(RIVER_MAX_WIDTH);
+      }
+    }
+  });
+
+  test('is deterministic by JSON equality across two calls with same seed', () => {
+    expect(JSON.stringify(getRiverPlan(42))).toBe(JSON.stringify(getRiverPlan(42)));
+    expect(JSON.stringify(getRiverPlan(7))).toBe(JSON.stringify(getRiverPlan(7)));
+    expect(JSON.stringify(getRiverPlan(0))).toBe(JSON.stringify(getRiverPlan(0)));
+  });
+});
+
+describe('riverColumnRole', () => {
+  test('returns "water" at the exact center of a known river', () => {
+    const plan = [{ centerX: 100, width: 6 }];
+    expect(riverColumnRole(100, plan)).toBe('water');
+  });
+
+  test('returns "beach" immediately left and right of the water band', () => {
+    // width=6 -> halfW=3, water band [97, 103].
+    const plan = [{ centerX: 100, width: 6 }];
+    // Left side: cols 94, 95, 96 (BEACH_WIDTH=3).
+    expect(riverColumnRole(96, plan)).toBe('beach');
+    expect(riverColumnRole(95, plan)).toBe('beach');
+    expect(riverColumnRole(94, plan)).toBe('beach');
+    // Right side: cols 104, 105, 106.
+    expect(riverColumnRole(104, plan)).toBe('beach');
+    expect(riverColumnRole(105, plan)).toBe('beach');
+    expect(riverColumnRole(106, plan)).toBe('beach');
+  });
+
+  test('returns null at columns 100+ cols away from any river center', () => {
+    const plan = [{ centerX: 300, width: 8 }];
+    expect(riverColumnRole(0, plan)).toBeNull();
+    expect(riverColumnRole(150, plan)).toBeNull();
+    expect(riverColumnRole(450, plan)).toBeNull();
+    expect(riverColumnRole(599, plan)).toBeNull();
+  });
+
+  test('handles empty plan: riverColumnRole(0, []) returns null', () => {
+    expect(riverColumnRole(0, [])).toBeNull();
+    expect(riverColumnRole(100, [])).toBeNull();
+    expect(riverColumnRole(WORLD_WIDTH - 1, [])).toBeNull();
+  });
+});
+
+describe('generateWorld with rivers', () => {
+  test('for seed 42, at least one river center column contains BLOCKS.WATER somewhere in [0, WORLD_HEIGHT)', () => {
+    const w = generateWorld(42);
+    const plan = getRiverPlan(42);
+    let foundWaterInACenter = false;
+    for (const r of plan) {
+      let hasWater = false;
+      for (let y = 0; y < WORLD_HEIGHT; y++) {
+        if (w[r.centerX][y] === BLOCKS.WATER) {
+          hasWater = true;
+          break;
+        }
+      }
+      if (hasWater) {
+        foundWaterInACenter = true;
+        break;
+      }
+    }
+    expect(foundWaterInACenter).toBe(true);
+  });
+
+  test('every river has a sand beach column adjacent to its water band', () => {
+    const w = generateWorld(42);
+    const plan = getRiverPlan(42);
+    for (const r of plan) {
+      const halfW = Math.floor(r.width / 2);
+      const leftBeachX = r.centerX - halfW - 1;   // first beach col left of water
+      const rightBeachX = r.centerX + halfW + 1;  // first beach col right of water
+      // The beach overwrites surfH + 1 with SAND. We scan the column to find it
+      // (cheaper than tracking exact surface). Stop at WATER/AIR boundaries.
+      const colHasSand = (x) => {
+        if (x < 0 || x >= WORLD_WIDTH) return false;
+        for (let y = 0; y < WORLD_HEIGHT; y++) {
+          if (w[x][y] === BLOCKS.SAND) return true;
+        }
+        return false;
+      };
+      expect(colHasSand(leftBeachX) || colHasSand(rightBeachX)).toBe(true);
+    }
+  });
+
+  test('bedrock floor + AIR top row invariants still hold (regression after river overlay)', () => {
+    const w = generateWorld(42);
+    for (let x = 0; x < WORLD_WIDTH; x++) {
+      expect(w[x][WORLD_HEIGHT - 1]).toBe(BLOCKS.BEDROCK);
+      expect(w[x][0]).toBe(BLOCKS.AIR);
+    }
+  });
+});
+
+describe('generateWorld with cave biomes', () => {
+  test('for at least one seed in 0..30, world contains >=1 SCULK or MOSS_BLOCK below CAVE_BIOME_START_Y', () => {
+    let found = false;
+    outer: for (let seed = 0; seed <= 30 && !found; seed++) {
+      const w = generateWorld(seed);
+      for (let x = 0; x < WORLD_WIDTH; x++) {
+        for (let y = CAVE_BIOME_START_Y + 1; y < WORLD_HEIGHT; y++) {
+          const b = w[x][y];
+          if (b === SCULK || b === MOSS_BLOCK) {
+            found = true;
+            break outer;
+          }
+        }
+      }
+    }
+    expect(found).toBe(true);
+  });
+
+  test('top half of world (y < CAVE_BIOME_START_Y) contains zero cave-biome blocks across multiple seeds', () => {
+    // Note: MOSS_BLOCK (23) is also a legitimate SURFACE block for
+    // old_growth_taiga (per BIOME_RULES), so it's intentionally NOT included
+    // in the forbidden set — only the strictly-subterranean dripstone /
+    // sculk / glow_berry family is checked.
+    const forbidden = new Set([
+      SCULK, ECHO_BLOCK, DRIPSTONE, POINTED_DRIPSTONE,
+      GLOW_BERRIES, AZALEA_LEAVES, CLAY,
+    ]);
+    for (const seed of [42, 99]) {
+      const w = generateWorld(seed);
+      for (let x = 0; x < WORLD_WIDTH; x++) {
+        const col = w[x];
+        for (let y = 0; y < CAVE_BIOME_START_Y; y++) {
+          expect(forbidden.has(col[y])).toBe(false);
+        }
+      }
+    }
+    // Sanity that CAVE_BLOCKS is the canonical set we tested against.
+    expect(CAVE_BLOCKS.has(SCULK)).toBe(true);
   });
 });
