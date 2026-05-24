@@ -1,38 +1,37 @@
 # Craftmania
 
-Welcome to **Craftmania**! This project is designed as a creative sandbox game where users can build, craft, and explore a dynamic world. The repository is currently in its early stages, and we welcome contributions from the community.
-
-## Project Overview
-Craftmania aims to provide an engaging and extensible platform for crafting and building experiences. The project is open-source and intended for learning, experimentation, and collaborative development.
+A small 2D Minecraft-style sandbox by **Sandy and Izaiah Adriano**, deployed as a static page via GitHub Pages.
 
 ## Features
-- Creative sandbox environment
-- Building and crafting mechanics (planned)
-- Modular and scalable codebase
-- Open for community contributions
+- Side-view canvas world (100 × 50 blocks)
+- Three playable characters: Steve, Sandy, WWE Champion
+- Mining, building, and a 5-slot inventory (stone, wood, pickaxe, sword, food)
+- **Five biomes** with their own terrain: plains, forest, desert, mountain, snow
+- **Day / night cycle** (~6 min) — sun and stars in the sky; zombies spawn only at night and burn at dawn
+- Pet wolves (P), vehicle mode (V), tool-aware mining speed
+- Pure-function game logic in `src/*.js`, unit-tested with Vitest
 
-## Getting Started
+## Play it
+Open `index.html` (or visit the GitHub Pages URL). Controls are listed in-game once you start mining.
+
+## Development
 
 ### Prerequisites
-- [Node.js](https://nodejs.org/) (if using a JavaScript/TypeScript stack)
+- [Node.js](https://nodejs.org/) (for the test runner only — the game itself needs no build step)
 - [Git](https://git-scm.com/)
 
 ### Setup
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/markjeromecruz/craftmania.git
-   cd craftmania
-   ```
-2. **Install dependencies:**
-   (Add this step if/when dependencies are added)
-   ```bash
-   npm install
-   ```
-3. **Run the project:**
-   (Add this step if/when a start script is available)
-   ```bash
-   npm start
-   ```
+```bash
+git clone https://github.com/markjeromecruz/craftmania.git
+cd craftmania
+npm install
+npm test          # run the Vitest unit suite (pure-logic modules in src/)
+```
+
+### Repo layout
+- `index.html` — single-page game (canvas + inline IIFE)
+- `src/` — pure ES modules (biome, time, physics, mining, survival, render-data) loaded by `src/game-logic.global.js` into `window.CraftLogic`
+- `tests/` — Vitest suites, one per `src/` module
 
 ## Contributing
 We welcome contributions! Please follow these steps:
