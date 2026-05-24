@@ -1,17 +1,10 @@
-            // Initialize inventory slots
-            document.querySelectorAll('.inventorySlot').forEach((slot, index) => {
-                slot.addEventListener('click', () => {
-                    gameState.inventory.selected = index;
-                    document.querySelectorAll('.inventorySlot').forEach((s, i) => {
-                        s.classList.toggle('selected', i === index);
-                    });
-                });
-            });<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CraftMania - By Sandy and Izaiah Adriano</title>
+    <script type="module" src="src/game-logic.global.js"></script>
     <style>
         body {
             margin: 0;
@@ -729,7 +722,17 @@
             const keys = {};
             let mouseDown = false;
             let rightMouseDown = false;
-            
+
+            // Inventory slot click → select slot (relocated from pre-doctype stray script)
+            document.querySelectorAll('.inventorySlot').forEach((slot, index) => {
+                slot.addEventListener('click', () => {
+                    gameState.inventory.selected = index;
+                    document.querySelectorAll('.inventorySlot').forEach((s, i) => {
+                        s.classList.toggle('selected', i === index);
+                    });
+                });
+            });
+
             window.addEventListener('keydown', (e) => {
                 keys[e.key] = true;
                 
