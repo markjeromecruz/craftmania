@@ -215,8 +215,12 @@
             let CL = null;
             
             const BLOCK_SIZE = 32;
-            const WORLD_WIDTH = 100;
-            const WORLD_HEIGHT = 50;
+            // WORLD_WIDTH / WORLD_HEIGHT are late-bound from CraftLogic in
+            // startGame() so they pick up the canonical 600×80 dimensions.
+            // Initial values are placeholders only — gameState.player.x is
+            // overwritten in startGame via the spawn-point search.
+            let WORLD_WIDTH = 100;
+            let WORLD_HEIGHT = 50;
             
             // Game State
             let gameState = {
@@ -628,6 +632,9 @@
                         throw new Error('CraftLogic.BLOCKS missing — module bridge is incomplete.');
                     }
                     BLOCKS = CL.BLOCKS;
+                    // Adopt the canonical world dimensions (600×80) from world.js.
+                    WORLD_WIDTH = CL.WORLD_WIDTH;
+                    WORLD_HEIGHT = CL.WORLD_HEIGHT;
 
                     document.getElementById('characterSelect').style.display = 'none';
                     document.getElementById('gameInfo').style.display = 'block';
