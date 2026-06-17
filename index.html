@@ -152,6 +152,8 @@
         <div style="margin-top:4px;">🌍 Blocks mined: <span id="blocks">0</span></div>
         <div>🗺️ <span id="biome">Plains</span> | <span id="phase">🌞 Day</span></div>
         <div>🐕 Pets: <span id="pets">0</span> | 🐮 Animals: <span id="animals">0</span></div>
+        <div>🧱 Building: <span id="buildBlock">Stone</span> <span style="font-size:11px;">(B to switch)</span></div>
+        <div id="gearLine" style="font-size:13px; color:#FFD54F;"></div>
     </div>
     
     <div id="inventory">
@@ -195,9 +197,23 @@
         <p>E: Eat (tap)</p>
         <p>🚗 V: Vehicle Mode</p>
         <p>🐕 P: Tame Pet</p>
+        <p>🛠️ C: Crafting</p>
+        <p>🧱 B: Switch Build Block</p>
+        <p>🛏️ K: Sleep (with bed)</p>
         <p>R: Respawn (when dead)</p>
     </div>
     
+    <div id="craftMenu" style="display:none; position:absolute; top:50%; left:50%;
+        transform:translate(-50%,-50%); background:#6B4A2B; padding:18px 22px;
+        border:4px solid #3E2A14; z-index:30; color:white; min-width:340px;
+        box-shadow:0 0 30px rgba(0,0,0,0.8);">
+        <h2 style="margin:0 0 6px 0;">🛠️ Crafting</h2>
+        <p style="margin:0 0 10px 0; font-size:13px;">Click a recipe to craft it. Greyed-out means you need more materials.</p>
+        <div id="craftRecipes"></div>
+        <p id="craftMsg" style="color:#FFD700; height:18px; margin:6px 0;"></p>
+        <button onclick="toggleCraft()">Close (C)</button>
+    </div>
+
     <div id="errorMsg"></div>
     
     <script>
@@ -274,6 +290,13 @@
                 diamonds: 0,
                 // Gathered materials used for crafting (not a score!).
                 resources: { coal: 0, iron: 0, gold: 0, netherite: 0, flint: 0, obsidian: 0 },
+                // Crafted placeable blocks you can build with.
+                crafted: { glass: 0, door: 0, bed: 0, furnace: 0 },
+                // Crafted gear / upgrades.
+                gear: { armor: false, swordTier: 1, hasBed: false },
+                // Which block right-click places (cycle with B).
+                buildBlock: 'stone',
+                craftOpen: false,
                 // --- Phase 3 additions ---
                 tick: 0,                          // increments each gameLoop frame (day/night)
                 worldSeed: 0,                     // set in startGame; also reused on respawn
@@ -618,7 +641,7 @@
 
                         if (distance < 30 && Math.abs(gameState.player.y - this.y) < 40) {
                             if (!gameState.player.inVehicle) {
-                                gameState.player.health -= 0.1;
+                                gameState.player.health -= gameState.gear.armor ? 0.05 : 0.1;
                                 updateUI();
                             }
                         }
@@ -795,6 +818,120 @@
                 }
             }
 
+            // --- Crafting -----------------------------------------------------
+            // Recipes use materials we actually track: stone (slot 0), wood
+            // (slot 1), and the ore resources. Each gives a placeable block or
+            // a gear upgrade.
+            const RECIPES = {
+                glass:   { name: '🪟 Window (Glass)', cost: { stone: 3 }, block: 'glass', count: 2 },
+                door:    { name: '🚪 Door',           cost: { wood: 6 },  block: 'door',  count: 1 },
+                bed:     { name: '🛏️ Bed',            cost: { wood: 5 },  block: 'bed',   count: 1 },
+                furnace: { name: '🔥 Oven (Furnace)', cost: { stone: 8 }, block: 'furnace', count: 1 },
+                sword:   { name: '⚔️ Iron Sword (stronger)', cost: { iron: 2, wood: 1 }, gear: 'sword' },
+                armor:   { name: '🛡️ Iron Armor (half damage)', cost: { iron: 5 }, gear: 'armor' },
+            };
+
+            function getMat(name) {
+                if (name === 'stone') return gameState.inventory.items[0].count;
+                if (name === 'wood') return gameState.inventory.items[1].count;
+                if (name === 'diamond') return gameState.diamonds;
+                return gameState.resources[name] ?? 0;
+            }
+            function spendMat(name, n) {
+                if (name === 'stone') gameState.inventory.items[0].count -= n;
+                else if (name === 'wood') gameState.inventory.items[1].count -= n;
+                else if (name === 'diamond') gameState.diamonds -= n;
+                else gameState.resources[name] -= n;
+            }
+
+            function flashCraftMsg(msg) {
+                const el = document.getElementById('craftMsg');
+                if (el) el.textContent = msg;
+            }
+
+            function craft(key) {
+                const r = RECIPES[key];
+                if (!r) return;
+                for (const [mat, amt] of Object.entries(r.cost)) {
+                    if (getMat(mat) < amt) { flashCraftMsg('Need more ' + mat + '!'); return; }
+                }
+                // Don't re-craft gear you already have.
+                if (r.gear === 'armor' && gameState.gear.armor) { flashCraftMsg('Already wearing armor!'); return; }
+                if (r.gear === 'sword' && gameState.gear.swordTier > 1) { flashCraftMsg('Sword already upgraded!'); return; }
+
+                for (const [mat, amt] of Object.entries(r.cost)) spendMat(mat, amt);
+                if (r.block) {
+                    gameState.crafted[r.block] += (r.count || 1);
+                    if (r.block === 'bed') gameState.gear.hasBed = true;
+                    flashCraftMsg('Crafted ' + r.name + '!');
+                }
+                if (r.gear === 'armor') { gameState.gear.armor = true; flashCraftMsg('Armor equipped!'); }
+                if (r.gear === 'sword') { gameState.gear.swordTier = 2; flashCraftMsg('Sword upgraded!'); }
+                updateUI();
+                renderCraftMenu();
+            }
+
+            function renderCraftMenu() {
+                const c = document.getElementById('craftRecipes');
+                if (!c) return;
+                c.innerHTML = '';
+                for (const [key, r] of Object.entries(RECIPES)) {
+                    const costStr = Object.entries(r.cost).map(([m, a]) => `${a} ${m}`).join(' + ');
+                    const affordable = Object.entries(r.cost).every(([m, a]) => getMat(m) >= a);
+                    let have = '';
+                    if (r.block) have = ` (have ${gameState.crafted[r.block]})`;
+                    else if (r.gear === 'armor' && gameState.gear.armor) have = ' ✅';
+                    else if (r.gear === 'sword' && gameState.gear.swordTier > 1) have = ' ✅';
+                    const btn = document.createElement('button');
+                    btn.textContent = `${r.name} — ${costStr}${have}`;
+                    btn.style.cssText = 'display:block; width:100%; margin:4px 0; text-align:left; font-size:14px;';
+                    btn.style.opacity = affordable ? '1' : '0.5';
+                    btn.onclick = () => craft(key);
+                    c.appendChild(btn);
+                }
+            }
+
+            window.toggleCraft = function() {
+                if (!gameState.gameStarted) return;
+                gameState.craftOpen = !gameState.craftOpen;
+                const m = document.getElementById('craftMenu');
+                if (m) m.style.display = gameState.craftOpen ? 'block' : 'none';
+                if (gameState.craftOpen) { flashCraftMsg(''); renderCraftMenu(); }
+            }
+
+            // Map a buildBlock name to its BLOCKS id (BLOCKS is late-bound).
+            function buildBlockId(name) {
+                switch (name) {
+                    case 'glass': return BLOCKS.GLASS;
+                    case 'door': return BLOCKS.DOOR;
+                    case 'bed': return BLOCKS.BED;
+                    case 'furnace': return BLOCKS.FURNACE;
+                    default: return BLOCKS.STONE;
+                }
+            }
+
+            // Cycle the build block among stone + any crafted blocks you have.
+            function cycleBuildBlock() {
+                const options = ['stone', 'glass', 'door', 'bed', 'furnace'].filter(o =>
+                    o === 'stone' ? gameState.inventory.items[0].count > 0 : gameState.crafted[o] > 0
+                );
+                if (options.length === 0) options.push('stone');
+                const idx = options.indexOf(gameState.buildBlock);
+                gameState.buildBlock = options[(idx + 1) % options.length];
+                updateUI();
+            }
+
+            // Sleep in a bed to skip the night (needs a crafted bed).
+            function trySleep() {
+                if (!gameState.gear.hasBed) return;
+                if (gameState.tod && (gameState.tod.phase === 'night' || gameState.tod.phase === 'sunset')) {
+                    gameState.tick = 0; // back to morning
+                    gameState.player.health = Math.min(20, gameState.player.health + 5);
+                    gameState.mobs = []; // dawn clears the zombies
+                    updateUI();
+                }
+            }
+
             window.selectCharacter = function(character) {
                 gameState.player.character = character;
             }
@@ -876,6 +1013,9 @@
                 gameState.blocksMinedTotal = 0;
                 gameState.diamonds = 0;
                 gameState.resources = { coal: 0, iron: 0, gold: 0, netherite: 0, flint: 0, obsidian: 0 };
+                gameState.crafted = { glass: 0, door: 0, bed: 0, furnace: 0 };
+                gameState.gear = { armor: false, swordTier: 1, hasBed: false };
+                gameState.buildBlock = 'stone';
                 gameState.inventory = {
                     selected: 0,
                     items: [
@@ -951,6 +1091,18 @@
                     }
                 }
 
+                if (e.key === 'c' || e.key === 'C') {
+                    window.toggleCraft();
+                }
+
+                if (e.key === 'b' || e.key === 'B') {
+                    cycleBuildBlock();
+                }
+
+                if (e.key === 'k' || e.key === 'K') {
+                    trySleep();
+                }
+
                 if (e.key === 'p' || e.key === 'P') {
                     // Fan each new pet out to its own slot, alternating sides so
                     // a whole pack stands spread out next to you (not stacked).
@@ -981,12 +1133,13 @@
                     // conflicted with jump). One swing per click; damages all
                     // mobs within ~60 px of the player.
                     if (gameState.inventory.selected === 3) {
+                        const dmg = gameState.gear.swordTier > 1 ? 8 : 5;
                         gameState.mobs.forEach(mob => {
                             const dx = mob.x - gameState.player.x;
                             const dy = mob.y - gameState.player.y;
                             const dist = Math.sqrt(dx * dx + dy * dy);
                             if (dist < 60) {
-                                mob.health -= 5;
+                                mob.health -= dmg;
                                 if (dist > 0) mob.x += (dx / dist) * 12;
                             }
                         });
@@ -995,7 +1148,7 @@
                             const dy = a.y - gameState.player.y;
                             const dist = Math.sqrt(dx * dx + dy * dy);
                             if (dist < 60) {
-                                a.health -= 5;
+                                a.health -= dmg;
                                 if (dist > 0) a.x += (dx / dist) * 10;
                             }
                         });
@@ -1069,7 +1222,7 @@
                     const bodyGX = Math.floor(gameState.player.x / BLOCK_SIZE);
                     const bodyGY = Math.floor((gameState.player.y - 20) / BLOCK_SIZE);
                     if (blockBelow === BLOCKS.LAVA || getBlock(bodyGX, bodyGY) === BLOCKS.LAVA) {
-                        gameState.player.health = Math.max(0, gameState.player.health - 0.3);
+                        gameState.player.health = Math.max(0, gameState.player.health - (gameState.gear.armor ? 0.15 : 0.3));
                     }
 
                     gameState.player.x = Math.max(0, Math.min((WORLD_WIDTH - 1) * BLOCK_SIZE, gameState.player.x));
@@ -1133,10 +1286,20 @@
                                     gameState.player.miningBlock = { x: blockX, y: blockY };
                                     gameState.player.miningProgress = 0;
                                 }
-                            } else if (rightMouseDown && currentBlock === BLOCKS.AIR && gameState.inventory.items[0].count > 0) {
-                                setBlock(blockX, blockY, BLOCKS.STONE);
-                                gameState.inventory.items[0].count--;
-                                updateUI();
+                            } else if (rightMouseDown && currentBlock === BLOCKS.AIR) {
+                                // Place the currently selected build block.
+                                const bb = gameState.buildBlock;
+                                if (bb === 'stone') {
+                                    if (gameState.inventory.items[0].count > 0) {
+                                        setBlock(blockX, blockY, BLOCKS.STONE);
+                                        gameState.inventory.items[0].count--;
+                                        updateUI();
+                                    }
+                                } else if (gameState.crafted[bb] > 0) {
+                                    setBlock(blockX, blockY, buildBlockId(bb));
+                                    gameState.crafted[bb]--;
+                                    updateUI();
+                                }
                             }
                         }
                     }
@@ -1190,6 +1353,16 @@
                     document.getElementById('blocks').textContent = gameState.blocksMinedTotal;
                     document.getElementById('pets').textContent = gameState.pets.length;
                     document.getElementById('animals').textContent = gameState.animals.length;
+                    // Build block + gear status.
+                    const bb = gameState.buildBlock;
+                    const bbLabel = bb.charAt(0).toUpperCase() + bb.slice(1);
+                    const bbCount = bb === 'stone' ? gameState.inventory.items[0].count : gameState.crafted[bb];
+                    document.getElementById('buildBlock').textContent = bbLabel + ' ×' + bbCount;
+                    const gear = [];
+                    if (gameState.gear.armor) gear.push('🛡️ Armor');
+                    if (gameState.gear.swordTier > 1) gear.push('⚔️ Iron Sword');
+                    if (gameState.gear.hasBed) gear.push('🛏️ Bed (K to sleep)');
+                    document.getElementById('gearLine').textContent = gear.join(' · ');
                     // Bug 6 — biome label updates as the player walks across zones.
                     if (CL) {
                         const playerCol = Math.floor(gameState.player.x / BLOCK_SIZE);

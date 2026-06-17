@@ -69,8 +69,19 @@ describe('render-data BLOCKS constants', () => {
     );
   });
 
-  test('BLOCKS total count is 47 (AIR + 46 block types)', () => {
-    expect(Object.keys(BLOCKS)).toHaveLength(47);
+  test('pins craftable block ids (47..50)', () => {
+    expect(BLOCKS).toEqual(
+      expect.objectContaining({
+        GLASS: 47,
+        DOOR: 48,
+        BED: 49,
+        FURNACE: 50,
+      }),
+    );
+  });
+
+  test('BLOCKS total count is 51 (AIR + 50 block types)', () => {
+    expect(Object.keys(BLOCKS)).toHaveLength(51);
   });
 
   test('exports BLOCK_SIZE = 32', () => {
@@ -141,5 +152,12 @@ describe('getBlockColor', () => {
     expect(getBlockColor(BLOCKS.NETHERITE_ORE)).toBe('#3A2E33');
     expect(getBlockColor(BLOCKS.LAVA)).toBe('#FF5A1E');
     expect(getBlockColor(BLOCKS.OBSIDIAN)).toBe('#1A1026');
+  });
+
+  test('craftable blocks have expected colors', () => {
+    expect(getBlockColor(BLOCKS.GLASS)).toBe('#B3E5FC');
+    expect(getBlockColor(BLOCKS.DOOR)).toBe('#8B5A2B');
+    expect(getBlockColor(BLOCKS.BED)).toBe('#D32F2F');
+    expect(getBlockColor(BLOCKS.FURNACE)).toBe('#5A5A5A');
   });
 });

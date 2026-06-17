@@ -257,6 +257,24 @@ describe('mining update: ore blocks 41-46', () => {
   });
 });
 
+describe('crafting update: placeable blocks 47-50', () => {
+  const GLASS = 47, DOOR = 48, BED = 49, FURNACE = 50;
+
+  test('craftable blocks are mineable', () => {
+    for (const id of [GLASS, DOOR, BED, FURNACE]) {
+      expect(getMiningSpeed('pickaxe', id)).toBeGreaterThan(0);
+      expect(getMiningSpeed('hand', id)).toBeGreaterThan(0);
+    }
+  });
+
+  test('craftable blocks return a base material (glass shatters to nothing)', () => {
+    expect(getBlockDrop(GLASS)).toBeNull();
+    expect(getBlockDrop(DOOR)).toEqual({ item: 'wood', count: 1 });
+    expect(getBlockDrop(BED)).toEqual({ item: 'wood', count: 1 });
+    expect(getBlockDrop(FURNACE)).toEqual({ item: 'stone', count: 1 });
+  });
+});
+
 describe('addToInventory', () => {
   test('adding stone increments slot 0 and does not mutate original', () => {
     const inv = makeInventory();

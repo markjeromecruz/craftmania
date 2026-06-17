@@ -28,6 +28,8 @@ const TALL_GRASS = 14, FLOWER_RED = 15, FLOWER_YELLOW = 16, FLOWER_PINK = 17,
 // Mining-update ore + deep block ids (41-46).
 const COAL_ORE = 41, IRON_ORE = 42, GOLD_ORE = 43, NETHERITE_ORE = 44,
       LAVA = 45, OBSIDIAN = 46;
+// Craftable placeable block ids (47-50).
+const GLASS = 47, DOOR = 48, BED = 49, FURNACE = 50;
 
 // Inventory slot layout from index.html ~256-261:
 //   0 stone (placed), 1 wood (placed), 2 pickaxe, 3 sword, 4 food
@@ -92,6 +94,11 @@ const SPEED = {
     [GOLD_ORE]: 1,
     [NETHERITE_ORE]: 0.8,
     [OBSIDIAN]: 0.4,
+    // Craftable blocks break easily.
+    [GLASS]: 2,
+    [DOOR]: 1.5,
+    [BED]: 1.5,
+    [FURNACE]: 1.5,
   },
   hand: {
     [BLOCKS.STONE]: 0.5,
@@ -139,6 +146,10 @@ const SPEED = {
     [GOLD_ORE]: 0.2,
     [NETHERITE_ORE]: 0.1,
     [OBSIDIAN]: 0.05,
+    [GLASS]: 1.5,
+    [DOOR]: 1,
+    [BED]: 1,
+    [FURNACE]: 0.5,
   },
   sword: {
     [BLOCKS.STONE]: 0.5,
@@ -185,6 +196,10 @@ const SPEED = {
     [GOLD_ORE]: 0.3,
     [NETHERITE_ORE]: 0.3,
     [OBSIDIAN]: 0.1,
+    [GLASS]: 1,
+    [DOOR]: 0.5,
+    [BED]: 0.5,
+    [FURNACE]: 0.5,
   },
 };
 
@@ -269,6 +284,11 @@ const DROPS = {
   [NETHERITE_ORE]: { item: 'netherite', count: 1 },
   [OBSIDIAN]: { item: 'obsidian', count: 1 },
   [LAVA]: null,
+  // Craftable blocks return a base material when broken.
+  [GLASS]: null,
+  [DOOR]: { item: 'wood', count: 1 },
+  [BED]: { item: 'wood', count: 1 },
+  [FURNACE]: { item: 'stone', count: 1 },
 };
 
 export function getBlockDrop(blockType) {
