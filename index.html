@@ -169,8 +169,12 @@
             <p>Classic miner with blue shirt!</p>
         </div>
         <div class="characterOption" onclick="selectCharacter('sandy')">
-            <h3>👧 Sandy</h3>
-            <p>Pink outfit, stylish and cool!</p>
+            <h3>🖤 Sandy · Kuromi</h3>
+            <p>Long brown hair, grey Kuromi shirt & navy shorts!</p>
+        </div>
+        <div class="characterOption" onclick="selectCharacter('sandy_cinna')">
+            <h3>🩷 Sandy · Cinnamoroll</h3>
+            <p>Long brown hair & a cute pink Cinnamoroll shirt!</p>
         </div>
         <div class="characterOption" onclick="selectCharacter('wrestler')">
             <h3>🤼 WWE Champion</h3>
@@ -241,7 +245,8 @@
                     miningProgress: 0,
                     miningBlock: null,
                     jumping: false,
-                    inVehicle: false
+                    inVehicle: false,
+                    vehicleColor: '#696969'
                 },
                 camera: {
                     x: 0,
@@ -354,41 +359,74 @@
                         ctx.fillRect(-8, 0, 6, 4);
                         ctx.fillRect(2, 0, 6, 4);
                         
-                    } else if (character === 'sandy') {
-                        // Sandy's character
+                    } else if (character === 'sandy' || character === 'sandy_cinna') {
+                        // Sandy — long brown hair + a Sanrio-themed outfit.
+                        // 'sandy'       = Kuromi look (dark grey shirt + navy shorts)
+                        // 'sandy_cinna' = Cinnamoroll look (light-pink shirt + sky shorts)
+                        const kuromi = (character === 'sandy');
+
+                        // Skin (head)
                         ctx.fillStyle = '#FDBCB4';
                         ctx.fillRect(-8, -48, 16, 16);
-                        
-                        ctx.fillStyle = '#8B4513';
-                        ctx.fillRect(-10, -50, 20, 8);
-                        ctx.fillRect(-8, -44, 16, 4);
-                        
+
+                        // Long brown hair: crown + two long strands down past the shoulders
+                        ctx.fillStyle = '#5A3210';
+                        ctx.fillRect(-10, -50, 20, 9);   // crown / top
+                        ctx.fillRect(-8, -44, 16, 3);    // fringe
+                        ctx.fillRect(-11, -42, 3, 22);   // left long strand
+                        ctx.fillRect(8, -42, 3, 22);     // right long strand
+
+                        // Eyes + little smile
                         ctx.fillStyle = '#000';
                         ctx.fillRect(-5, -40, 3, 3);
                         ctx.fillRect(2, -40, 3, 3);
-                        
-                        ctx.fillStyle = '#FF69B4';
+                        ctx.fillStyle = '#C24A6B';
+                        ctx.fillRect(-2, -35, 4, 2);
+
+                        // Shirt
+                        ctx.fillStyle = kuromi ? '#3A3A42' : '#FFD1E8';
                         ctx.fillRect(-8, -32, 16, 12);
-                        
+
+                        // Sanrio motif on the shirt
+                        if (kuromi) {
+                            // Kuromi: white skull face + tiny pink bow
+                            ctx.fillStyle = '#FFFFFF';
+                            ctx.fillRect(-4, -29, 8, 6);
+                            ctx.fillStyle = '#000';
+                            ctx.fillRect(-3, -27, 2, 2);
+                            ctx.fillRect(1, -27, 2, 2);
+                            ctx.fillStyle = '#FF4FA3';
+                            ctx.fillRect(-2, -31, 4, 2);
+                        } else {
+                            // Cinnamoroll: white puppy with long ears + blue eyes
+                            ctx.fillStyle = '#FFFFFF';
+                            ctx.fillRect(-3, -29, 6, 5);   // head
+                            ctx.fillRect(-6, -29, 2, 6);   // left long ear
+                            ctx.fillRect(3, -29, 2, 6);    // right long ear
+                            ctx.fillStyle = '#3AA0FF';
+                            ctx.fillRect(-2, -27, 1, 1);
+                            ctx.fillRect(1, -27, 1, 1);
+                        }
+
+                        // Arms (skin)
                         ctx.fillStyle = '#FDBCB4';
                         ctx.fillRect(-12, -32, 4, 12);
                         ctx.fillRect(8, -32, 4, 12);
-                        
-                        ctx.fillStyle = '#4169E1';
+
+                        // Shorts
+                        ctx.fillStyle = kuromi ? '#1A1A4E' : '#9AD0FF';
                         ctx.fillRect(-8, -20, 16, 10);
-                        
+
+                        // Legs (skin)
                         ctx.fillStyle = '#FDBCB4';
                         ctx.fillRect(-8, -10, 6, 6);
                         ctx.fillRect(2, -10, 6, 6);
-                        
-                        ctx.fillStyle = '#FFF';
-                        ctx.fillRect(-8, -4, 6, 4);
-                        ctx.fillRect(2, -4, 6, 4);
-                        
-                        ctx.fillStyle = '#FF0000';
-                        ctx.fillRect(-8, 0, 6, 4);
-                        ctx.fillRect(2, 0, 6, 4);
-                        
+
+                        // Shoes
+                        ctx.fillStyle = kuromi ? '#FF4FA3' : '#FF8FC7';
+                        ctx.fillRect(-8, -4, 6, 6);
+                        ctx.fillRect(2, -4, 6, 6);
+
                     } else {
                         // Steve style
                         ctx.fillStyle = '#FDBCB4';
@@ -447,7 +485,7 @@
             
             // Pet class
             class Pet {
-                constructor(type, x, y) {
+                constructor(type, x, y, followOffset = 0) {
                     this.type = type;
                     this.x = x;
                     this.y = y;
@@ -456,21 +494,26 @@
                     this.width = 24;
                     this.height = 24;
                     this.onGround = false;
+                    // Each pet keeps its own spot beside the player so a pack
+                    // spreads out instead of stacking on one point.
+                    this.followOffset = followOffset;
                 }
                 
                 update() {
                     try {
-                        const dx = gameState.player.x - this.x;
+                        // Aim for this pet's personal slot beside the player so the
+                        // pack fans out rather than piling on a single column.
+                        const targetX = gameState.player.x + this.followOffset;
+                        const dx = targetX - this.x;
                         const distance = Math.abs(dx);
-                        
-                        if (distance > 100) {
-                            this.vx = dx > 0 ? 3 : -3;
-                        } else if (distance < 50) {
-                            this.vx *= 0.8;
+
+                        if (distance > 12) {
+                            const speed = Math.min(5, 1 + distance * 0.08);
+                            this.vx = dx > 0 ? speed : -speed;
                         } else {
-                            this.vx = 0;
+                            this.vx *= 0.7;
                         }
-                        
+
                         this.vy += 0.5;
                         this.x += this.vx;
                         this.y += this.vy;
@@ -755,10 +798,25 @@
 
                 if (e.key === 'v' || e.key === 'V') {
                     gameState.player.inVehicle = !gameState.player.inVehicle;
+                    // Pick a fresh fun color every time you hop into the car.
+                    if (gameState.player.inVehicle) {
+                        const carColors = ['#E53935', '#FB8C00', '#FDD835', '#43A047',
+                                           '#1E88E5', '#8E24AA', '#FF4081', '#00ACC1',
+                                           '#7CB342', '#F4511E'];
+                        gameState.player.vehicleColor =
+                            carColors[Math.floor(Math.random() * carColors.length)];
+                    }
                 }
 
                 if (e.key === 'p' || e.key === 'P') {
-                    const wolf = new Pet('wolf', gameState.player.x + 50, gameState.player.y);
+                    // Fan each new pet out to its own slot, alternating sides so
+                    // a whole pack stands spread out next to you (not stacked).
+                    const n = gameState.pets.length;
+                    const side = (n % 2 === 0) ? 1 : -1;
+                    const tier = Math.floor(n / 2) + 1;
+                    const offset = side * (40 + tier * 28);
+                    const wolf = new Pet('wolf', gameState.player.x + offset,
+                                         gameState.player.y - 20, offset);
                     gameState.pets.push(wolf);
                     updateUI();
                 }
@@ -1139,7 +1197,7 @@
                     const screenY = gameState.player.y - gameState.camera.y;
                     
                     if (gameState.player.inVehicle) {
-                        ctx.fillStyle = '#696969';
+                        ctx.fillStyle = gameState.player.vehicleColor || '#696969';
                         ctx.fillRect(screenX - 20, screenY - 20, 40, 20);
                         ctx.fillStyle = '#000';
                         ctx.fillRect(screenX - 15, screenY - 5, 10, 10);
