@@ -52,6 +52,11 @@ export const BLOCKS = {
   NETHERITE_ORE: 44,
   LAVA: 45,
   OBSIDIAN: 46,
+  // Craftable placeable blocks
+  GLASS: 47,
+  DOOR: 48,
+  BED: 49,
+  FURNACE: 50,
 };
 
 const BLOCK_COLORS = {
@@ -101,6 +106,10 @@ const BLOCK_COLORS = {
   [BLOCKS.NETHERITE_ORE]: '#3A2E33',
   [BLOCKS.LAVA]: '#FF5A1E',
   [BLOCKS.OBSIDIAN]: '#1A1026',
+  [BLOCKS.GLASS]: '#B3E5FC',
+  [BLOCKS.DOOR]: '#8B5A2B',
+  [BLOCKS.BED]: '#D32F2F',
+  [BLOCKS.FURNACE]: '#5A5A5A',
 };
 
 export function getBlockColor(block) {

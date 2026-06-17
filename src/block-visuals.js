@@ -242,6 +242,44 @@ export function drawBlockDetail(ctx, x, y, block, BLOCK_SIZE) {
       ctx.fillRect(x + 12, y + 22, 3, 3);
       break;
 
+    // --- Craftable blocks ---
+
+    case BLOCKS.GLASS:
+      // Window frame + a light shine.
+      ctx.fillStyle = '#E1F5FE';
+      ctx.fillRect(x + 2, y + 2, BLOCK_SIZE - 4, 2);
+      ctx.fillRect(x + 2, y + 2, 2, BLOCK_SIZE - 4);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(x + 7, y + 7, 4, 8);
+      break;
+
+    case BLOCKS.DOOR:
+      // Two panels + a knob.
+      ctx.fillStyle = '#5E3A1A';
+      ctx.fillRect(x + 6, y + 4, BLOCK_SIZE - 12, 10);
+      ctx.fillRect(x + 6, y + 18, BLOCK_SIZE - 12, 10);
+      ctx.fillStyle = '#FFD24A';
+      ctx.fillRect(x + BLOCK_SIZE - 9, y + 14, 3, 3);
+      break;
+
+    case BLOCKS.BED:
+      // Pillow + blanket.
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(x + 3, y + 8, 8, BLOCK_SIZE - 12);
+      ctx.fillStyle = '#B71C1C';
+      ctx.fillRect(x + 13, y + 10, BLOCK_SIZE - 16, BLOCK_SIZE - 16);
+      ctx.fillStyle = '#5E3A1A';
+      ctx.fillRect(x + 2, y + BLOCK_SIZE - 5, BLOCK_SIZE - 4, 4);
+      break;
+
+    case BLOCKS.FURNACE:
+      // Stone box with a glowing opening.
+      ctx.fillStyle = '#3A3A3A';
+      ctx.fillRect(x + 8, y + 14, BLOCK_SIZE - 16, 12);
+      ctx.fillStyle = '#FF8A3A';
+      ctx.fillRect(x + 12, y + 18, BLOCK_SIZE - 24, 6);
+      break;
+
     default:
       // No-op for plain blocks (STONE, WOOD, AIR, BEDROCK, DIRT, LEAVES,
       // SAND, WATER, PINE_LEAVES, DARK_OAK_WOOD, SPRUCE_WOOD, JUNGLE_WOOD,
