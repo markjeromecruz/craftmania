@@ -25,6 +25,10 @@ const TALL_GRASS = 14, FLOWER_RED = 15, FLOWER_YELLOW = 16, FLOWER_PINK = 17,
       GRAVEL = 33, AZALEA_LEAVES = 34, GLOW_BERRIES = 35, CLAY = 36,
       DRIPSTONE = 37, POINTED_DRIPSTONE = 38, SCULK = 39, ECHO_BLOCK = 40;
 
+// Mining-update ore + deep block ids (41-46).
+const COAL_ORE = 41, IRON_ORE = 42, GOLD_ORE = 43, NETHERITE_ORE = 44,
+      LAVA = 45, OBSIDIAN = 46;
+
 // Inventory slot layout from index.html ~256-261:
 //   0 stone (placed), 1 wood (placed), 2 pickaxe, 3 sword, 4 food
 const SLOT_TO_TOOL = {
@@ -82,6 +86,12 @@ const SPEED = {
     [POINTED_DRIPSTONE]: 2,
     [SCULK]: 2,
     [ECHO_BLOCK]: 2,
+    // Ores: pickaxe is the right tool. Harder metals take longer.
+    [COAL_ORE]: 1.5,
+    [IRON_ORE]: 1.2,
+    [GOLD_ORE]: 1,
+    [NETHERITE_ORE]: 0.8,
+    [OBSIDIAN]: 0.4,
   },
   hand: {
     [BLOCKS.STONE]: 0.5,
@@ -123,6 +133,12 @@ const SPEED = {
     [POINTED_DRIPSTONE]: 0.3,
     [SCULK]: 0.3,
     [ECHO_BLOCK]: 0.3,
+    // Ores barely budge by hand — bring a pickaxe.
+    [COAL_ORE]: 0.3,
+    [IRON_ORE]: 0.2,
+    [GOLD_ORE]: 0.2,
+    [NETHERITE_ORE]: 0.1,
+    [OBSIDIAN]: 0.05,
   },
   sword: {
     [BLOCKS.STONE]: 0.5,
@@ -164,15 +180,21 @@ const SPEED = {
     [POINTED_DRIPSTONE]: 0.3,
     [SCULK]: 0.3,
     [ECHO_BLOCK]: 0.3,
+    [COAL_ORE]: 0.3,
+    [IRON_ORE]: 0.3,
+    [GOLD_ORE]: 0.3,
+    [NETHERITE_ORE]: 0.3,
+    [OBSIDIAN]: 0.1,
   },
 };
 
 export function getMiningSpeed(tool, blockType) {
-  // BEDROCK, AIR, WATER and unknown blocks cannot be mined.
+  // BEDROCK, AIR, WATER, LAVA and unknown blocks cannot be mined.
   if (
     blockType === BLOCKS.BEDROCK ||
     blockType === BLOCKS.AIR ||
-    blockType === BLOCKS.WATER
+    blockType === BLOCKS.WATER ||
+    blockType === LAVA
   ) {
     return 0;
   }
@@ -240,6 +262,13 @@ const DROPS = {
   [POINTED_DRIPSTONE]: { item: 'stone', count: 1 },
   [SCULK]: null,
   [ECHO_BLOCK]: null,
+  // Ores drop their material (routed to the resources panel by the integrator).
+  [COAL_ORE]: { item: 'coal', count: 1 },
+  [IRON_ORE]: { item: 'iron', count: 1 },
+  [GOLD_ORE]: { item: 'gold', count: 1 },
+  [NETHERITE_ORE]: { item: 'netherite', count: 1 },
+  [OBSIDIAN]: { item: 'obsidian', count: 1 },
+  [LAVA]: null,
 };
 
 export function getBlockDrop(blockType) {

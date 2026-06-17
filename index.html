@@ -145,10 +145,12 @@
     <div id="ui">
         <div>❤️ Health: <span id="health">20</span>/20</div>
         <div>🍖 Hunger: <span id="hunger">20</span>/20</div>
-        <div>💎 Diamonds: <span id="diamonds">0</span></div>
-        <div>🪨 Stone: <span id="stone">64</span></div>
-        <div>🌍 Blocks: <span id="blocks">0</span></div>
-        <div>🗺️ Biome: <span id="biome">Plains</span> | <span id="phase">🌞 Day</span></div>
+        <div style="margin-top:4px;">⛏️ Materials (for crafting):</div>
+        <div style="margin-left:8px;">🪨 <span id="stone">64</span> · 🪵 <span id="wood">0</span> · ⚫ <span id="coal">0</span> · 🔩 <span id="iron">0</span></div>
+        <div style="margin-left:8px;">🥇 <span id="gold">0</span> · 💎 <span id="diamond">0</span> · 🟪 <span id="netherite">0</span> · ⬛ <span id="obsidian">0</span></div>
+        <div style="margin-left:8px;">🔥 <span id="flint">0</span> flint</div>
+        <div style="margin-top:4px;">🌍 Blocks mined: <span id="blocks">0</span></div>
+        <div>🗺️ <span id="biome">Plains</span> | <span id="phase">🌞 Day</span></div>
         <div>🐕 Pets: <span id="pets">0</span></div>
     </div>
     
@@ -269,6 +271,8 @@
                 mouseX: 0,
                 mouseY: 0,
                 diamonds: 0,
+                // Gathered materials used for crafting (not a score!).
+                resources: { coal: 0, iron: 0, gold: 0, netherite: 0, flint: 0, obsidian: 0 },
                 // --- Phase 3 additions ---
                 tick: 0,                          // increments each gameLoop frame (day/night)
                 worldSeed: 0,                     // set in startGame; also reused on respawn
@@ -734,6 +738,7 @@
                 gameState.tick = 0;
                 gameState.blocksMinedTotal = 0;
                 gameState.diamonds = 0;
+                gameState.resources = { coal: 0, iron: 0, gold: 0, netherite: 0, flint: 0, obsidian: 0 };
                 gameState.inventory = {
                     selected: 0,
                     items: [
@@ -913,6 +918,13 @@
                     gameState.player.onGround = snap.onGround;
                     if (snap.onGround) gameState.player.jumping = false;
 
+                    // Lava hurts! Standing on or wading into lava drains health.
+                    const bodyGX = Math.floor(gameState.player.x / BLOCK_SIZE);
+                    const bodyGY = Math.floor((gameState.player.y - 20) / BLOCK_SIZE);
+                    if (blockBelow === BLOCKS.LAVA || getBlock(bodyGX, bodyGY) === BLOCKS.LAVA) {
+                        gameState.player.health = Math.max(0, gameState.player.health - 0.3);
+                    }
+
                     gameState.player.x = Math.max(0, Math.min((WORLD_WIDTH - 1) * BLOCK_SIZE, gameState.player.x));
                     
                     // Mining/Building — bug 7 (collect drops), bug 8 (sword can't mine),
@@ -950,11 +962,19 @@
                                         if (drop) {
                                             if (drop.item === 'diamond') {
                                                 gameState.diamonds += drop.count;
+                                            } else if (drop.item in gameState.resources) {
+                                                // Ores (coal/iron/gold/netherite/obsidian)
+                                                // go to the crafting materials panel.
+                                                gameState.resources[drop.item] += drop.count;
                                             } else {
                                                 gameState.inventory = CL.addToInventory(
                                                     gameState.inventory, drop.item, drop.count
                                                 );
                                             }
+                                        }
+                                        // Gravel sometimes hides flint (used for flint & steel).
+                                        if (currentBlock === BLOCKS.GRAVEL && Math.random() < 0.18) {
+                                            gameState.resources.flint += 1;
                                         }
                                         gameState.blocksMinedTotal++;
                                         setBlock(blockX, blockY, BLOCKS.AIR);
@@ -1008,7 +1028,16 @@
                 try {
                     document.getElementById('health').textContent = Math.floor(gameState.player.health);
                     document.getElementById('hunger').textContent = Math.floor(gameState.player.hunger);
-                    document.getElementById('diamonds').textContent = gameState.diamonds;
+                    // Materials panel (used for crafting — not a score).
+                    document.getElementById('diamond').textContent = gameState.diamonds;
+                    const res = gameState.resources;
+                    document.getElementById('coal').textContent = res.coal;
+                    document.getElementById('iron').textContent = res.iron;
+                    document.getElementById('gold').textContent = res.gold;
+                    document.getElementById('netherite').textContent = res.netherite;
+                    document.getElementById('obsidian').textContent = res.obsidian;
+                    document.getElementById('flint').textContent = res.flint;
+                    document.getElementById('wood').textContent = gameState.inventory.items[1].count;
                     // Bug 10 — split: #stone shows the stone slot, #blocks shows total mined.
                     document.getElementById('stone').textContent = gameState.inventory.items[0].count;
                     document.getElementById('blocks').textContent = gameState.blocksMinedTotal;
@@ -1222,8 +1251,8 @@
                         ctx.font = '48px Courier New';
                         ctx.fillText('YOU DIED!', canvas.width/2 - 120, canvas.height/2);
                         ctx.fillStyle = '#FFF';
-                        ctx.font = '24px Courier New';
-                        ctx.fillText('Score: ' + gameState.diamonds + ' Diamonds', canvas.width/2 - 140, canvas.height/2 + 40);
+                        ctx.font = '22px Courier New';
+                        ctx.fillText('Don\'t worry — your world is still here!', canvas.width/2 - 220, canvas.height/2 + 40);
                         // Bug 3 — respawn prompt.
                         ctx.fillStyle = '#FFD700';
                         ctx.font = '28px Courier New';

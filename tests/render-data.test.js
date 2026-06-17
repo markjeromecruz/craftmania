@@ -56,8 +56,21 @@ describe('render-data BLOCKS constants', () => {
     );
   });
 
-  test('BLOCKS total count is 41 (AIR + 40 block types)', () => {
-    expect(Object.keys(BLOCKS)).toHaveLength(41);
+  test('pins mining-update ore ids (41..46)', () => {
+    expect(BLOCKS).toEqual(
+      expect.objectContaining({
+        COAL_ORE: 41,
+        IRON_ORE: 42,
+        GOLD_ORE: 43,
+        NETHERITE_ORE: 44,
+        LAVA: 45,
+        OBSIDIAN: 46,
+      }),
+    );
+  });
+
+  test('BLOCKS total count is 47 (AIR + 46 block types)', () => {
+    expect(Object.keys(BLOCKS)).toHaveLength(47);
   });
 
   test('exports BLOCK_SIZE = 32', () => {
@@ -119,5 +132,14 @@ describe('getBlockColor', () => {
     expect(getBlockColor(BLOCKS.POINTED_DRIPSTONE)).toBe('#B59F84');
     expect(getBlockColor(BLOCKS.SCULK)).toBe('#0E2A36');
     expect(getBlockColor(BLOCKS.ECHO_BLOCK)).toBe('#1E4858');
+  });
+
+  test('mining-update ore blocks have expected colors', () => {
+    expect(getBlockColor(BLOCKS.COAL_ORE)).toBe('#5B5B5B');
+    expect(getBlockColor(BLOCKS.IRON_ORE)).toBe('#B0A08C');
+    expect(getBlockColor(BLOCKS.GOLD_ORE)).toBe('#8C7A40');
+    expect(getBlockColor(BLOCKS.NETHERITE_ORE)).toBe('#3A2E33');
+    expect(getBlockColor(BLOCKS.LAVA)).toBe('#FF5A1E');
+    expect(getBlockColor(BLOCKS.OBSIDIAN)).toBe('#1A1026');
   });
 });

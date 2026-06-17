@@ -194,6 +194,54 @@ export function drawBlockDetail(ctx, x, y, block, BLOCK_SIZE) {
       ctx.fillRect(x + 26, y + 26, 2, 2);
       break;
 
+    // --- Ores + deep blocks (mining update) ---
+
+    case BLOCKS.COAL_ORE:
+      ctx.fillStyle = '#1A1A1A';
+      ctx.fillRect(x + 7, y + 8, 5, 5);
+      ctx.fillRect(x + 18, y + 6, 4, 4);
+      ctx.fillRect(x + 12, y + 19, 6, 5);
+      ctx.fillRect(x + 21, y + 20, 4, 4);
+      break;
+
+    case BLOCKS.IRON_ORE:
+      ctx.fillStyle = '#D9A066';
+      ctx.fillRect(x + 8, y + 9, 5, 4);
+      ctx.fillRect(x + 19, y + 8, 4, 4);
+      ctx.fillRect(x + 13, y + 20, 5, 4);
+      break;
+
+    case BLOCKS.GOLD_ORE:
+      ctx.fillStyle = '#FFD84D';
+      ctx.fillRect(x + 8, y + 8, 5, 5);
+      ctx.fillRect(x + 19, y + 10, 4, 4);
+      ctx.fillRect(x + 12, y + 20, 5, 4);
+      break;
+
+    case BLOCKS.NETHERITE_ORE:
+      ctx.fillStyle = '#6B5B66';
+      ctx.fillRect(x + 8, y + 9, 5, 4);
+      ctx.fillRect(x + 18, y + 8, 5, 4);
+      ctx.fillStyle = '#C9B7C2';
+      ctx.fillRect(x + 13, y + 20, 5, 4);
+      break;
+
+    case BLOCKS.LAVA:
+      // Shimmering brighter blobs over the orange base.
+      ctx.fillStyle = '#FFD23A';
+      ctx.fillRect(x + 5, y + 7, 7, 5);
+      ctx.fillRect(x + 19, y + 14, 6, 5);
+      ctx.fillStyle = '#FF8A3A';
+      ctx.fillRect(x + 12, y + 20, 8, 5);
+      break;
+
+    case BLOCKS.OBSIDIAN:
+      ctx.fillStyle = '#3A2A5A';
+      ctx.fillRect(x + 6, y + 6, 3, 3);
+      ctx.fillRect(x + 20, y + 12, 3, 3);
+      ctx.fillRect(x + 12, y + 22, 3, 3);
+      break;
+
     default:
       // No-op for plain blocks (STONE, WOOD, AIR, BEDROCK, DIRT, LEAVES,
       // SAND, WATER, PINE_LEAVES, DARK_OAK_WOOD, SPRUCE_WOOD, JUNGLE_WOOD,

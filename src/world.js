@@ -1,7 +1,7 @@
 import { BLOCKS } from './render-data.js';
 
 // World dimensions and biome layout.
-export const WORLD_WIDTH = 600;
+export const WORLD_WIDTH = 1200;
 export const WORLD_HEIGHT = 80;
 // Average / default zone width. Variable per-biome widths are the source of truth;
 // this is exposed for any consumer that needs a coarse single number.
@@ -63,20 +63,23 @@ export const BIOME_WEIGHTS = {
 
 // Per-biome zone width range. `buildZoneTable` picks a width in
 // [minW, maxW] inclusive when laying down each zone.
+// Big biomes: widths are roughly doubled so each zone feels like a real place
+// you walk across, not a quick strip. Paired with the 1200-wide world this
+// still fits a good mix of biomes per game.
 export const BIOME_WIDTHS = {
-  plains:           { minW: 40, maxW: 80 },
-  forest:           { minW: 40, maxW: 70 },
-  taiga:            { minW: 35, maxW: 65 },
-  desert:           { minW: 30, maxW: 60 },
-  snow:             { minW: 30, maxW: 60 },
-  mountain:         { minW: 25, maxW: 50 },
-  jungle:           { minW: 25, maxW: 45 },
-  dark_forest:      { minW: 25, maxW: 45 },
-  flower_forest:    { minW: 20, maxW: 35 },
-  bamboo_jungle:    { minW: 20, maxW: 35 },
-  old_growth_taiga: { minW: 20, maxW: 35 },
-  cherry_grove:     { minW: 15, maxW: 30 },
-  pale_garden:      { minW: 15, maxW: 30 },
+  plains:           { minW: 90, maxW: 160 },
+  forest:           { minW: 80, maxW: 140 },
+  taiga:            { minW: 75, maxW: 130 },
+  desert:           { minW: 65, maxW: 120 },
+  snow:             { minW: 65, maxW: 120 },
+  mountain:         { minW: 55, maxW: 100 },
+  jungle:           { minW: 55, maxW: 95 },
+  dark_forest:      { minW: 55, maxW: 95 },
+  flower_forest:    { minW: 45, maxW: 75 },
+  bamboo_jungle:    { minW: 45, maxW: 75 },
+  old_growth_taiga: { minW: 45, maxW: 75 },
+  cherry_grove:     { minW: 35, maxW: 65 },
+  pale_garden:      { minW: 35, maxW: 65 },
 };
 
 // Per-biome generation rules. Keys mirror BIOMES.
@@ -141,6 +144,29 @@ const DRIPSTONE = 37;
 const POINTED_DRIPSTONE = 38;
 const SCULK = 39;
 const ECHO_BLOCK = 40;
+// Ore + deep block ids (mining update).
+const COAL_ORE = 41;
+const IRON_ORE = 42;
+const GOLD_ORE = 43;
+const NETHERITE_ORE = 44;
+const LAVA = 45;
+const OBSIDIAN = 46;
+
+// Pure: picks what fills a deep (below-surface) stone cell. Pulls exactly one
+// rng() value, then maps disjoint probability bands to ores / lava / obsidian,
+// gating the rarer/deeper materials by depth. `depth` = rows below the surface;
+// `fromBottom` = rows above bedrock. Returns rules.deep (stone) otherwise.
+function pickDeepBlock(depth, fromBottom, rules, rng) {
+  const r = rng();
+  if (r < 0.10) return COAL_ORE;                                   // common
+  if (r < 0.16) return IRON_ORE;                                   // common
+  if (r < 0.195) return depth >= 9  ? GOLD_ORE       : rules.deep; // mid-deep
+  if (r < 0.215) return depth >= 14 ? BLOCKS.DIAMOND : rules.deep; // deep
+  if (r < 0.230) return fromBottom <= 10 ? NETHERITE_ORE : rules.deep; // very deep
+  if (r < 0.255) return fromBottom <= 6  ? LAVA          : rules.deep; // lava near bedrock
+  if (r < 0.270) return fromBottom <= 8  ? OBSIDIAN      : rules.deep; // near lava layer
+  return rules.deep;
+}
 
 // Pure: same (x, y, seed) -> same return.
 // Returns 'lush' | 'dripstone' | 'deep_dark' | null. Cave biomes are zoned
@@ -182,9 +208,9 @@ function pickCaveBlock(caveBiome, rng) {
 // ---------------------------------------------------------------------------
 // River + beach overlay — 3 deterministic cut-through rivers per world.
 // ---------------------------------------------------------------------------
-export const NUM_RIVERS = 3;
+export const NUM_RIVERS = 5;
 export const RIVER_MIN_WIDTH = 4;
-export const RIVER_MAX_WIDTH = 8;
+export const RIVER_MAX_WIDTH = 10;
 export const BEACH_WIDTH = 3;
 export const RIVER_DEPTH_BELOW = 3;
 
@@ -551,15 +577,16 @@ export function generateWorld(seed) {
       if (y === WORLD_HEIGHT - 1) {
         world[x][y] = BLOCKS.BEDROCK;
       } else if (y > height + 5) {
-        // Cave-biome sprinkle FIRST so its rng pull happens before the diamond
+        // Cave-biome sprinkle FIRST so its rng pull happens before the ore
         // check — preserves determinism across the whole generateWorld call.
         const caveBiome = getCaveBiomeAt(x, y, seed);
         if (caveBiome && rng() < CAVE_BLOCK_SPRINKLE_CHANCE) {
           world[x][y] = pickCaveBlock(caveBiome, rng);
-        } else if (rng() < 0.02 && y > height + 10) {
-          world[x][y] = BLOCKS.DIAMOND;
         } else {
-          world[x][y] = rules.deep;
+          // Depth-banded ores / lava / obsidian (else plain deep stone).
+          const depth = y - height;
+          const fromBottom = WORLD_HEIGHT - y;
+          world[x][y] = pickDeepBlock(depth, fromBottom, rules, rng);
         }
       } else if (y > height) {
         world[x][y] = rules.subSurface;
