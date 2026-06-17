@@ -48,8 +48,8 @@ const CAVE_BLOCKS = new Set([
 ]);
 
 describe('world constants', () => {
-  test('exports WORLD_WIDTH=600, WORLD_HEIGHT=80', () => {
-    expect(WORLD_WIDTH).toBe(600);
+  test('exports WORLD_WIDTH=1200, WORLD_HEIGHT=80', () => {
+    expect(WORLD_WIDTH).toBe(1200);
     expect(WORLD_HEIGHT).toBe(80);
   });
 
@@ -515,11 +515,11 @@ describe('getCaveBiomeAt', () => {
 });
 
 describe('getRiverPlan', () => {
-  test('returns exactly NUM_RIVERS (=3) entries', () => {
+  test('returns exactly NUM_RIVERS (=5) entries', () => {
     for (const seed of [0, 7, 42, 123, 999]) {
       const plan = getRiverPlan(seed);
       expect(plan.length).toBe(NUM_RIVERS);
-      expect(NUM_RIVERS).toBe(3);
+      expect(NUM_RIVERS).toBe(5);
     }
   });
 
@@ -648,6 +648,31 @@ describe('generateWorld with cave biomes', () => {
       }
     }
     expect(found).toBe(true);
+  });
+
+  test('contains iron and coal ore somewhere underground (seed 42)', () => {
+    const COAL_ORE = 41, IRON_ORE = 42;
+    const w = generateWorld(42);
+    let coal = 0, iron = 0;
+    for (let x = 0; x < WORLD_WIDTH; x++) {
+      for (let y = 0; y < WORLD_HEIGHT; y++) {
+        if (w[x][y] === COAL_ORE) coal++;
+        if (w[x][y] === IRON_ORE) iron++;
+      }
+    }
+    expect(coal).toBeGreaterThan(0);
+    expect(iron).toBeGreaterThan(0);
+  });
+
+  test('lava and netherite only appear deep (never above mid-world) for seed 42', () => {
+    const NETHERITE_ORE = 44, LAVA = 45;
+    const w = generateWorld(42);
+    for (let x = 0; x < WORLD_WIDTH; x++) {
+      for (let y = 0; y < Math.floor(WORLD_HEIGHT / 2); y++) {
+        expect(w[x][y]).not.toBe(LAVA);
+        expect(w[x][y]).not.toBe(NETHERITE_ORE);
+      }
+    }
   });
 
   test('top half of world (y < CAVE_BIOME_START_Y) contains zero cave-biome blocks across multiple seeds', () => {

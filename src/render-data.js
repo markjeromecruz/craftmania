@@ -45,6 +45,13 @@ export const BLOCKS = {
   POINTED_DRIPSTONE: 38,
   SCULK: 39,
   ECHO_BLOCK: 40,
+  // Ores + deep blocks (mining update)
+  COAL_ORE: 41,
+  IRON_ORE: 42,
+  GOLD_ORE: 43,
+  NETHERITE_ORE: 44,
+  LAVA: 45,
+  OBSIDIAN: 46,
 };
 
 const BLOCK_COLORS = {
@@ -88,6 +95,12 @@ const BLOCK_COLORS = {
   [BLOCKS.POINTED_DRIPSTONE]: '#B59F84',
   [BLOCKS.SCULK]: '#0E2A36',
   [BLOCKS.ECHO_BLOCK]: '#1E4858',
+  [BLOCKS.COAL_ORE]: '#5B5B5B',
+  [BLOCKS.IRON_ORE]: '#B0A08C',
+  [BLOCKS.GOLD_ORE]: '#8C7A40',
+  [BLOCKS.NETHERITE_ORE]: '#3A2E33',
+  [BLOCKS.LAVA]: '#FF5A1E',
+  [BLOCKS.OBSIDIAN]: '#1A1026',
 };
 
 export function getBlockColor(block) {

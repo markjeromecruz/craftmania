@@ -222,6 +222,41 @@ describe('biome expansion: coverage', () => {
   });
 });
 
+// --- Mining update: ores + lava + obsidian (ids 41-46) -----------------------
+describe('mining update: ore blocks 41-46', () => {
+  const COAL_ORE = 41, IRON_ORE = 42, GOLD_ORE = 43, NETHERITE_ORE = 44,
+        LAVA = 45, OBSIDIAN = 46;
+
+  test('pickaxe mines ores, faster for softer ores', () => {
+    expect(getMiningSpeed('pickaxe', COAL_ORE)).toBe(1.5);
+    expect(getMiningSpeed('pickaxe', IRON_ORE)).toBe(1.2);
+    expect(getMiningSpeed('pickaxe', GOLD_ORE)).toBe(1);
+    expect(getMiningSpeed('pickaxe', NETHERITE_ORE)).toBe(0.8);
+    expect(getMiningSpeed('pickaxe', OBSIDIAN)).toBe(0.4);
+  });
+
+  test('ores barely mine by hand', () => {
+    expect(getMiningSpeed('hand', IRON_ORE)).toBeLessThan(getMiningSpeed('pickaxe', IRON_ORE));
+    expect(getMiningSpeed('hand', OBSIDIAN)).toBeGreaterThan(0);
+  });
+
+  test('LAVA cannot be mined by any tool', () => {
+    expect(getMiningSpeed('pickaxe', LAVA)).toBe(0);
+    expect(getMiningSpeed('hand', LAVA)).toBe(0);
+    expect(getMiningSpeed('sword', LAVA)).toBe(0);
+    expect(applyMiningTick(0, LAVA, 'pickaxe')).toEqual({ progress: 0, completed: false });
+  });
+
+  test('ores drop their material; lava drops nothing', () => {
+    expect(getBlockDrop(COAL_ORE)).toEqual({ item: 'coal', count: 1 });
+    expect(getBlockDrop(IRON_ORE)).toEqual({ item: 'iron', count: 1 });
+    expect(getBlockDrop(GOLD_ORE)).toEqual({ item: 'gold', count: 1 });
+    expect(getBlockDrop(NETHERITE_ORE)).toEqual({ item: 'netherite', count: 1 });
+    expect(getBlockDrop(OBSIDIAN)).toEqual({ item: 'obsidian', count: 1 });
+    expect(getBlockDrop(LAVA)).toBeNull();
+  });
+});
+
 describe('addToInventory', () => {
   test('adding stone increments slot 0 and does not mutate original', () => {
     const inv = makeInventory();
