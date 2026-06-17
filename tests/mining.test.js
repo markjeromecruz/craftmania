@@ -275,6 +275,28 @@ describe('crafting update: placeable blocks 47-50', () => {
   });
 });
 
+describe('nether update: blocks 51-54', () => {
+  const PORTAL = 51, NETHERRACK = 52, GLOWSTONE = 53, SOUL_SAND = 54;
+
+  test('PORTAL cannot be mined', () => {
+    expect(getMiningSpeed('pickaxe', PORTAL)).toBe(0);
+    expect(getMiningSpeed('hand', PORTAL)).toBe(0);
+    expect(getBlockDrop(PORTAL)).toBeNull();
+  });
+
+  test('nether ground blocks are mineable', () => {
+    for (const id of [NETHERRACK, GLOWSTONE, SOUL_SAND]) {
+      expect(getMiningSpeed('pickaxe', id)).toBeGreaterThan(0);
+    }
+  });
+
+  test('nether ground blocks drop expected materials', () => {
+    expect(getBlockDrop(NETHERRACK)).toEqual({ item: 'stone', count: 1 });
+    expect(getBlockDrop(SOUL_SAND)).toEqual({ item: 'stone', count: 1 });
+    expect(getBlockDrop(GLOWSTONE)).toBeNull();
+  });
+});
+
 describe('addToInventory', () => {
   test('adding stone increments slot 0 and does not mutate original', () => {
     const inv = makeInventory();

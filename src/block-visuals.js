@@ -280,6 +280,40 @@ export function drawBlockDetail(ctx, x, y, block, BLOCK_SIZE) {
       ctx.fillRect(x + 12, y + 18, BLOCK_SIZE - 24, 6);
       break;
 
+    // --- Nether blocks ---
+
+    case BLOCKS.PORTAL:
+      // Swirly lighter-purple sparkles over the purple base.
+      ctx.fillStyle = '#C77DFF';
+      ctx.fillRect(x + 6, y + 6, 4, 4);
+      ctx.fillRect(x + 20, y + 14, 4, 4);
+      ctx.fillRect(x + 12, y + 22, 4, 4);
+      ctx.fillStyle = '#E0AAFF';
+      ctx.fillRect(x + 15, y + 10, 2, 2);
+      break;
+
+    case BLOCKS.NETHERRACK:
+      ctx.fillStyle = '#561F1F';
+      ctx.fillRect(x + 5, y + 6, 3, 3);
+      ctx.fillRect(x + 18, y + 9, 3, 3);
+      ctx.fillRect(x + 10, y + 20, 3, 3);
+      ctx.fillRect(x + 23, y + 22, 3, 3);
+      break;
+
+    case BLOCKS.GLOWSTONE:
+      ctx.fillStyle = '#FFF3C4';
+      ctx.fillRect(x + 6, y + 6, 5, 5);
+      ctx.fillRect(x + 18, y + 8, 5, 5);
+      ctx.fillRect(x + 10, y + 19, 5, 5);
+      ctx.fillRect(x + 20, y + 20, 4, 4);
+      break;
+
+    case BLOCKS.SOUL_SAND:
+      ctx.fillStyle = '#2E241A';
+      ctx.fillRect(x + 7, y + 10, 5, 5);   // little hollow "faces"
+      ctx.fillRect(x + 19, y + 16, 5, 5);
+      break;
+
     default:
       // No-op for plain blocks (STONE, WOOD, AIR, BEDROCK, DIRT, LEAVES,
       // SAND, WATER, PINE_LEAVES, DARK_OAK_WOOD, SPRUCE_WOOD, JUNGLE_WOOD,
