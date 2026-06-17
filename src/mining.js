@@ -329,6 +329,11 @@ const DOOR_OPEN = 66;
 SPEED.pickaxe[DOOR_OPEN] = 1.5; SPEED.hand[DOOR_OPEN] = 1; SPEED.sword[DOOR_OPEN] = 0.5;
 DROPS[DOOR_OPEN] = { item: 'wood', count: 1 };
 
+// Copper ore — needs a pickaxe, drops copper.
+const COPPER_ORE = 67;
+SPEED.pickaxe[COPPER_ORE] = 1.3; SPEED.hand[COPPER_ORE] = 0.25; SPEED.sword[COPPER_ORE] = 0.3;
+DROPS[COPPER_ORE] = { item: 'copper', count: 1 };
+
 export function getBlockDrop(blockType) {
   if (!(blockType in DROPS)) return null;
   return DROPS[blockType];

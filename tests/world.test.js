@@ -681,18 +681,20 @@ describe('generateWorld with cave biomes', () => {
     expect(found).toBe(true);
   });
 
-  test('contains iron and coal ore somewhere underground (seed 42)', () => {
-    const COAL_ORE = 41, IRON_ORE = 42;
+  test('contains iron, coal and copper ore somewhere underground (seed 42)', () => {
+    const COAL_ORE = 41, IRON_ORE = 42, COPPER_ORE = 67;
     const w = generateWorld(42);
-    let coal = 0, iron = 0;
+    let coal = 0, iron = 0, copper = 0;
     for (let x = 0; x < WORLD_WIDTH; x++) {
       for (let y = 0; y < WORLD_HEIGHT; y++) {
         if (w[x][y] === COAL_ORE) coal++;
         if (w[x][y] === IRON_ORE) iron++;
+        if (w[x][y] === COPPER_ORE) copper++;
       }
     }
     expect(coal).toBeGreaterThan(0);
     expect(iron).toBeGreaterThan(0);
+    expect(copper).toBeGreaterThan(0);
   });
 
   test('lava and netherite only appear deep (never above mid-world) for seed 42', () => {

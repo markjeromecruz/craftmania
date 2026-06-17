@@ -297,6 +297,13 @@ describe('nether update: blocks 51-54', () => {
   });
 });
 
+describe('copper ore (67)', () => {
+  test('copper needs a pickaxe and drops copper', () => {
+    expect(getMiningSpeed('pickaxe', 67)).toBeGreaterThan(getMiningSpeed('hand', 67));
+    expect(getBlockDrop(67)).toEqual({ item: 'copper', count: 1 });
+  });
+});
+
 describe('planks update: blocks 55-63', () => {
   test('all 9 planks are mineable and drop wood', () => {
     for (let id = 55; id <= 63; id++) {

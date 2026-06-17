@@ -77,6 +77,8 @@ export const BLOCKS = {
   WHEAT: 65,
   // Open door (toggled by right-clicking a door)
   DOOR_OPEN: 66,
+  // Copper ore
+  COPPER_ORE: 67,
 };
 
 const BLOCK_COLORS = {
@@ -146,6 +148,7 @@ const BLOCK_COLORS = {
   [BLOCKS.FARMLAND]: '#6B4A2A',
   [BLOCKS.WHEAT]: '#D9C247',
   [BLOCKS.DOOR_OPEN]: '#8B5A2B',
+  [BLOCKS.COPPER_ORE]: '#B87333',
 };
 
 export function getBlockColor(block) {

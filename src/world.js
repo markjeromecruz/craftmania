@@ -151,6 +151,7 @@ const GOLD_ORE = 43;
 const NETHERITE_ORE = 44;
 const LAVA = 45;
 const OBSIDIAN = 46;
+const COPPER_ORE = 67;
 
 // Pure: picks what fills a deep (below-surface) stone cell. Pulls exactly one
 // rng() value, then maps disjoint probability bands to ores / lava / obsidian,
@@ -159,12 +160,13 @@ const OBSIDIAN = 46;
 function pickDeepBlock(depth, fromBottom, rules, rng) {
   const r = rng();
   if (r < 0.10) return COAL_ORE;                                   // common
-  if (r < 0.16) return IRON_ORE;                                   // common
-  if (r < 0.195) return depth >= 9  ? GOLD_ORE       : rules.deep; // mid-deep
-  if (r < 0.215) return depth >= 14 ? BLOCKS.DIAMOND : rules.deep; // deep
-  if (r < 0.230) return fromBottom <= 10 ? NETHERITE_ORE : rules.deep; // very deep
-  if (r < 0.255) return fromBottom <= 6  ? LAVA          : rules.deep; // lava near bedrock
-  if (r < 0.270) return fromBottom <= 8  ? OBSIDIAN      : rules.deep; // near lava layer
+  if (r < 0.15) return COPPER_ORE;                                 // common, shallow-mid
+  if (r < 0.21) return IRON_ORE;                                   // common
+  if (r < 0.245) return depth >= 9  ? GOLD_ORE       : rules.deep; // mid-deep
+  if (r < 0.265) return depth >= 14 ? BLOCKS.DIAMOND : rules.deep; // deep
+  if (r < 0.280) return fromBottom <= 10 ? NETHERITE_ORE : rules.deep; // very deep
+  if (r < 0.305) return fromBottom <= 6  ? LAVA          : rules.deep; // lava near bedrock
+  if (r < 0.320) return fromBottom <= 8  ? OBSIDIAN      : rules.deep; // near lava layer
   return rules.deep;
 }
 

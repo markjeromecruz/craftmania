@@ -147,8 +147,9 @@
         <div>🍖 Hunger: <span id="hunger">20</span>/20</div>
         <div style="margin-top:4px;">⛏️ Materials (for crafting):</div>
         <div style="margin-left:8px;">🪨 Stone <span id="stone">64</span> · 🪵 Wood <span id="wood">0</span> · ⚫ Coal <span id="coal">0</span></div>
-        <div style="margin-left:8px;">🔩 Iron <span id="iron">0</span> · 🥇 Gold <span id="gold">0</span> · 💎 Diamond <span id="diamond">0</span></div>
-        <div style="margin-left:8px;">🟪 Netherite <span id="netherite">0</span> · ⬛ Obsidian <span id="obsidian">0</span> · 🔥 Flint <span id="flint">0</span></div>
+        <div style="margin-left:8px;">🟫 Copper <span id="copper">0</span> · 🔩 Iron <span id="iron">0</span> · 🥇 Gold <span id="gold">0</span></div>
+        <div style="margin-left:8px;">💎 Diamond <span id="diamond">0</span> · 🟪 Netherite <span id="netherite">0</span></div>
+        <div style="margin-left:8px;">⬛ Obsidian <span id="obsidian">0</span> · 🔥 Flint <span id="flint">0</span></div>
         <div style="margin-top:4px;">🌍 Blocks mined: <span id="blocks">0</span></div>
         <div>🗺️ <span id="biome">Plains</span> | <span id="phase">🌞 Day</span></div>
         <div>🐕 Pets: <span id="pets">0</span> | 🐮 Animals: <span id="animals">0</span></div>
@@ -291,14 +292,14 @@
                 mouseY: 0,
                 diamonds: 0,
                 // Gathered materials used for crafting (not a score!).
-                resources: { coal: 0, iron: 0, gold: 0, netherite: 0, flint: 0, obsidian: 0 },
+                resources: { coal: 0, copper: 0, iron: 0, gold: 0, netherite: 0, flint: 0, obsidian: 0 },
                 // Crafted placeable blocks you can build with.
                 crafted: { glass: 0, door: 0, bed: 0, furnace: 0,
                     oak_planks: 0, birch_planks: 0, spruce_planks: 0, jungle_planks: 0,
                     acacia_planks: 0, dark_oak_planks: 0, mangrove_planks: 0,
                     cherry_planks: 0, bamboo_planks: 0 },
                 // Crafted gear / upgrades.
-                gear: { armor: false, swordTier: 1, hasBed: false, flintSteel: false },
+                gear: { armorTier: 0, swordTier: 1, hasBed: false, flintSteel: false },
                 // Which block right-click places (cycle with B).
                 buildBlock: 'stone',
                 craftOpen: false,
@@ -684,7 +685,7 @@
 
                 hurtPlayer(amount) {
                     if (gameState.player.inVehicle) return;
-                    gameState.player.health -= gameState.gear.armor ? amount * 0.5 : amount;
+                    gameState.player.health -= amount * (ARMOR_REDUCTION[gameState.gear.armorTier] ?? 1);
                     updateUI();
                 }
 
@@ -1252,8 +1253,12 @@
             // (slot 1), and the ore resources. Each gives a placeable block or
             // a gear upgrade.
             // Sword tiers: 1 wood (start) → 6 netherite. Higher = more damage.
-            const SWORD_DAMAGE = { 1: 5, 2: 6, 3: 8, 4: 9, 5: 11, 6: 13 };
-            const SWORD_NAME = { 1: 'Wood', 2: 'Stone', 3: 'Iron', 4: 'Gold', 5: 'Diamond', 6: 'Netherite' };
+            // Sword tiers 1-7: wood, stone, copper, iron, gold, diamond, netherite.
+            const SWORD_DAMAGE = { 1: 5, 2: 6, 3: 7, 4: 8, 5: 9, 6: 11, 7: 13 };
+            const SWORD_NAME = { 1: 'Wood', 2: 'Stone', 3: 'Copper', 4: 'Iron', 5: 'Gold', 6: 'Diamond', 7: 'Netherite' };
+            // Armor tiers 0-7: 0 = none. Value = fraction of damage you still take.
+            const ARMOR_REDUCTION = { 0: 1, 1: 0.85, 2: 0.78, 3: 0.70, 4: 0.60, 5: 0.50, 6: 0.40, 7: 0.30 };
+            const ARMOR_NAME = { 1: 'Wood', 2: 'Stone', 3: 'Copper', 4: 'Iron', 5: 'Gold', 6: 'Diamond', 7: 'Netherite' };
             // Crafted-block name -> BLOCKS key (for planks + other placeables).
             const PLANK_BLOCK = {
                 oak_planks: 'OAK_PLANKS', birch_planks: 'BIRCH_PLANKS', spruce_planks: 'SPRUCE_PLANKS',
@@ -1277,12 +1282,21 @@
                 planks_cherry:   { name: '🪵 Cherry Planks',   cost: { wood: 1 }, block: 'cherry_planks',   count: 4 },
                 planks_bamboo:   { name: '🪵 Bamboo Planks',   cost: { wood: 1 }, block: 'bamboo_planks',   count: 4 },
                 // Swords — each tier is stronger than the last.
+                sword_wood:      { name: '🗡️ Wood Sword',      cost: { wood: 2 },      swordTier: 1 },
                 sword_stone:     { name: '🗡️ Stone Sword',     cost: { stone: 2 },     swordTier: 2 },
-                sword_iron:      { name: '⚔️ Iron Sword',      cost: { iron: 2 },      swordTier: 3 },
-                sword_gold:      { name: '⚔️ Gold Sword',      cost: { gold: 2 },      swordTier: 4 },
-                sword_diamond:   { name: '💎 Diamond Sword',   cost: { diamond: 2 },   swordTier: 5 },
-                sword_netherite: { name: '🟪 Netherite Sword', cost: { netherite: 2 }, swordTier: 6 },
-                armor:   { name: '🛡️ Iron Armor (half damage)', cost: { iron: 5 }, gear: 'armor' },
+                sword_copper:    { name: '⚔️ Copper Sword',    cost: { copper: 2 },    swordTier: 3 },
+                sword_iron:      { name: '⚔️ Iron Sword',      cost: { iron: 2 },      swordTier: 4 },
+                sword_gold:      { name: '⚔️ Gold Sword',      cost: { gold: 2 },      swordTier: 5 },
+                sword_diamond:   { name: '💎 Diamond Sword',   cost: { diamond: 2 },   swordTier: 6 },
+                sword_netherite: { name: '🟪 Netherite Sword', cost: { netherite: 2 }, swordTier: 7 },
+                // Armor — each tier blocks more damage.
+                armor_wood:      { name: '🛡️ Wood Armor',      cost: { wood: 5 },      armorTier: 1 },
+                armor_stone:     { name: '🛡️ Stone Armor',     cost: { stone: 5 },     armorTier: 2 },
+                armor_copper:    { name: '🛡️ Copper Armor',    cost: { copper: 5 },    armorTier: 3 },
+                armor_iron:      { name: '🛡️ Iron Armor',      cost: { iron: 5 },      armorTier: 4 },
+                armor_gold:      { name: '🛡️ Gold Armor',      cost: { gold: 5 },      armorTier: 5 },
+                armor_diamond:   { name: '🛡️ Diamond Armor',   cost: { diamond: 5 },   armorTier: 6 },
+                armor_netherite: { name: '🛡️ Netherite Armor', cost: { netherite: 5 }, armorTier: 7 },
                 flintsteel: { name: '🔧 Flint & Steel (light a Nether portal)', cost: { iron: 1, flint: 1 }, gear: 'flintsteel' },
             };
 
@@ -1310,8 +1324,8 @@
                 for (const [mat, amt] of Object.entries(r.cost)) {
                     if (getMat(mat) < amt) { flashCraftMsg('Need more ' + mat + '!'); return; }
                 }
-                // Don't re-craft gear you already have.
-                if (r.gear === 'armor' && gameState.gear.armor) { flashCraftMsg('Already wearing armor!'); return; }
+                // Don't re-craft gear you already have at the same or better tier.
+                if (r.armorTier && gameState.gear.armorTier >= r.armorTier) { flashCraftMsg('You already have equal or better armor!'); return; }
                 if (r.swordTier && gameState.gear.swordTier >= r.swordTier) { flashCraftMsg('You already have an equal or better sword!'); return; }
                 if (r.gear === 'flintsteel' && gameState.gear.flintSteel) { flashCraftMsg('You already have flint & steel!'); return; }
 
@@ -1322,7 +1336,7 @@
                     flashCraftMsg('Crafted ' + r.name + '!');
                 }
                 if (r.swordTier) { gameState.gear.swordTier = r.swordTier; flashCraftMsg(SWORD_NAME[r.swordTier] + ' sword equipped!'); }
-                if (r.gear === 'armor') { gameState.gear.armor = true; flashCraftMsg('Armor equipped!'); }
+                if (r.armorTier) { gameState.gear.armorTier = r.armorTier; flashCraftMsg(ARMOR_NAME[r.armorTier] + ' armor equipped!'); }
                 if (r.gear === 'flintsteel') { gameState.gear.flintSteel = true; flashCraftMsg('Flint & Steel ready! Press N near 10 obsidian.'); }
                 updateUI();
                 renderCraftMenu();
@@ -1339,7 +1353,7 @@
                     const affordable = Object.entries(r.cost).every(([m, a]) => getMat(m) >= a);
                     let have = '';
                     if (r.block) have = ` (have ${gameState.crafted[r.block]})`;
-                    else if (r.gear === 'armor' && gameState.gear.armor) have = ' ✅';
+                    else if (r.armorTier && gameState.gear.armorTier >= r.armorTier) have = ' ✅';
                     else if (r.swordTier && gameState.gear.swordTier >= r.swordTier) have = ' ✅';
                     else if (r.gear === 'flintsteel' && gameState.gear.flintSteel) have = ' ✅';
                     const btn = document.createElement('button');
@@ -1566,12 +1580,12 @@
                 gameState.tick = 0;
                 gameState.blocksMinedTotal = 0;
                 gameState.diamonds = 0;
-                gameState.resources = { coal: 0, iron: 0, gold: 0, netherite: 0, flint: 0, obsidian: 0 };
+                gameState.resources = { coal: 0, copper: 0, iron: 0, gold: 0, netherite: 0, flint: 0, obsidian: 0 };
                 gameState.crafted = { glass: 0, door: 0, bed: 0, furnace: 0,
                     oak_planks: 0, birch_planks: 0, spruce_planks: 0, jungle_planks: 0,
                     acacia_planks: 0, dark_oak_planks: 0, mangrove_planks: 0,
                     cherry_planks: 0, bamboo_planks: 0 };
-                gameState.gear = { armor: false, swordTier: 1, hasBed: false, flintSteel: false };
+                gameState.gear = { armorTier: 0, swordTier: 1, hasBed: false, flintSteel: false };
                 gameState.buildBlock = 'stone';
                 gameState.dimension = 'overworld';
                 gameState.overworldWorld = null;
@@ -1808,7 +1822,7 @@
                     const bodyGX = Math.floor(gameState.player.x / BLOCK_SIZE);
                     const bodyGY = Math.floor((gameState.player.y - 20) / BLOCK_SIZE);
                     if (blockBelow === BLOCKS.LAVA || getBlock(bodyGX, bodyGY) === BLOCKS.LAVA) {
-                        gameState.player.health = Math.max(0, gameState.player.health - (gameState.gear.armor ? 0.15 : 0.3));
+                        gameState.player.health = Math.max(0, gameState.player.health - 0.3 * (ARMOR_REDUCTION[gameState.gear.armorTier] ?? 1));
                     }
 
                     // Step near a portal's glow to travel between dimensions.
@@ -1949,6 +1963,7 @@
                     document.getElementById('diamond').textContent = gameState.diamonds;
                     const res = gameState.resources;
                     document.getElementById('coal').textContent = res.coal;
+                    document.getElementById('copper').textContent = res.copper;
                     document.getElementById('iron').textContent = res.iron;
                     document.getElementById('gold').textContent = res.gold;
                     document.getElementById('netherite').textContent = res.netherite;
@@ -1968,7 +1983,7 @@
                                     gameState.crafted[bb];
                     document.getElementById('buildBlock').textContent = bbLabel + ' ×' + bbCount;
                     const gear = [];
-                    if (gameState.gear.armor) gear.push('🛡️ Armor');
+                    if (gameState.gear.armorTier > 0) gear.push('🛡️ ' + ARMOR_NAME[gameState.gear.armorTier] + ' Armor');
                     if (gameState.gear.swordTier > 1) gear.push('⚔️ ' + SWORD_NAME[gameState.gear.swordTier] + ' Sword');
                     if (gameState.gear.hasBed) gear.push('🛏️ Bed (K to sleep)');
                     if (gameState.gear.flintSteel) gear.push('🔧 Flint & Steel (N)');
