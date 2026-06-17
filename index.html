@@ -151,7 +151,7 @@
         <div style="margin-left:8px;">🔥 <span id="flint">0</span> flint</div>
         <div style="margin-top:4px;">🌍 Blocks mined: <span id="blocks">0</span></div>
         <div>🗺️ <span id="biome">Plains</span> | <span id="phase">🌞 Day</span></div>
-        <div>🐕 Pets: <span id="pets">0</span></div>
+        <div>🐕 Pets: <span id="pets">0</span> | 🐮 Animals: <span id="animals">0</span></div>
     </div>
     
     <div id="inventory">
@@ -266,6 +266,7 @@
                 },
                 pets: [],
                 mobs: [],
+                animals: [],
                 particles: [],
                 gameStarted: false,
                 mouseX: 0,
@@ -663,6 +664,137 @@
                 }
             }
             
+            // Passive Animal class — peaceful critters that wander the world.
+            // They never chase or hurt the player; when hit they drop food.
+            class Animal {
+                constructor(type, x, y) {
+                    this.type = type;           // 'pig' | 'cow' | 'sheep' | 'chicken'
+                    this.x = x;
+                    this.y = y;
+                    this.vx = 0;
+                    this.vy = 0;
+                    this.width = 24;
+                    this.height = 20;
+                    this.health = 8;
+                    this.onGround = false;
+                    this.direction = Math.random() > 0.5 ? 1 : -1;
+                    this.facing = this.direction;
+                    this.wanderTimer = 0;
+                }
+
+                update() {
+                    try {
+                        // Wander: occasionally pause or pick a new direction.
+                        this.wanderTimer--;
+                        if (this.wanderTimer <= 0) {
+                            const roll = Math.random();
+                            this.direction = roll < 0.35 ? 0 : (Math.random() > 0.5 ? 1 : -1);
+                            this.wanderTimer = 60 + Math.floor(Math.random() * 120);
+                        }
+                        if (this.direction !== 0) this.facing = this.direction;
+                        this.vx = this.direction * 1.0;
+
+                        this.vy += 0.5;
+                        this.x += this.vx;
+                        this.y += this.vy;
+
+                        const footOffset = 0;
+                        const gridX = Math.floor(this.x / BLOCK_SIZE);
+                        const gridY = Math.floor((this.y + footOffset) / BLOCK_SIZE);
+                        const blockBelow = getBlock(gridX, gridY);
+                        const snap = CL.computeCollisionSnap(this.y, this.vy, footOffset, gridY, blockBelow !== BLOCKS.AIR);
+                        this.y = snap.y;
+                        this.vy = snap.vy;
+                        this.onGround = snap.onGround;
+
+                        // Hop over a block directly ahead.
+                        if (snap.onGround && this.direction !== 0) {
+                            const frontX = Math.floor((this.x + this.direction * 16) / BLOCK_SIZE);
+                            const ahead = getBlock(frontX, gridY - 1);
+                            if (ahead !== BLOCKS.AIR && ahead !== BLOCKS.WATER) {
+                                this.vy = -7;
+                            }
+                        }
+
+                        this.x = Math.max(0, Math.min((WORLD_WIDTH - 1) * BLOCK_SIZE, this.x));
+                    } catch (error) {
+                        console.error("Error updating animal:", error);
+                    }
+                }
+
+                draw() {
+                    try {
+                        const sx = Math.floor(this.x - gameState.camera.x);
+                        const sy = Math.floor(this.y - gameState.camera.y);
+                        const f = this.facing || 1;
+                        const bodyColors = { pig: '#EA9AB2', cow: '#F2F2F2', sheep: '#EFEFEF', chicken: '#FFFFFF' };
+                        ctx.fillStyle = bodyColors[this.type] || '#CFCFCF';
+
+                        if (this.type === 'chicken') {
+                            ctx.fillRect(sx - 8, sy - 12, 16, 8);          // body
+                            ctx.fillRect(sx + f * 6, sy - 18, 6, 6);       // head
+                            ctx.fillStyle = '#E53935';
+                            ctx.fillRect(sx + f * 7, sy - 20, 4, 2);       // comb
+                            ctx.fillStyle = '#FFC107';
+                            ctx.fillRect(sx + f * 11, sy - 15, 3, 2);      // beak
+                            ctx.fillRect(sx - 4, sy - 4, 2, 4);            // legs
+                            ctx.fillRect(sx + 3, sy - 4, 2, 4);
+                            ctx.fillStyle = '#000';
+                            ctx.fillRect(sx + f * 8, sy - 16, 1, 1);       // eye
+                        } else {
+                            ctx.fillRect(sx - 14, sy - 16, 28, 12);        // body
+                            ctx.fillRect(sx + f * 10, sy - 20, 11, 11);    // head
+                            ctx.fillStyle = '#9A8A7A';
+                            ctx.fillRect(sx - 12, sy - 4, 4, 4);           // legs
+                            ctx.fillRect(sx - 4, sy - 4, 4, 4);
+                            ctx.fillRect(sx + 4, sy - 4, 4, 4);
+                            ctx.fillRect(sx + 10, sy - 4, 4, 4);
+                            if (this.type === 'pig') {
+                                ctx.fillStyle = '#D87C98';
+                                ctx.fillRect(sx + f * 16, sy - 15, 4, 4);  // snout
+                            } else if (this.type === 'cow') {
+                                ctx.fillStyle = '#3A3A3A';
+                                ctx.fillRect(sx - 8, sy - 14, 6, 5);       // spots
+                                ctx.fillRect(sx + 3, sy - 12, 5, 5);
+                            } else if (this.type === 'sheep') {
+                                ctx.fillStyle = '#FFFFFF';
+                                ctx.fillRect(sx - 15, sy - 19, 30, 6);     // fluffy top
+                                ctx.fillStyle = '#E8C9A0';
+                                ctx.fillRect(sx + f * 12, sy - 18, 7, 8);  // face
+                            }
+                            ctx.fillStyle = '#000';
+                            ctx.fillRect(sx + f * 14, sy - 17, 2, 2);      // eye
+                        }
+                    } catch (error) {
+                        console.error("Error drawing animal:", error);
+                    }
+                }
+            }
+
+            // Spawn a random animal on the surface near the edge of the screen.
+            function spawnAnimal(nearPlayer) {
+                try {
+                    const types = ['pig', 'cow', 'sheep', 'chicken'];
+                    const type = types[Math.floor(Math.random() * types.length)];
+                    const side = Math.random() > 0.5 ? 1 : -1;
+                    const offset = nearPlayer ? side * (80 + Math.random() * 120)
+                                              : side * (canvas.width / 2 + 60);
+                    const col = Math.floor((gameState.player.x + offset) / BLOCK_SIZE);
+                    if (col < 0 || col >= WORLD_WIDTH) return;
+                    for (let y = 0; y < WORLD_HEIGHT - 1; y++) {
+                        const here = getBlock(col, y);
+                        const below = getBlock(col, y + 1);
+                        if (here === BLOCKS.AIR && below !== BLOCKS.AIR &&
+                            below !== BLOCKS.WATER && below !== BLOCKS.LAVA) {
+                            gameState.animals.push(new Animal(type, col * BLOCK_SIZE, y * BLOCK_SIZE));
+                            return;
+                        }
+                    }
+                } catch (error) {
+                    console.error("Error spawning animal:", error);
+                }
+            }
+
             window.selectCharacter = function(character) {
                 gameState.player.character = character;
             }
@@ -716,6 +848,10 @@
                     // for night (Bug 4). The first nightfall populates them.
                     gameState.mobs = [];
 
+                    // Animals greet you right away so the world feels alive.
+                    gameState.animals = [];
+                    for (let i = 0; i < 4; i++) spawnAnimal(true);
+
                     gameLoop();
                 } catch (error) {
                     console.error("Error starting game:", error);
@@ -735,6 +871,7 @@
                 gameState.player.miningProgress = 0;
                 gameState.player.miningBlock = null;
                 gameState.mobs = [];
+                gameState.animals = [];
                 gameState.tick = 0;
                 gameState.blocksMinedTotal = 0;
                 gameState.diamonds = 0;
@@ -769,10 +906,11 @@
                     gameState.player.x = (WORLD_WIDTH / 2) * BLOCK_SIZE;
                     gameState.player.y = 100;
                 }
+                for (let i = 0; i < 4; i++) spawnAnimal(true);
                 updateUI();
                 gameLoop();
             }
-            
+
             // Input handling
             const keys = {};
             let mouseDown = false;
@@ -850,6 +988,15 @@
                             if (dist < 60) {
                                 mob.health -= 5;
                                 if (dist > 0) mob.x += (dx / dist) * 12;
+                            }
+                        });
+                        gameState.animals.forEach(a => {
+                            const dx = a.x - gameState.player.x;
+                            const dy = a.y - gameState.player.y;
+                            const dist = Math.sqrt(dx * dx + dy * dy);
+                            if (dist < 60) {
+                                a.health -= 5;
+                                if (dist > 0) a.x += (dx / dist) * 10;
                             }
                         });
                     }
@@ -1042,6 +1189,7 @@
                     document.getElementById('stone').textContent = gameState.inventory.items[0].count;
                     document.getElementById('blocks').textContent = gameState.blocksMinedTotal;
                     document.getElementById('pets').textContent = gameState.pets.length;
+                    document.getElementById('animals').textContent = gameState.animals.length;
                     // Bug 6 — biome label updates as the player walks across zones.
                     if (CL) {
                         const playerCol = Math.floor(gameState.player.x / BLOCK_SIZE);
@@ -1216,9 +1364,23 @@
                     
                     gameState.pets.forEach(pet => pet.update());
                     gameState.mobs.forEach(mob => mob.update());
-                    
+                    gameState.animals.forEach(animal => animal.update());
+
+                    // Keep a small herd wandering near the player.
+                    if (gameState.animals.length < 6 && Math.random() < 0.02) {
+                        spawnAnimal(false);
+                    }
+                    // Animals hit down to 0 health drop food, then despawn.
+                    for (const a of gameState.animals) {
+                        if (a.health <= 0) {
+                            gameState.inventory = CL.addToInventory(gameState.inventory, 'food', 2);
+                        }
+                    }
+                    gameState.animals = gameState.animals.filter(a => a.health > 0);
+
                     drawWorld();
-                    
+
+                    gameState.animals.forEach(animal => animal.draw());
                     gameState.mobs.forEach(mob => mob.draw());
                     gameState.pets.forEach(pet => pet.draw());
                     
