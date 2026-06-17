@@ -75,6 +75,8 @@ export const BLOCKS = {
   // Village farm blocks
   FARMLAND: 64,
   WHEAT: 65,
+  // Open door (toggled by right-clicking a door)
+  DOOR_OPEN: 66,
 };
 
 const BLOCK_COLORS = {
@@ -143,6 +145,7 @@ const BLOCK_COLORS = {
   [BLOCKS.BAMBOO_PLANKS]: '#CFC07A',
   [BLOCKS.FARMLAND]: '#6B4A2A',
   [BLOCKS.WHEAT]: '#D9C247',
+  [BLOCKS.DOOR_OPEN]: '#8B5A2B',
 };
 
 export function getBlockColor(block) {

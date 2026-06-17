@@ -324,6 +324,11 @@ SPEED.pickaxe[WHEAT] = 1; SPEED.hand[WHEAT] = 1; SPEED.sword[WHEAT] = 1;
 DROPS[FARMLAND] = { item: 'stone', count: 1 };
 DROPS[WHEAT] = { item: 'food', count: 1 };
 
+// Open door mines like a door.
+const DOOR_OPEN = 66;
+SPEED.pickaxe[DOOR_OPEN] = 1.5; SPEED.hand[DOOR_OPEN] = 1; SPEED.sword[DOOR_OPEN] = 0.5;
+DROPS[DOOR_OPEN] = { item: 'wood', count: 1 };
+
 export function getBlockDrop(blockType) {
   if (!(blockType in DROPS)) return null;
   return DROPS[blockType];
