@@ -965,6 +965,7 @@
                 frog:     { shape: 'small', body: '#5BBF3A', accent: '#2E7D32', feature: 'frog',  drop: 0, size: 0.75, hopper: true, biomes: ['jungle','bamboo_jungle','plains'] },
                 armadillo:{ shape: 'small', body: '#9A7B5A', accent: '#6A4A2A', feature: 'shell', drop: 0, size: 0.85, biomes: ['desert','mountain'] },
                 ocelot:   { shape: 'quad',  body: '#E0C060', accent: '#5A4A20', feature: 'spots', drop: 0, size: 0.85, biomes: ['jungle','bamboo_jungle'] },
+                villager: { shape: 'villager', body: '#C9A37A', accent: '#6E4A8A', drop: 0, size: 1, biomes: ['plains','forest','flower_forest','desert'] },
             };
             const DEFAULT_ANIMALS = ['pig', 'cow', 'sheep', 'chicken', 'rabbit'];
 
@@ -1094,6 +1095,24 @@
                             return;
                         }
 
+                        if (def.shape === 'villager') {
+                            ctx.fillStyle = def.body;
+                            ctx.fillRect(sx - 6, sy - 34, 12, 12);          // head
+                            ctx.fillStyle = '#000';
+                            ctx.fillRect(sx - 4, sy - 29, 3, 2);            // eyes
+                            ctx.fillRect(sx + 1, sy - 29, 3, 2);
+                            ctx.fillStyle = '#B98A63';
+                            ctx.fillRect(sx - 2, sy - 28, 4, 7);            // big nose
+                            ctx.fillStyle = def.accent;
+                            ctx.fillRect(sx - 7, sy - 22, 14, 22);          // robe
+                            ctx.fillStyle = '#5A3A72';
+                            ctx.fillRect(sx - 7, sy - 14, 14, 4);           // crossed arms
+                            ctx.fillStyle = '#3A2A18';
+                            ctx.fillRect(sx - 6, sy - 2, 4, 2);             // feet
+                            ctx.fillRect(sx + 2, sy - 2, 4, 2);
+                            return;
+                        }
+
                         // quad — scaled quadruped + per-type feature
                         const s = this.size;
                         const bw = Math.round(28 * s), bh = Math.round(12 * s);
@@ -1160,6 +1179,33 @@
                     }
                 } catch (error) {
                     console.error("Error spawning animal:", error);
+                }
+            }
+
+            // Spawn a specific animal type on the surface at a given column.
+            function spawnAnimalAt(type, col) {
+                try {
+                    if (col < 0 || col >= WORLD_WIDTH) return;
+                    for (let y = 0; y < WORLD_HEIGHT - 1; y++) {
+                        const here = getBlock(col, y);
+                        const below = getBlock(col, y + 1);
+                        if (here === BLOCKS.AIR && below !== BLOCKS.AIR &&
+                            below !== BLOCKS.WATER && below !== BLOCKS.LAVA) {
+                            gameState.animals.push(new Animal(type, col * BLOCK_SIZE, y * BLOCK_SIZE));
+                            return;
+                        }
+                    }
+                } catch (error) {
+                    console.error("Error spawning animal at:", error);
+                }
+            }
+
+            // Populate each village with a couple of wandering villagers.
+            function spawnVillagers() {
+                if (!CL || !CL.getVillagePlan) return;
+                for (const cx of CL.getVillagePlan(gameState.worldSeed)) {
+                    spawnAnimalAt('villager', cx + 3);
+                    spawnAnimalAt('villager', cx + 11);
                 }
             }
 
@@ -1457,6 +1503,7 @@
                     // Animals greet you right away so the world feels alive.
                     gameState.animals = [];
                     for (let i = 0; i < 7; i++) spawnAnimal(true);
+                    spawnVillagers();
 
                     gameLoop();
                 } catch (error) {
@@ -1525,6 +1572,7 @@
                     gameState.player.y = 100;
                 }
                 for (let i = 0; i < 7; i++) spawnAnimal(true);
+                spawnVillagers();
                 updateUI();
                 gameLoop();
             }

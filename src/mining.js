@@ -317,6 +317,13 @@ for (let id = 55; id <= 63; id++) {
   DROPS[id] = { item: 'wood', count: 1 };
 }
 
+// Farm blocks: farmland (64) drops stone-rubble; harvesting wheat (65) gives food.
+const FARMLAND = 64, WHEAT = 65;
+SPEED.pickaxe[FARMLAND] = 1.5; SPEED.hand[FARMLAND] = 1; SPEED.sword[FARMLAND] = 0.5;
+SPEED.pickaxe[WHEAT] = 1; SPEED.hand[WHEAT] = 1; SPEED.sword[WHEAT] = 1;
+DROPS[FARMLAND] = { item: 'stone', count: 1 };
+DROPS[WHEAT] = { item: 'food', count: 1 };
+
 export function getBlockDrop(blockType) {
   if (!(blockType in DROPS)) return null;
   return DROPS[blockType];

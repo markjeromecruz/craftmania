@@ -542,6 +542,64 @@ function placeTree(world, x, groundY, rules, rng) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Villages — a few plank houses + a wheat farm placed on the surface.
+// ---------------------------------------------------------------------------
+export const NUM_VILLAGES = 3;
+
+// Pure: deterministic village center columns, spaced across the world and at
+// least 80 columns from either edge.
+export function getVillagePlan(seed) {
+  const centers = [];
+  const span = WORLD_WIDTH - 160;
+  for (let i = 0; i < NUM_VILLAGES; i++) {
+    const h = hash32(((seed >>> 0) * 2654435761 + i * 1013904223 + 17) >>> 0);
+    centers.push(80 + (h % span));
+  }
+  return centers;
+}
+
+// Build a small plank house (walls + roof + door + window) with its base at groundY.
+function buildHouse(world, x, groundY) {
+  const w = 6, h = 4;
+  const left = x, right = x + w - 1, top = groundY - h;
+  if (left < 0 || right >= WORLD_WIDTH || top < 1) return;
+  for (let c = left; c <= right; c++) {
+    world[c][top] = BLOCKS.OAK_PLANKS;                          // roof
+    for (let r = top + 1; r < groundY; r++) world[c][r] = BLOCKS.AIR; // hollow interior
+  }
+  for (let r = top; r < groundY; r++) {
+    world[left][r] = BLOCKS.OAK_PLANKS;
+    world[right][r] = BLOCKS.OAK_PLANKS;
+  }
+  world[left + 1][groundY - 1] = BLOCKS.DOOR;                   // doorway
+  world[left + 1][groundY - 2] = BLOCKS.AIR;
+  world[right - 1][groundY - 2] = BLOCKS.GLASS;                 // window
+}
+
+// Build a short wheat farm, tilling each column at its own surface height.
+function buildFarm(world, x, surfaceY) {
+  for (let c = x; c < x + 5; c++) {
+    if (c < 0 || c >= WORLD_WIDTH) continue;
+    const gy = surfaceY[c];
+    world[c][gy] = BLOCKS.FARMLAND;
+    if (gy - 1 >= 0 && world[c][gy - 1] === BLOCKS.AIR) {
+      world[c][gy - 1] = BLOCKS.WHEAT;
+    }
+  }
+}
+
+// Build all villages into the world. Deterministic (no rng).
+export function buildVillages(world, seed, surfaceY) {
+  for (const cx of getVillagePlan(seed)) {
+    if (cx < 5 || cx + 20 >= WORLD_WIDTH) continue;
+    const gy = surfaceY[cx];
+    buildHouse(world, cx, gy);
+    buildHouse(world, cx + 8, surfaceY[cx + 8] ?? gy);
+    buildFarm(world, cx + 15, surfaceY);
+  }
+}
+
 // MAIN. Builds and returns a 2D array world[x][y] of block IDs.
 // Deterministic given the seed.
 export function generateWorld(seed) {
@@ -629,6 +687,9 @@ export function generateWorld(seed) {
       placeTree(world, x, surfaceY[x], rules, rng);
     }
   }
+
+  // Villages last, so houses sit cleanly on top of the finished terrain.
+  buildVillages(world, seed, surfaceY);
 
   return world;
 }

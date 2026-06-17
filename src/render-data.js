@@ -72,6 +72,9 @@ export const BLOCKS = {
   MANGROVE_PLANKS: 61,
   CHERRY_PLANKS: 62,
   BAMBOO_PLANKS: 63,
+  // Village farm blocks
+  FARMLAND: 64,
+  WHEAT: 65,
 };
 
 const BLOCK_COLORS = {
@@ -138,6 +141,8 @@ const BLOCK_COLORS = {
   [BLOCKS.MANGROVE_PLANKS]: '#7A3B3B',
   [BLOCKS.CHERRY_PLANKS]: '#E0A6B8',
   [BLOCKS.BAMBOO_PLANKS]: '#CFC07A',
+  [BLOCKS.FARMLAND]: '#6B4A2A',
+  [BLOCKS.WHEAT]: '#D9C247',
 };
 
 export function getBlockColor(block) {

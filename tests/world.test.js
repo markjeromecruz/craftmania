@@ -30,6 +30,8 @@ import {
   RIVER_DEPTH_BELOW,
   getRiverPlan,
   riverColumnRole,
+  NUM_VILLAGES,
+  getVillagePlan,
 } from '../src/world.js';
 
 // Numeric ids for new cave biome blocks (kept local-mirror to match world.js;
@@ -629,6 +631,35 @@ describe('generateWorld with rivers', () => {
       expect(w[x][WORLD_HEIGHT - 1]).toBe(BLOCKS.BEDROCK);
       expect(w[x][0]).toBe(BLOCKS.AIR);
     }
+  });
+});
+
+describe('villages', () => {
+  test('getVillagePlan returns NUM_VILLAGES centers in [80, WORLD_WIDTH-80]', () => {
+    for (const seed of [0, 7, 42, 123]) {
+      const plan = getVillagePlan(seed);
+      expect(plan.length).toBe(NUM_VILLAGES);
+      for (const cx of plan) {
+        expect(cx).toBeGreaterThanOrEqual(80);
+        expect(cx).toBeLessThanOrEqual(WORLD_WIDTH - 80);
+      }
+    }
+  });
+
+  test('is deterministic across calls', () => {
+    expect(JSON.stringify(getVillagePlan(42))).toBe(JSON.stringify(getVillagePlan(42)));
+  });
+
+  test('generateWorld builds at least one house (DOOR + OAK_PLANKS present)', () => {
+    const w = generateWorld(42);
+    let doors = 0, planks = 0;
+    for (let x = 0; x < WORLD_WIDTH; x++)
+      for (let y = 0; y < WORLD_HEIGHT; y++) {
+        if (w[x][y] === BLOCKS.DOOR) doors++;
+        if (w[x][y] === BLOCKS.OAK_PLANKS) planks++;
+      }
+    expect(doors).toBeGreaterThan(0);
+    expect(planks).toBeGreaterThan(0);
   });
 });
 

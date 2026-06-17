@@ -332,6 +332,24 @@ export function drawBlockDetail(ctx, x, y, block, BLOCK_SIZE) {
       ctx.fillRect(x + 24, y + 22, 1, 10);
       break;
 
+    case BLOCKS.FARMLAND:
+      ctx.fillStyle = '#4A3018';
+      ctx.fillRect(x, y + 8, BLOCK_SIZE, 2);
+      ctx.fillRect(x, y + 18, BLOCK_SIZE, 2);
+      ctx.fillRect(x, y + 28, BLOCK_SIZE, 2);
+      break;
+
+    case BLOCKS.WHEAT:
+      ctx.fillStyle = '#9A7B2A';
+      ctx.fillRect(x + 6, y + 8, 2, BLOCK_SIZE - 8);   // stalks
+      ctx.fillRect(x + 14, y + 6, 2, BLOCK_SIZE - 6);
+      ctx.fillRect(x + 22, y + 9, 2, BLOCK_SIZE - 9);
+      ctx.fillStyle = '#F2DA5A';
+      ctx.fillRect(x + 5, y + 6, 4, 4);                // golden heads
+      ctx.fillRect(x + 13, y + 4, 4, 4);
+      ctx.fillRect(x + 21, y + 7, 4, 4);
+      break;
+
     default:
       // No-op for plain blocks (STONE, WOOD, AIR, BEDROCK, DIRT, LEAVES,
       // SAND, WATER, PINE_LEAVES, DARK_OAK_WOOD, SPRUCE_WOOD, JUNGLE_WOOD,
