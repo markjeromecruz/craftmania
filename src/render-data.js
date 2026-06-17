@@ -57,6 +57,11 @@ export const BLOCKS = {
   DOOR: 48,
   BED: 49,
   FURNACE: 50,
+  // Nether dimension blocks
+  PORTAL: 51,
+  NETHERRACK: 52,
+  GLOWSTONE: 53,
+  SOUL_SAND: 54,
 };
 
 const BLOCK_COLORS = {
@@ -110,6 +115,10 @@ const BLOCK_COLORS = {
   [BLOCKS.DOOR]: '#8B5A2B',
   [BLOCKS.BED]: '#D32F2F',
   [BLOCKS.FURNACE]: '#5A5A5A',
+  [BLOCKS.PORTAL]: '#9B30FF',
+  [BLOCKS.NETHERRACK]: '#6E2B2B',
+  [BLOCKS.GLOWSTONE]: '#FFD37A',
+  [BLOCKS.SOUL_SAND]: '#4A3A2A',
 };
 
 export function getBlockColor(block) {

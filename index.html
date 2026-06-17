@@ -200,6 +200,7 @@
         <p>🛠️ C: Crafting</p>
         <p>🧱 B: Switch Build Block</p>
         <p>🛏️ K: Sleep (with bed)</p>
+        <p>🌌 N: Light Nether Portal</p>
         <p>R: Respawn (when dead)</p>
     </div>
     
@@ -293,10 +294,17 @@
                 // Crafted placeable blocks you can build with.
                 crafted: { glass: 0, door: 0, bed: 0, furnace: 0 },
                 // Crafted gear / upgrades.
-                gear: { armor: false, swordTier: 1, hasBed: false },
+                gear: { armor: false, swordTier: 1, hasBed: false, flintSteel: false },
                 // Which block right-click places (cycle with B).
                 buildBlock: 'stone',
                 craftOpen: false,
+                // Nether dimension travel.
+                dimension: 'overworld',
+                overworldWorld: null,
+                netherWorld: null,
+                netherSpawn: null,
+                overworldReturn: null,
+                portalCooldown: 0,
                 // --- Phase 3 additions ---
                 tick: 0,                          // increments each gameLoop frame (day/night)
                 worldSeed: 0,                     // set in startGame; also reused on respawn
@@ -829,6 +837,7 @@
                 furnace: { name: '🔥 Oven (Furnace)', cost: { stone: 8 }, block: 'furnace', count: 1 },
                 sword:   { name: '⚔️ Iron Sword (stronger)', cost: { iron: 2, wood: 1 }, gear: 'sword' },
                 armor:   { name: '🛡️ Iron Armor (half damage)', cost: { iron: 5 }, gear: 'armor' },
+                flintsteel: { name: '🔧 Flint & Steel (light a Nether portal)', cost: { iron: 1, flint: 1 }, gear: 'flintsteel' },
             };
 
             function getMat(name) {
@@ -858,6 +867,7 @@
                 // Don't re-craft gear you already have.
                 if (r.gear === 'armor' && gameState.gear.armor) { flashCraftMsg('Already wearing armor!'); return; }
                 if (r.gear === 'sword' && gameState.gear.swordTier > 1) { flashCraftMsg('Sword already upgraded!'); return; }
+                if (r.gear === 'flintsteel' && gameState.gear.flintSteel) { flashCraftMsg('You already have flint & steel!'); return; }
 
                 for (const [mat, amt] of Object.entries(r.cost)) spendMat(mat, amt);
                 if (r.block) {
@@ -867,6 +877,7 @@
                 }
                 if (r.gear === 'armor') { gameState.gear.armor = true; flashCraftMsg('Armor equipped!'); }
                 if (r.gear === 'sword') { gameState.gear.swordTier = 2; flashCraftMsg('Sword upgraded!'); }
+                if (r.gear === 'flintsteel') { gameState.gear.flintSteel = true; flashCraftMsg('Flint & Steel ready! Press N near 10 obsidian.'); }
                 updateUI();
                 renderCraftMenu();
             }
@@ -882,6 +893,7 @@
                     if (r.block) have = ` (have ${gameState.crafted[r.block]})`;
                     else if (r.gear === 'armor' && gameState.gear.armor) have = ' ✅';
                     else if (r.gear === 'sword' && gameState.gear.swordTier > 1) have = ' ✅';
+                    else if (r.gear === 'flintsteel' && gameState.gear.flintSteel) have = ' ✅';
                     const btn = document.createElement('button');
                     btn.textContent = `${r.name} — ${costStr}${have}`;
                     btn.style.cssText = 'display:block; width:100%; margin:4px 0; text-align:left; font-size:14px;';
@@ -906,14 +918,17 @@
                     case 'door': return BLOCKS.DOOR;
                     case 'bed': return BLOCKS.BED;
                     case 'furnace': return BLOCKS.FURNACE;
+                    case 'obsidian': return BLOCKS.OBSIDIAN;
                     default: return BLOCKS.STONE;
                 }
             }
 
             // Cycle the build block among stone + any crafted blocks you have.
             function cycleBuildBlock() {
-                const options = ['stone', 'glass', 'door', 'bed', 'furnace'].filter(o =>
-                    o === 'stone' ? gameState.inventory.items[0].count > 0 : gameState.crafted[o] > 0
+                const options = ['stone', 'obsidian', 'glass', 'door', 'bed', 'furnace'].filter(o =>
+                    o === 'stone' ? gameState.inventory.items[0].count > 0 :
+                    o === 'obsidian' ? gameState.resources.obsidian > 0 :
+                    gameState.crafted[o] > 0
                 );
                 if (options.length === 0) options.push('stone');
                 const idx = options.indexOf(gameState.buildBlock);
@@ -930,6 +945,86 @@
                     gameState.mobs = []; // dawn clears the zombies
                     updateUI();
                 }
+            }
+
+            // --- Nether portals -----------------------------------------------
+            // Build a 3-wide x 4-tall obsidian frame with a 1x2 PORTAL interior,
+            // with the interior bottom at the given foot row (so it's walkable).
+            function buildPortalFrame(c, footRow) {
+                const bottom = footRow + 1, top = footRow - 2;
+                for (let dx = 0; dx < 3; dx++) {
+                    setBlock(c + dx, bottom, BLOCKS.OBSIDIAN);
+                    setBlock(c + dx, top, BLOCKS.OBSIDIAN);
+                }
+                for (let row = top; row <= bottom; row++) {
+                    setBlock(c, row, BLOCKS.OBSIDIAN);
+                    setBlock(c + 2, row, BLOCKS.OBSIDIAN);
+                }
+                setBlock(c + 1, footRow, BLOCKS.PORTAL);      // feet level
+                setBlock(c + 1, footRow - 1, BLOCKS.PORTAL);  // body level
+            }
+
+            // Light a nether portal next to the player (needs flint & steel + obsidian).
+            function makePortal() {
+                if (gameState.dimension !== 'overworld') return;
+                if (!gameState.gear.flintSteel) { showError('Craft Flint & Steel first (press C)!'); return; }
+                if (gameState.resources.obsidian < 10) { showError('Need 10 obsidian to build a portal!'); return; }
+                gameState.resources.obsidian -= 10;
+                const footRow = Math.floor(gameState.player.y / BLOCK_SIZE);
+                const baseCol = Math.floor(gameState.player.x / BLOCK_SIZE) + 2;
+                buildPortalFrame(baseCol, footRow);
+                showError('✨ Nether portal lit! Walk into the purple glow.');
+                updateUI();
+            }
+
+            // Find a safe stand-on-ground spawn in the current gameState.world.
+            function findSpawnIn() {
+                const mid = Math.floor(WORLD_WIDTH / 2);
+                for (let x = mid - 10; x < mid + 10; x++) {
+                    for (let y = 0; y < WORLD_HEIGHT - 1; y++) {
+                        const below = getBlock(x, y + 1);
+                        if (getBlock(x, y) === BLOCKS.AIR && below !== BLOCKS.AIR &&
+                            below !== BLOCKS.LAVA && below !== BLOCKS.PORTAL) {
+                            return { x: x * BLOCK_SIZE, y: (y + 1) * BLOCK_SIZE - 4 };
+                        }
+                    }
+                }
+                return { x: mid * BLOCK_SIZE, y: 100 };
+            }
+
+            // Walk into a PORTAL block to travel between the overworld and nether.
+            function travelThroughPortal() {
+                gameState.portalCooldown = 150;
+                gameState.mobs = [];
+                if (gameState.dimension === 'overworld') {
+                    gameState.overworldWorld = gameState.world;
+                    gameState.overworldReturn = { x: gameState.player.x, y: gameState.player.y };
+                    if (!gameState.netherWorld) {
+                        gameState.netherWorld = CL.generateNether(gameState.worldSeed);
+                        gameState.world = gameState.netherWorld;
+                        const s = findSpawnIn();
+                        gameState.netherSpawn = s;
+                        // a return portal a few tiles right of the nether spawn
+                        buildPortalFrame(Math.floor(s.x / BLOCK_SIZE) + 3,
+                                         Math.floor(s.y / BLOCK_SIZE));
+                    } else {
+                        gameState.world = gameState.netherWorld;
+                    }
+                    gameState.dimension = 'nether';
+                    gameState.animals = [];
+                    const s = gameState.netherSpawn;
+                    gameState.player.x = s.x;
+                    gameState.player.y = s.y;
+                } else {
+                    gameState.netherWorld = gameState.world;
+                    gameState.world = gameState.overworldWorld;
+                    gameState.dimension = 'overworld';
+                    const r = gameState.overworldReturn;
+                    if (r) { gameState.player.x = r.x; gameState.player.y = r.y; }
+                }
+                gameState.player.vx = 0;
+                gameState.player.vy = 0;
+                updateUI();
             }
 
             window.selectCharacter = function(character) {
@@ -1014,8 +1109,14 @@
                 gameState.diamonds = 0;
                 gameState.resources = { coal: 0, iron: 0, gold: 0, netherite: 0, flint: 0, obsidian: 0 };
                 gameState.crafted = { glass: 0, door: 0, bed: 0, furnace: 0 };
-                gameState.gear = { armor: false, swordTier: 1, hasBed: false };
+                gameState.gear = { armor: false, swordTier: 1, hasBed: false, flintSteel: false };
                 gameState.buildBlock = 'stone';
+                gameState.dimension = 'overworld';
+                gameState.overworldWorld = null;
+                gameState.netherWorld = null;
+                gameState.netherSpawn = null;
+                gameState.overworldReturn = null;
+                gameState.portalCooldown = 0;
                 gameState.inventory = {
                     selected: 0,
                     items: [
@@ -1101,6 +1202,10 @@
 
                 if (e.key === 'k' || e.key === 'K') {
                     trySleep();
+                }
+
+                if (e.key === 'n' || e.key === 'N') {
+                    makePortal();
                 }
 
                 if (e.key === 'p' || e.key === 'P') {
@@ -1225,6 +1330,21 @@
                         gameState.player.health = Math.max(0, gameState.player.health - (gameState.gear.armor ? 0.15 : 0.3));
                     }
 
+                    // Step near a portal's glow to travel between dimensions.
+                    if (gameState.portalCooldown > 0) {
+                        gameState.portalCooldown--;
+                    } else {
+                        const pgx = Math.floor(gameState.player.x / BLOCK_SIZE);
+                        const pgy = Math.floor((gameState.player.y - 16) / BLOCK_SIZE);
+                        let touchingPortal = false;
+                        for (let dx = -2; dx <= 2 && !touchingPortal; dx++) {
+                            for (let dy = -2; dy <= 1 && !touchingPortal; dy++) {
+                                if (getBlock(pgx + dx, pgy + dy) === BLOCKS.PORTAL) touchingPortal = true;
+                            }
+                        }
+                        if (touchingPortal) travelThroughPortal();
+                    }
+
                     gameState.player.x = Math.max(0, Math.min((WORLD_WIDTH - 1) * BLOCK_SIZE, gameState.player.x));
                     
                     // Mining/Building — bug 7 (collect drops), bug 8 (sword can't mine),
@@ -1295,6 +1415,12 @@
                                         gameState.inventory.items[0].count--;
                                         updateUI();
                                     }
+                                } else if (bb === 'obsidian') {
+                                    if (gameState.resources.obsidian > 0) {
+                                        setBlock(blockX, blockY, BLOCKS.OBSIDIAN);
+                                        gameState.resources.obsidian--;
+                                        updateUI();
+                                    }
                                 } else if (gameState.crafted[bb] > 0) {
                                     setBlock(blockX, blockY, buildBlockId(bb));
                                     gameState.crafted[bb]--;
@@ -1356,22 +1482,29 @@
                     // Build block + gear status.
                     const bb = gameState.buildBlock;
                     const bbLabel = bb.charAt(0).toUpperCase() + bb.slice(1);
-                    const bbCount = bb === 'stone' ? gameState.inventory.items[0].count : gameState.crafted[bb];
+                    const bbCount = bb === 'stone' ? gameState.inventory.items[0].count :
+                                    bb === 'obsidian' ? gameState.resources.obsidian :
+                                    gameState.crafted[bb];
                     document.getElementById('buildBlock').textContent = bbLabel + ' ×' + bbCount;
                     const gear = [];
                     if (gameState.gear.armor) gear.push('🛡️ Armor');
                     if (gameState.gear.swordTier > 1) gear.push('⚔️ Iron Sword');
                     if (gameState.gear.hasBed) gear.push('🛏️ Bed (K to sleep)');
+                    if (gameState.gear.flintSteel) gear.push('🔧 Flint & Steel (N)');
                     document.getElementById('gearLine').textContent = gear.join(' · ');
                     // Bug 6 — biome label updates as the player walks across zones.
-                    if (CL) {
+                    if (gameState.dimension === 'nether') {
+                        document.getElementById('biome').textContent = 'The Nether 🔥';
+                    } else if (CL) {
                         const playerCol = Math.floor(gameState.player.x / BLOCK_SIZE);
                         const biome = CL.getBiomeAt(playerCol, gameState.worldSeed);
                         document.getElementById('biome').textContent =
                             biome.charAt(0).toUpperCase() + biome.slice(1);
                     }
                     // Bug 4 — phase indicator (🌞 Day / 🌅 Sunset / 🌙 Night / 🌄 Sunrise).
-                    if (gameState.tod) {
+                    if (gameState.dimension === 'nether') {
+                        document.getElementById('phase').textContent = '🔥 Hot';
+                    } else if (gameState.tod) {
                         const phaseLabels = {
                             day: '🌞 Day',
                             sunset: '🌅 Sunset',
@@ -1526,12 +1659,15 @@
                     const tod = CL.getTimeOfDay(gameState.tick);
                     gameState.tod = tod;
 
-                    // Bug 4 — sky color follows the time-of-day curve.
-                    ctx.fillStyle = tod.skyColor;
+                    // Sky: dark red haze in the nether, else the time-of-day color.
+                    const inNether = gameState.dimension === 'nether';
+                    ctx.fillStyle = inNether ? '#2A0A0A' : tod.skyColor;
                     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-                    drawStars(tod);
-                    drawCelestialBody(tod);
+                    if (!inNether) {
+                        drawStars(tod);
+                        drawCelestialBody(tod);
+                    }
 
                     updatePlayer();
                     

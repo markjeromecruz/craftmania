@@ -30,6 +30,8 @@ const COAL_ORE = 41, IRON_ORE = 42, GOLD_ORE = 43, NETHERITE_ORE = 44,
       LAVA = 45, OBSIDIAN = 46;
 // Craftable placeable block ids (47-50).
 const GLASS = 47, DOOR = 48, BED = 49, FURNACE = 50;
+// Nether block ids (51-54).
+const PORTAL = 51, NETHERRACK = 52, GLOWSTONE = 53, SOUL_SAND = 54;
 
 // Inventory slot layout from index.html ~256-261:
 //   0 stone (placed), 1 wood (placed), 2 pickaxe, 3 sword, 4 food
@@ -99,6 +101,10 @@ const SPEED = {
     [DOOR]: 1.5,
     [BED]: 1.5,
     [FURNACE]: 1.5,
+    // Nether blocks
+    [NETHERRACK]: 1.5,
+    [GLOWSTONE]: 1,
+    [SOUL_SAND]: 1,
   },
   hand: {
     [BLOCKS.STONE]: 0.5,
@@ -150,6 +156,9 @@ const SPEED = {
     [DOOR]: 1,
     [BED]: 1,
     [FURNACE]: 0.5,
+    [NETHERRACK]: 0.8,
+    [GLOWSTONE]: 0.5,
+    [SOUL_SAND]: 1,
   },
   sword: {
     [BLOCKS.STONE]: 0.5,
@@ -200,6 +209,9 @@ const SPEED = {
     [DOOR]: 0.5,
     [BED]: 0.5,
     [FURNACE]: 0.5,
+    [NETHERRACK]: 0.5,
+    [GLOWSTONE]: 0.5,
+    [SOUL_SAND]: 0.5,
   },
 };
 
@@ -209,7 +221,8 @@ export function getMiningSpeed(tool, blockType) {
     blockType === BLOCKS.BEDROCK ||
     blockType === BLOCKS.AIR ||
     blockType === BLOCKS.WATER ||
-    blockType === LAVA
+    blockType === LAVA ||
+    blockType === PORTAL
   ) {
     return 0;
   }
@@ -289,6 +302,11 @@ const DROPS = {
   [DOOR]: { item: 'wood', count: 1 },
   [BED]: { item: 'wood', count: 1 },
   [FURNACE]: { item: 'stone', count: 1 },
+  // Nether blocks
+  [NETHERRACK]: { item: 'stone', count: 1 },
+  [GLOWSTONE]: null,
+  [SOUL_SAND]: { item: 'stone', count: 1 },
+  [PORTAL]: null,
 };
 
 export function getBlockDrop(blockType) {

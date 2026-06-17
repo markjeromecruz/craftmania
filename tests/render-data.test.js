@@ -80,8 +80,19 @@ describe('render-data BLOCKS constants', () => {
     );
   });
 
-  test('BLOCKS total count is 51 (AIR + 50 block types)', () => {
-    expect(Object.keys(BLOCKS)).toHaveLength(51);
+  test('pins nether block ids (51..54)', () => {
+    expect(BLOCKS).toEqual(
+      expect.objectContaining({
+        PORTAL: 51,
+        NETHERRACK: 52,
+        GLOWSTONE: 53,
+        SOUL_SAND: 54,
+      }),
+    );
+  });
+
+  test('BLOCKS total count is 55 (AIR + 54 block types)', () => {
+    expect(Object.keys(BLOCKS)).toHaveLength(55);
   });
 
   test('exports BLOCK_SIZE = 32', () => {
@@ -159,5 +170,12 @@ describe('getBlockColor', () => {
     expect(getBlockColor(BLOCKS.DOOR)).toBe('#8B5A2B');
     expect(getBlockColor(BLOCKS.BED)).toBe('#D32F2F');
     expect(getBlockColor(BLOCKS.FURNACE)).toBe('#5A5A5A');
+  });
+
+  test('nether blocks have expected colors', () => {
+    expect(getBlockColor(BLOCKS.PORTAL)).toBe('#9B30FF');
+    expect(getBlockColor(BLOCKS.NETHERRACK)).toBe('#6E2B2B');
+    expect(getBlockColor(BLOCKS.GLOWSTONE)).toBe('#FFD37A');
+    expect(getBlockColor(BLOCKS.SOUL_SAND)).toBe('#4A3A2A');
   });
 });
