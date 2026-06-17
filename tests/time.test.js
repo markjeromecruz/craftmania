@@ -12,10 +12,10 @@ import {
 
 describe('time constants', () => {
   test('exports the expected lengths', () => {
-    expect(DAY_LENGTH_TICKS).toBe(14400);
-    expect(SUNSET_LENGTH_TICKS).toBe(1800);
-    expect(NIGHT_LENGTH_TICKS).toBe(3600);
-    expect(SUNRISE_LENGTH_TICKS).toBe(1800);
+    expect(DAY_LENGTH_TICKS).toBe(6000);
+    expect(SUNSET_LENGTH_TICKS).toBe(1500);
+    expect(NIGHT_LENGTH_TICKS).toBe(9000);
+    expect(SUNRISE_LENGTH_TICKS).toBe(1500);
     expect(TOTAL_CYCLE_TICKS).toBe(
       DAY_LENGTH_TICKS + SUNSET_LENGTH_TICKS + NIGHT_LENGTH_TICKS + SUNRISE_LENGTH_TICKS
     );
