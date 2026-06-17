@@ -297,6 +297,16 @@ describe('nether update: blocks 51-54', () => {
   });
 });
 
+describe('planks update: blocks 55-63', () => {
+  test('all 9 planks are mineable and drop wood', () => {
+    for (let id = 55; id <= 63; id++) {
+      expect(getMiningSpeed('pickaxe', id)).toBeGreaterThan(0);
+      expect(getMiningSpeed('hand', id)).toBeGreaterThan(0);
+      expect(getBlockDrop(id)).toEqual({ item: 'wood', count: 1 });
+    }
+  });
+});
+
 describe('addToInventory', () => {
   test('adding stone increments slot 0 and does not mutate original', () => {
     const inv = makeInventory();

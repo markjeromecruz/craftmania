@@ -292,7 +292,10 @@
                 // Gathered materials used for crafting (not a score!).
                 resources: { coal: 0, iron: 0, gold: 0, netherite: 0, flint: 0, obsidian: 0 },
                 // Crafted placeable blocks you can build with.
-                crafted: { glass: 0, door: 0, bed: 0, furnace: 0 },
+                crafted: { glass: 0, door: 0, bed: 0, furnace: 0,
+                    oak_planks: 0, birch_planks: 0, spruce_planks: 0, jungle_planks: 0,
+                    acacia_planks: 0, dark_oak_planks: 0, mangrove_planks: 0,
+                    cherry_planks: 0, bamboo_planks: 0 },
                 // Crafted gear / upgrades.
                 gear: { armor: false, swordTier: 1, hasBed: false, flintSteel: false },
                 // Which block right-click places (cycle with B).
@@ -1063,12 +1066,37 @@
             // Recipes use materials we actually track: stone (slot 0), wood
             // (slot 1), and the ore resources. Each gives a placeable block or
             // a gear upgrade.
+            // Sword tiers: 1 wood (start) → 6 netherite. Higher = more damage.
+            const SWORD_DAMAGE = { 1: 5, 2: 6, 3: 8, 4: 9, 5: 11, 6: 13 };
+            const SWORD_NAME = { 1: 'Wood', 2: 'Stone', 3: 'Iron', 4: 'Gold', 5: 'Diamond', 6: 'Netherite' };
+            // Crafted-block name -> BLOCKS key (for planks + other placeables).
+            const PLANK_BLOCK = {
+                oak_planks: 'OAK_PLANKS', birch_planks: 'BIRCH_PLANKS', spruce_planks: 'SPRUCE_PLANKS',
+                jungle_planks: 'JUNGLE_PLANKS', acacia_planks: 'ACACIA_PLANKS', dark_oak_planks: 'DARK_OAK_PLANKS',
+                mangrove_planks: 'MANGROVE_PLANKS', cherry_planks: 'CHERRY_PLANKS', bamboo_planks: 'BAMBOO_PLANKS',
+            };
+
             const RECIPES = {
                 glass:   { name: '🪟 Window (Glass)', cost: { stone: 3 }, block: 'glass', count: 2 },
                 door:    { name: '🚪 Door',           cost: { wood: 6 },  block: 'door',  count: 1 },
                 bed:     { name: '🛏️ Bed',            cost: { wood: 5 },  block: 'bed',   count: 1 },
                 furnace: { name: '🔥 Oven (Furnace)', cost: { stone: 8 }, block: 'furnace', count: 1 },
-                sword:   { name: '⚔️ Iron Sword (stronger)', cost: { iron: 2, wood: 1 }, gear: 'sword' },
+                // Wood planks for building houses (each gives 4).
+                planks_oak:      { name: '🪵 Oak Planks',      cost: { wood: 1 }, block: 'oak_planks',      count: 4 },
+                planks_birch:    { name: '🪵 Birch Planks',    cost: { wood: 1 }, block: 'birch_planks',    count: 4 },
+                planks_spruce:   { name: '🪵 Spruce Planks',   cost: { wood: 1 }, block: 'spruce_planks',   count: 4 },
+                planks_jungle:   { name: '🪵 Jungle Planks',   cost: { wood: 1 }, block: 'jungle_planks',   count: 4 },
+                planks_acacia:   { name: '🪵 Acacia Planks',   cost: { wood: 1 }, block: 'acacia_planks',   count: 4 },
+                planks_dark_oak: { name: '🪵 Dark Oak Planks', cost: { wood: 1 }, block: 'dark_oak_planks', count: 4 },
+                planks_mangrove: { name: '🪵 Mangrove Planks', cost: { wood: 1 }, block: 'mangrove_planks', count: 4 },
+                planks_cherry:   { name: '🪵 Cherry Planks',   cost: { wood: 1 }, block: 'cherry_planks',   count: 4 },
+                planks_bamboo:   { name: '🪵 Bamboo Planks',   cost: { wood: 1 }, block: 'bamboo_planks',   count: 4 },
+                // Swords — each tier is stronger than the last.
+                sword_stone:     { name: '🗡️ Stone Sword',     cost: { stone: 2 },     swordTier: 2 },
+                sword_iron:      { name: '⚔️ Iron Sword',      cost: { iron: 2 },      swordTier: 3 },
+                sword_gold:      { name: '⚔️ Gold Sword',      cost: { gold: 2 },      swordTier: 4 },
+                sword_diamond:   { name: '💎 Diamond Sword',   cost: { diamond: 2 },   swordTier: 5 },
+                sword_netherite: { name: '🟪 Netherite Sword', cost: { netherite: 2 }, swordTier: 6 },
                 armor:   { name: '🛡️ Iron Armor (half damage)', cost: { iron: 5 }, gear: 'armor' },
                 flintsteel: { name: '🔧 Flint & Steel (light a Nether portal)', cost: { iron: 1, flint: 1 }, gear: 'flintsteel' },
             };
@@ -1099,7 +1127,7 @@
                 }
                 // Don't re-craft gear you already have.
                 if (r.gear === 'armor' && gameState.gear.armor) { flashCraftMsg('Already wearing armor!'); return; }
-                if (r.gear === 'sword' && gameState.gear.swordTier > 1) { flashCraftMsg('Sword already upgraded!'); return; }
+                if (r.swordTier && gameState.gear.swordTier >= r.swordTier) { flashCraftMsg('You already have an equal or better sword!'); return; }
                 if (r.gear === 'flintsteel' && gameState.gear.flintSteel) { flashCraftMsg('You already have flint & steel!'); return; }
 
                 for (const [mat, amt] of Object.entries(r.cost)) spendMat(mat, amt);
@@ -1108,8 +1136,8 @@
                     if (r.block === 'bed') gameState.gear.hasBed = true;
                     flashCraftMsg('Crafted ' + r.name + '!');
                 }
+                if (r.swordTier) { gameState.gear.swordTier = r.swordTier; flashCraftMsg(SWORD_NAME[r.swordTier] + ' sword equipped!'); }
                 if (r.gear === 'armor') { gameState.gear.armor = true; flashCraftMsg('Armor equipped!'); }
-                if (r.gear === 'sword') { gameState.gear.swordTier = 2; flashCraftMsg('Sword upgraded!'); }
                 if (r.gear === 'flintsteel') { gameState.gear.flintSteel = true; flashCraftMsg('Flint & Steel ready! Press N near 10 obsidian.'); }
                 updateUI();
                 renderCraftMenu();
@@ -1118,6 +1146,8 @@
             function renderCraftMenu() {
                 const c = document.getElementById('craftRecipes');
                 if (!c) return;
+                c.style.maxHeight = '55vh';
+                c.style.overflowY = 'auto';
                 c.innerHTML = '';
                 for (const [key, r] of Object.entries(RECIPES)) {
                     const costStr = Object.entries(r.cost).map(([m, a]) => `${a} ${m}`).join(' + ');
@@ -1125,7 +1155,7 @@
                     let have = '';
                     if (r.block) have = ` (have ${gameState.crafted[r.block]})`;
                     else if (r.gear === 'armor' && gameState.gear.armor) have = ' ✅';
-                    else if (r.gear === 'sword' && gameState.gear.swordTier > 1) have = ' ✅';
+                    else if (r.swordTier && gameState.gear.swordTier >= r.swordTier) have = ' ✅';
                     else if (r.gear === 'flintsteel' && gameState.gear.flintSteel) have = ' ✅';
                     const btn = document.createElement('button');
                     btn.textContent = `${r.name} — ${costStr}${have}`;
@@ -1152,13 +1182,16 @@
                     case 'bed': return BLOCKS.BED;
                     case 'furnace': return BLOCKS.FURNACE;
                     case 'obsidian': return BLOCKS.OBSIDIAN;
-                    default: return BLOCKS.STONE;
+                    default:
+                        if (PLANK_BLOCK[name]) return BLOCKS[PLANK_BLOCK[name]];
+                        return BLOCKS.STONE;
                 }
             }
 
-            // Cycle the build block among stone + any crafted blocks you have.
+            // Cycle the build block among stone, obsidian, and any crafted block
+            // you actually have (glass/door/bed/furnace + all 9 plank types).
             function cycleBuildBlock() {
-                const options = ['stone', 'obsidian', 'glass', 'door', 'bed', 'furnace'].filter(o =>
+                const options = ['stone', 'obsidian', ...Object.keys(gameState.crafted)].filter(o =>
                     o === 'stone' ? gameState.inventory.items[0].count > 0 :
                     o === 'obsidian' ? gameState.resources.obsidian > 0 :
                     gameState.crafted[o] > 0
@@ -1341,7 +1374,10 @@
                 gameState.blocksMinedTotal = 0;
                 gameState.diamonds = 0;
                 gameState.resources = { coal: 0, iron: 0, gold: 0, netherite: 0, flint: 0, obsidian: 0 };
-                gameState.crafted = { glass: 0, door: 0, bed: 0, furnace: 0 };
+                gameState.crafted = { glass: 0, door: 0, bed: 0, furnace: 0,
+                    oak_planks: 0, birch_planks: 0, spruce_planks: 0, jungle_planks: 0,
+                    acacia_planks: 0, dark_oak_planks: 0, mangrove_planks: 0,
+                    cherry_planks: 0, bamboo_planks: 0 };
                 gameState.gear = { armor: false, swordTier: 1, hasBed: false, flintSteel: false };
                 gameState.buildBlock = 'stone';
                 gameState.dimension = 'overworld';
@@ -1473,7 +1509,7 @@
                     // conflicted with jump). One swing per click; damages all
                     // mobs within ~60 px of the player.
                     if (gameState.inventory.selected === 3) {
-                        const dmg = gameState.gear.swordTier > 1 ? 8 : 5;
+                        const dmg = SWORD_DAMAGE[gameState.gear.swordTier] || 5;
                         gameState.mobs.forEach(mob => {
                             const dx = mob.x - gameState.player.x;
                             const dy = mob.y - gameState.player.y;
@@ -1723,7 +1759,7 @@
                     document.getElementById('buildBlock').textContent = bbLabel + ' ×' + bbCount;
                     const gear = [];
                     if (gameState.gear.armor) gear.push('🛡️ Armor');
-                    if (gameState.gear.swordTier > 1) gear.push('⚔️ Iron Sword');
+                    if (gameState.gear.swordTier > 1) gear.push('⚔️ ' + SWORD_NAME[gameState.gear.swordTier] + ' Sword');
                     if (gameState.gear.hasBed) gear.push('🛏️ Bed (K to sleep)');
                     if (gameState.gear.flintSteel) gear.push('🔧 Flint & Steel (N)');
                     document.getElementById('gearLine').textContent = gear.join(' · ');

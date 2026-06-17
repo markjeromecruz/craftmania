@@ -309,6 +309,14 @@ const DROPS = {
   [PORTAL]: null,
 };
 
+// Wood planks (55-63) mine like wood and drop wood.
+for (let id = 55; id <= 63; id++) {
+  SPEED.pickaxe[id] = 1.5;
+  SPEED.hand[id] = 1;
+  SPEED.sword[id] = 0.5;
+  DROPS[id] = { item: 'wood', count: 1 };
+}
+
 export function getBlockDrop(blockType) {
   if (!(blockType in DROPS)) return null;
   return DROPS[blockType];
