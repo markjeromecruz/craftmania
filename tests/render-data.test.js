@@ -107,8 +107,12 @@ describe('render-data BLOCKS constants', () => {
     );
   });
 
-  test('BLOCKS total count is 64 (AIR + 63 block types)', () => {
-    expect(Object.keys(BLOCKS)).toHaveLength(64);
+  test('pins farm block ids (64..65)', () => {
+    expect(BLOCKS).toEqual(expect.objectContaining({ FARMLAND: 64, WHEAT: 65 }));
+  });
+
+  test('BLOCKS total count is 66 (AIR + 65 block types)', () => {
+    expect(Object.keys(BLOCKS)).toHaveLength(66);
   });
 
   test('exports BLOCK_SIZE = 32', () => {
@@ -193,5 +197,10 @@ describe('getBlockColor', () => {
     expect(getBlockColor(BLOCKS.NETHERRACK)).toBe('#6E2B2B');
     expect(getBlockColor(BLOCKS.GLOWSTONE)).toBe('#FFD37A');
     expect(getBlockColor(BLOCKS.SOUL_SAND)).toBe('#4A3A2A');
+  });
+
+  test('farm blocks have expected colors', () => {
+    expect(getBlockColor(BLOCKS.FARMLAND)).toBe('#6B4A2A');
+    expect(getBlockColor(BLOCKS.WHEAT)).toBe('#D9C247');
   });
 });
