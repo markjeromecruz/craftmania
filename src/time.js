@@ -1,8 +1,8 @@
 // Day / night cycle. All units are game ticks (60 ticks ≈ 1 sec).
-export const DAY_LENGTH_TICKS = 14400;     // 4 min at 60 fps
-export const SUNSET_LENGTH_TICKS = 1800;   // 30 sec
-export const NIGHT_LENGTH_TICKS = 3600;    // 1 min
-export const SUNRISE_LENGTH_TICKS = 1800;  // 30 sec
+export const DAY_LENGTH_TICKS = 6000;      // ~1.7 min at 60 fps (shorter day)
+export const SUNSET_LENGTH_TICKS = 1500;   // 25 sec
+export const NIGHT_LENGTH_TICKS = 9000;    // ~2.5 min (longer night)
+export const SUNRISE_LENGTH_TICKS = 1500;  // 25 sec
 export const TOTAL_CYCLE_TICKS =
   DAY_LENGTH_TICKS + SUNSET_LENGTH_TICKS + NIGHT_LENGTH_TICKS + SUNRISE_LENGTH_TICKS;
 
