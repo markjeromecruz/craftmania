@@ -314,6 +314,24 @@ export function drawBlockDetail(ctx, x, y, block, BLOCK_SIZE) {
       ctx.fillRect(x + 19, y + 16, 5, 5);
       break;
 
+    // --- Wood planks: shared plank-grain detail ---
+    case BLOCKS.OAK_PLANKS:
+    case BLOCKS.BIRCH_PLANKS:
+    case BLOCKS.SPRUCE_PLANKS:
+    case BLOCKS.JUNGLE_PLANKS:
+    case BLOCKS.ACACIA_PLANKS:
+    case BLOCKS.DARK_OAK_PLANKS:
+    case BLOCKS.MANGROVE_PLANKS:
+    case BLOCKS.CHERRY_PLANKS:
+    case BLOCKS.BAMBOO_PLANKS:
+      ctx.fillStyle = 'rgba(0,0,0,0.18)';
+      ctx.fillRect(x, y + 10, BLOCK_SIZE, 1);
+      ctx.fillRect(x, y + 21, BLOCK_SIZE, 1);
+      ctx.fillRect(x + 16, y, 1, 10);
+      ctx.fillRect(x + 8, y + 11, 1, 10);
+      ctx.fillRect(x + 24, y + 22, 1, 10);
+      break;
+
     default:
       // No-op for plain blocks (STONE, WOOD, AIR, BEDROCK, DIRT, LEAVES,
       // SAND, WATER, PINE_LEAVES, DARK_OAK_WOOD, SPRUCE_WOOD, JUNGLE_WOOD,

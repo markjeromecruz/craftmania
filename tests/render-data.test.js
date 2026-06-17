@@ -91,8 +91,24 @@ describe('render-data BLOCKS constants', () => {
     );
   });
 
-  test('BLOCKS total count is 55 (AIR + 54 block types)', () => {
-    expect(Object.keys(BLOCKS)).toHaveLength(55);
+  test('pins wood plank ids (55..63)', () => {
+    expect(BLOCKS).toEqual(
+      expect.objectContaining({
+        OAK_PLANKS: 55,
+        BIRCH_PLANKS: 56,
+        SPRUCE_PLANKS: 57,
+        JUNGLE_PLANKS: 58,
+        ACACIA_PLANKS: 59,
+        DARK_OAK_PLANKS: 60,
+        MANGROVE_PLANKS: 61,
+        CHERRY_PLANKS: 62,
+        BAMBOO_PLANKS: 63,
+      }),
+    );
+  });
+
+  test('BLOCKS total count is 64 (AIR + 63 block types)', () => {
+    expect(Object.keys(BLOCKS)).toHaveLength(64);
   });
 
   test('exports BLOCK_SIZE = 32', () => {
