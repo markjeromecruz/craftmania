@@ -107,12 +107,12 @@ describe('render-data BLOCKS constants', () => {
     );
   });
 
-  test('pins farm block ids (64..65)', () => {
-    expect(BLOCKS).toEqual(expect.objectContaining({ FARMLAND: 64, WHEAT: 65 }));
+  test('pins farm + open-door block ids (64..66)', () => {
+    expect(BLOCKS).toEqual(expect.objectContaining({ FARMLAND: 64, WHEAT: 65, DOOR_OPEN: 66 }));
   });
 
-  test('BLOCKS total count is 66 (AIR + 65 block types)', () => {
-    expect(Object.keys(BLOCKS)).toHaveLength(66);
+  test('BLOCKS total count is 67 (AIR + 66 block types)', () => {
+    expect(Object.keys(BLOCKS)).toHaveLength(67);
   });
 
   test('exports BLOCK_SIZE = 32', () => {
@@ -199,8 +199,9 @@ describe('getBlockColor', () => {
     expect(getBlockColor(BLOCKS.SOUL_SAND)).toBe('#4A3A2A');
   });
 
-  test('farm blocks have expected colors', () => {
+  test('farm + open-door blocks have expected colors', () => {
     expect(getBlockColor(BLOCKS.FARMLAND)).toBe('#6B4A2A');
     expect(getBlockColor(BLOCKS.WHEAT)).toBe('#D9C247');
+    expect(getBlockColor(BLOCKS.DOOR_OPEN)).toBe('#8B5A2B');
   });
 });

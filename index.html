@@ -146,9 +146,9 @@
         <div>❤️ Health: <span id="health">20</span>/20</div>
         <div>🍖 Hunger: <span id="hunger">20</span>/20</div>
         <div style="margin-top:4px;">⛏️ Materials (for crafting):</div>
-        <div style="margin-left:8px;">🪨 <span id="stone">64</span> · 🪵 <span id="wood">0</span> · ⚫ <span id="coal">0</span> · 🔩 <span id="iron">0</span></div>
-        <div style="margin-left:8px;">🥇 <span id="gold">0</span> · 💎 <span id="diamond">0</span> · 🟪 <span id="netherite">0</span> · ⬛ <span id="obsidian">0</span></div>
-        <div style="margin-left:8px;">🔥 <span id="flint">0</span> flint</div>
+        <div style="margin-left:8px;">🪨 Stone <span id="stone">64</span> · 🪵 Wood <span id="wood">0</span> · ⚫ Coal <span id="coal">0</span></div>
+        <div style="margin-left:8px;">🔩 Iron <span id="iron">0</span> · 🥇 Gold <span id="gold">0</span> · 💎 Diamond <span id="diamond">0</span></div>
+        <div style="margin-left:8px;">🟪 Netherite <span id="netherite">0</span> · ⬛ Obsidian <span id="obsidian">0</span> · 🔥 Flint <span id="flint">0</span></div>
         <div style="margin-top:4px;">🌍 Blocks mined: <span id="blocks">0</span></div>
         <div>🗺️ <span id="biome">Plains</span> | <span id="phase">🌞 Day</span></div>
         <div>🐕 Pets: <span id="pets">0</span> | 🐮 Animals: <span id="animals">0</span></div>
@@ -192,7 +192,7 @@
         <h3>Controls:</h3>
         <p>⬆️⬇️⬅️➡️ Move/Jump</p>
         <p>🖱️ Left: Break / 🗡️ Attack</p>
-        <p>🖱️ Right Click: Place</p>
+        <p>🖱️ Right Click: Place / Open door</p>
         <p>1-5: Select Item</p>
         <p>E: Eat (tap)</p>
         <p>🚗 V: Vehicle Mode</p>
@@ -209,7 +209,8 @@
         border:4px solid #3E2A14; z-index:30; color:white; min-width:340px;
         box-shadow:0 0 30px rgba(0,0,0,0.8);">
         <h2 style="margin:0 0 6px 0;">🛠️ Crafting</h2>
-        <p style="margin:0 0 10px 0; font-size:13px;">Click a recipe to craft it. Greyed-out means you need more materials.</p>
+        <p style="margin:0 0 6px 0; font-size:13px;">Click a recipe to craft it. Greyed-out means you need more materials.</p>
+        <p style="margin:0 0 10px 0; font-size:12px; color:#FFD54F;">💡 Tip: mine <b>gravel</b> to get flint, then craft <b>🔧 Flint &amp; Steel</b> to light a Nether portal.</p>
         <div id="craftRecipes"></div>
         <p id="craftMsg" style="color:#FFD700; height:18px; margin:6px 0;"></p>
         <button onclick="toggleCraft()">Close (C)</button>
@@ -510,6 +511,16 @@
 
                     const ix = Math.floor(x);
                     const iy = Math.floor(y);
+
+                    // Open door: draw a thin door swung to the side (see-through).
+                    if (block === BLOCKS.DOOR_OPEN) {
+                        ctx.fillStyle = '#5E3A1A';
+                        ctx.fillRect(ix + 1, iy, 5, BLOCK_SIZE);
+                        ctx.fillStyle = '#FFD24A';
+                        ctx.fillRect(ix + 2, iy + 15, 2, 2);
+                        return;
+                    }
+
                     ctx.fillStyle = color;
                     ctx.fillRect(ix, iy, BLOCK_SIZE, BLOCK_SIZE);
 
@@ -1713,9 +1724,25 @@
                         });
                     }
                 }
-                if (e.button === 2) rightMouseDown = true;
+                if (e.button === 2) {
+                    rightMouseDown = true;
+                    // Right-click a door (within reach) to open or close it.
+                    if (BLOCKS) {
+                        const wx = gameState.mouseX + gameState.camera.x;
+                        const wy = gameState.mouseY + gameState.camera.y;
+                        const bx = Math.floor(wx / BLOCK_SIZE);
+                        const by = Math.floor(wy / BLOCK_SIZE);
+                        const dx = (bx * BLOCK_SIZE + BLOCK_SIZE / 2) - gameState.player.x;
+                        const dy = (by * BLOCK_SIZE + BLOCK_SIZE / 2) - (gameState.player.y - 24);
+                        if (Math.sqrt(dx * dx + dy * dy) < 160) {
+                            const b = getBlock(bx, by);
+                            if (b === BLOCKS.DOOR) setBlock(bx, by, BLOCKS.DOOR_OPEN);
+                            else if (b === BLOCKS.DOOR_OPEN) setBlock(bx, by, BLOCKS.DOOR);
+                        }
+                    }
+                }
             });
-            
+
             canvas.addEventListener('mouseup', (e) => {
                 if (e.button === 0) {
                     mouseDown = false;
