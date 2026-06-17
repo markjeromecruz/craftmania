@@ -204,6 +204,14 @@ export function drawBlockDetail(ctx, x, y, block, BLOCK_SIZE) {
       ctx.fillRect(x + 21, y + 20, 4, 4);
       break;
 
+    case BLOCKS.COPPER_ORE:
+      ctx.fillStyle = '#E0A060';
+      ctx.fillRect(x + 8, y + 9, 5, 4);
+      ctx.fillRect(x + 19, y + 8, 4, 4);
+      ctx.fillStyle = '#7BB89A';   // a touch of oxidized green
+      ctx.fillRect(x + 13, y + 20, 4, 3);
+      break;
+
     case BLOCKS.IRON_ORE:
       ctx.fillStyle = '#D9A066';
       ctx.fillRect(x + 8, y + 9, 5, 4);

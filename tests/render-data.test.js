@@ -107,12 +107,12 @@ describe('render-data BLOCKS constants', () => {
     );
   });
 
-  test('pins farm + open-door block ids (64..66)', () => {
-    expect(BLOCKS).toEqual(expect.objectContaining({ FARMLAND: 64, WHEAT: 65, DOOR_OPEN: 66 }));
+  test('pins farm + open-door + copper block ids (64..67)', () => {
+    expect(BLOCKS).toEqual(expect.objectContaining({ FARMLAND: 64, WHEAT: 65, DOOR_OPEN: 66, COPPER_ORE: 67 }));
   });
 
-  test('BLOCKS total count is 67 (AIR + 66 block types)', () => {
-    expect(Object.keys(BLOCKS)).toHaveLength(67);
+  test('BLOCKS total count is 68 (AIR + 67 block types)', () => {
+    expect(Object.keys(BLOCKS)).toHaveLength(68);
   });
 
   test('exports BLOCK_SIZE = 32', () => {
@@ -203,5 +203,6 @@ describe('getBlockColor', () => {
     expect(getBlockColor(BLOCKS.FARMLAND)).toBe('#6B4A2A');
     expect(getBlockColor(BLOCKS.WHEAT)).toBe('#D9C247');
     expect(getBlockColor(BLOCKS.DOOR_OPEN)).toBe('#8B5A2B');
+    expect(getBlockColor(BLOCKS.COPPER_ORE)).toBe('#B87333');
   });
 });
