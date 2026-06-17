@@ -630,6 +630,16 @@
                 creeper:         { kind: 'creeper',  body: '#5BC236',                                     speed: 1.2, health: 14, damage: 0,    h: 48 },
                 spider:          { kind: 'spider',   body: '#352525',                                     speed: 2.1, health: 16, damage: 0.12, h: 26 },
                 phantom:         { kind: 'phantom',  body: '#8A93A8',                                     speed: 2.3, health: 12, damage: 0.1,  h: 22, fly: true },
+                // Nether mobs
+                piglin:           { kind: 'humanoid', body: '#E7A07A', shirt: '#C9A33A', pants: '#7A5A2A', speed: 1.5, health: 16, damage: 0.12, h: 48 },
+                zombified_piglin: { kind: 'humanoid', body: '#7FA86A', shirt: '#9A7A3A', pants: '#5A4A2A', speed: 1.2, health: 18, damage: 0.1,  h: 48 },
+                piglin_brute:     { kind: 'humanoid', body: '#D98F6A', shirt: '#8A8A8A', pants: '#5A3A2A', speed: 1.6, health: 28, damage: 0.2,  h: 52 },
+                wither_skeleton:  { kind: 'humanoid', body: '#2A2A2A', shirt: '#1A1A1A', pants: '#222222', speed: 1.6, health: 20, damage: 0.16, h: 52 },
+                blaze:            { kind: 'fly',      body: '#FFB13A',                                     speed: 2.0, health: 14, damage: 0.14, h: 30, fly: true, blaze: true },
+                ghast:            { kind: 'fly',      body: '#EDEDED',                                     speed: 1.0, health: 20, damage: 0.16, h: 40, fly: true, big: true },
+                magma_cube:       { kind: 'cube',     body: '#E2562A',                                     speed: 1.4, health: 16, damage: 0.14, h: 28, hop: true },
+                zoglin:           { kind: 'beast',    body: '#C96A5A',                                     speed: 1.8, health: 26, damage: 0.18, h: 28 },
+                strider:          { kind: 'beast',    body: '#9A3A4A',                                     speed: 0.8, health: 14, damage: 0,    h: 30, passive: true },
             };
 
             // Is this column open to the sky above (so daytime sun reaches it)?
@@ -682,7 +692,11 @@
                             return;
                         }
 
-                        if (distance < 260) {
+                        if (this.def.passive) {
+                            // Striders just amble around peacefully.
+                            if (Math.random() < 0.02) this.direction *= -1;
+                            this.vx = this.direction * this.speed * 0.7;
+                        } else if (distance < 260) {
                             this.vx = dx > 0 ? this.speed : -this.speed;
                             this.direction = dx > 0 ? 1 : -1;
                         } else {
@@ -710,6 +724,10 @@
                         // Spiders climb walls.
                         if (this.def.kind === 'spider' && wallAhead) {
                             this.vy = -3;
+                        }
+                        // Magma cubes bounce as they move.
+                        if (this.def.hop && snap.onGround && Math.random() < 0.05) {
+                            this.vy = -10;
                         }
 
                         // Touch damage.
@@ -766,14 +784,63 @@
                             ctx.fillStyle = '#FF2A2A';
                             ctx.fillRect(x + 8, y - 13, 2, 2);            // red eyes
                             ctx.fillRect(x + 12, y - 13, 2, 2);
-                        } else if (def.kind === 'phantom') {
+                        } else if (this.fly) {
+                            if (def.big) {
+                                // Ghast: big white blob + dangling tentacles.
+                                ctx.fillStyle = def.body;
+                                ctx.fillRect(x - 16, y - 28, 32, 24);
+                                ctx.fillStyle = '#C9C9C9';
+                                for (const tx of [-12, -4, 4, 12]) ctx.fillRect(x + tx, y - 4, 3, 8);
+                                ctx.fillStyle = '#7A2A2A';
+                                ctx.fillRect(x - 8, y - 20, 3, 3);        // sad eyes
+                                ctx.fillRect(x + 5, y - 20, 3, 3);
+                                ctx.fillRect(x - 4, y - 13, 8, 2);        // mouth
+                            } else if (def.blaze) {
+                                // Blaze: glowing core + spinning rods.
+                                ctx.fillStyle = '#FFE066';
+                                ctx.fillRect(x - 7, y - 22, 14, 16);      // core
+                                ctx.fillStyle = def.body;
+                                for (const rx of [-12, -2, 8]) { ctx.fillRect(x + rx, y - 26, 3, 8); ctx.fillRect(x + rx, y - 8, 3, 8); }
+                                ctx.fillStyle = '#FF6A00';
+                                ctx.fillRect(x - 4, y - 18, 2, 2);
+                                ctx.fillRect(x + 2, y - 18, 2, 2);
+                            } else {
+                                // Phantom.
+                                ctx.fillStyle = def.body;
+                                ctx.fillRect(x - 8, y - 10, 16, 6);
+                                ctx.fillRect(x - 20, y - 12, 12, 4);
+                                ctx.fillRect(x + 8, y - 12, 12, 4);
+                                ctx.fillStyle = '#3AF0FF';
+                                ctx.fillRect(x - 4, y - 9, 2, 2);
+                                ctx.fillRect(x + 2, y - 9, 2, 2);
+                            }
+                        } else if (def.kind === 'cube') {
+                            // Magma cube: glowing cracked cube.
                             ctx.fillStyle = def.body;
-                            ctx.fillRect(x - 8, y - 10, 16, 6);           // body
-                            ctx.fillRect(x - 20, y - 12, 12, 4);          // wings
-                            ctx.fillRect(x + 8, y - 12, 12, 4);
-                            ctx.fillStyle = '#3AF0FF';
-                            ctx.fillRect(x - 4, y - 9, 2, 2);             // eyes
-                            ctx.fillRect(x + 2, y - 9, 2, 2);
+                            ctx.fillRect(x - 12, y - 24, 24, 24);
+                            ctx.fillStyle = '#FFC04A';
+                            ctx.fillRect(x - 12, y - 14, 24, 3);          // glowing seam
+                            ctx.fillRect(x - 6, y - 24, 3, 24);
+                            ctx.fillStyle = '#000';
+                            ctx.fillRect(x - 6, y - 20, 3, 3);            // eyes
+                            ctx.fillRect(x + 3, y - 20, 3, 3);
+                        } else if (def.kind === 'beast') {
+                            // Zoglin / strider — a stocky quadruped.
+                            const f = this.direction || 1;
+                            ctx.fillStyle = def.body;
+                            ctx.fillRect(x - 14, y - 22, 28, 16);         // body
+                            ctx.fillRect(x + f * 10, y - 26, 12, 12);     // head
+                            ctx.fillStyle = '#000';
+                            for (const lx of [-12, -4, 4, 10]) ctx.fillRect(x + lx, y - 6, 4, 6); // legs
+                            if (this.type === 'strider') {               // strider has a tall fin
+                                ctx.fillStyle = '#C04A6A';
+                                ctx.fillRect(x - 8, y - 30, 16, 6);
+                            } else {                                      // zoglin tusks
+                                ctx.fillStyle = '#FFF';
+                                ctx.fillRect(x + f * 20, y - 16, 4, 2);
+                            }
+                            ctx.fillStyle = '#FF3030';
+                            ctx.fillRect(x + f * 16, y - 22, 2, 2);       // eye
                         } else {
                             // humanoid (zombie / villager / baby / skeleton), scaled
                             const sc = this.height / 48;
@@ -845,6 +912,40 @@
                     }
                 } catch (error) {
                     console.error("Error spawning mob:", error);
+                }
+            }
+
+            // Spawn a nether mob near the player (flyers in the air, others on
+            // the netherrack floor).
+            function spawnNetherMob() {
+                try {
+                    const pool = ['piglin', 'zombified_piglin', 'piglin_brute', 'wither_skeleton',
+                                  'magma_cube', 'zoglin', 'strider', 'blaze', 'ghast'];
+                    const type = pool[Math.floor(Math.random() * pool.length)];
+                    const def = MOB_DEFS[type];
+                    const baseCol = Math.floor(gameState.player.x / BLOCK_SIZE);
+                    if (def.fly) {
+                        const off = (Math.random() > 0.5 ? 1 : -1) * (4 + Math.floor(Math.random() * 6));
+                        const col = Math.max(0, Math.min(WORLD_WIDTH - 1, baseCol + off));
+                        gameState.mobs.push(new Mob(type, col * BLOCK_SIZE, gameState.player.y - 80));
+                        return;
+                    }
+                    const around = Math.floor(gameState.player.y / BLOCK_SIZE);
+                    for (let d = 4; d <= 12; d++) {
+                        for (const side of [1, -1]) {
+                            const col = baseCol + side * d;
+                            if (col < 0 || col >= WORLD_WIDTH) continue;
+                            for (let y = Math.max(1, around - 5); y <= Math.min(WORLD_HEIGHT - 2, around + 6); y++) {
+                                if (getBlock(col, y) === BLOCKS.AIR && getBlock(col, y + 1) !== BLOCKS.AIR &&
+                                    getBlock(col, y + 1) !== BLOCKS.LAVA) {
+                                    gameState.mobs.push(new Mob(type, col * BLOCK_SIZE, y * BLOCK_SIZE));
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error("Error spawning nether mob:", error);
                 }
             }
 
@@ -1319,6 +1420,13 @@
                     gameState.tick = 0;
                     gameState.blocksMinedTotal = 0;
                     gameState.worldSeed = Math.floor(Math.random() * 1e9);
+                    // Always begin in a fresh overworld.
+                    gameState.dimension = 'overworld';
+                    gameState.overworldWorld = null;
+                    gameState.netherWorld = null;
+                    gameState.netherSpawn = null;
+                    gameState.overworldReturn = null;
+                    gameState.portalCooldown = 0;
 
                     generateWorld();
 
@@ -1993,6 +2101,12 @@
                             if (b !== BLOCKS.AIR && b !== BLOCKS.LEAVES) { inCave = true; break; }
                         }
                         if (isNight || inCave) spawnMob(inCave && !isNight);
+                    }
+
+                    // Nether mobs spawn around the player in the nether.
+                    if (gameState.dimension === 'nether' && gameState.mobs.length < 8 &&
+                        Math.random() < 0.03) {
+                        spawnNetherMob();
                     }
 
                     if (gameState.player.health <= 0) {
