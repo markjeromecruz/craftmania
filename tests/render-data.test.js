@@ -166,7 +166,7 @@ describe('getBlockColor', () => {
     expect(getBlockColor(BLOCKS.PALE_OAK_WOOD)).toBe('#B4B4A8');
     expect(getBlockColor(BLOCKS.PALE_LEAVES)).toBe('#C7C9B8');
     expect(getBlockColor(BLOCKS.HANGING_MOSS)).toBe('#9BAA8C');
-    expect(getBlockColor(BLOCKS.GRAVEL)).toBe('#707070');
+    expect(getBlockColor(BLOCKS.GRAVEL)).toBe('#A39B8C');
     expect(getBlockColor(BLOCKS.AZALEA_LEAVES)).toBe('#6FA248');
     expect(getBlockColor(BLOCKS.GLOW_BERRIES)).toBe('#F2A23A');
     expect(getBlockColor(BLOCKS.CLAY)).toBe('#A6A8B5');

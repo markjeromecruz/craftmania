@@ -697,6 +697,16 @@ describe('generateWorld with cave biomes', () => {
     expect(copper).toBeGreaterThan(0);
   });
 
+  test('contains gravel underground so flint is obtainable (seed 42)', () => {
+    const GRAVEL = 33;
+    const w = generateWorld(42);
+    let gravel = 0;
+    for (let x = 0; x < WORLD_WIDTH; x++)
+      for (let y = 0; y < WORLD_HEIGHT; y++)
+        if (w[x][y] === GRAVEL) gravel++;
+    expect(gravel).toBeGreaterThan(0);
+  });
+
   test('lava and netherite only appear deep (never above mid-world) for seed 42', () => {
     const NETHERITE_ORE = 44, LAVA = 45;
     const w = generateWorld(42);

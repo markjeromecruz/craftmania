@@ -136,7 +136,8 @@ export function drawBlockDetail(ctx, x, y, block, BLOCK_SIZE) {
       break;
 
     case BLOCKS.GRAVEL:
-      ctx.fillStyle = '#555555';
+      // Chunky dark pebbles on a tan base so it reads clearly as gravel.
+      ctx.fillStyle = '#5A4F42';
       ctx.fillRect(x + 4, y + 4, 2, 2);
       ctx.fillRect(x + 22, y + 4, 2, 2);
       ctx.fillRect(x + 4, y + 22, 2, 2);
