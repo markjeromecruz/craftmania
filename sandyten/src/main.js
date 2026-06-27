@@ -184,7 +184,17 @@ const billboards = []; // meshes that turn to face the camera each frame
 
 const textureLoader = new THREE.TextureLoader();
 const CHAR_HEIGHT = 3.4;        // how tall a character stands, in world units
-const CHAR_RING = 6.5;          // distance from the central fountain
+const CHAR_RING = 6.5;          // starting distance from the central fountain
+
+// Characters wander inside this ring — wide enough to roam, but it keeps them
+// out of the fountain in the middle and away from the trees on the outside.
+const ROAM_INNER = 4, ROAM_OUTER = 9;
+const _charDir = new THREE.Vector3();
+function pickRoamTarget(holder) {
+  const a = Math.random() * Math.PI * 2;
+  const r = ROAM_INNER + Math.random() * (ROAM_OUTER - ROAM_INNER);
+  holder.userData.target.set(Math.cos(a) * r, 0, Math.sin(a) * r);
+}
 
 // A small floating name tag drawn on a canvas, shown above each character.
 function makeNameLabel(text) {
@@ -236,6 +246,14 @@ function placeCharacter(char, index, total) {
 
   const holder = new THREE.Group();
   holder.position.set(x, 0, z);
+  // each character roams on its own: a target to walk to, its own speed,
+  // and a short pause between strolls.
+  holder.userData = {
+    speed: 1.0 + Math.random() * 0.8,
+    target: new THREE.Vector3(x, 0, z),
+    pauseUntil: 1 + Math.random() * 2, // settle in before the first stroll
+    moving: false,
+  };
   mesh.position.y = baseY;
   mesh.userData.baseY = baseY;
   mesh.userData.bobPhase = index * 0.9;
@@ -360,14 +378,39 @@ function tick() {
     c.position.y = c.userData.baseY + Math.sin(t * 1.2 + i) * 0.4;
   });
 
-  // Characters: turn to face the camera (upright billboard) + gentle bob.
+  // Characters: wander around, face the camera (upright billboard), and bob/hop.
   for (const b of billboards) {
     const holder = b.parent;
+    const w = holder.userData;
+
+    // roam toward the current target, then pause and pick a new one
+    if (t >= w.pauseUntil) {
+      _charDir.set(w.target.x - holder.position.x, 0, w.target.z - holder.position.z);
+      const dist = _charDir.length();
+      if (dist < 0.25) {
+        w.moving = false;
+        w.pauseUntil = t + 0.6 + Math.random() * 1.8; // rest a moment
+        pickRoamTarget(holder);
+      } else {
+        w.moving = true;
+        const step = Math.min(w.speed * dt, dist);
+        holder.position.x += (_charDir.x / dist) * step;
+        holder.position.z += (_charDir.z / dist) * step;
+      }
+    } else {
+      w.moving = false;
+    }
+
+    // always turn to face the camera, staying upright
     b.rotation.y = Math.atan2(
       camera.position.x - holder.position.x,
       camera.position.z - holder.position.z
     );
-    b.position.y = b.userData.baseY + Math.sin(t * 1.6 + b.userData.bobPhase) * 0.12;
+
+    // little hop while walking, gentle float while resting
+    b.position.y = w.moving
+      ? b.userData.baseY + Math.abs(Math.sin(t * 9 + b.userData.bobPhase)) * 0.22
+      : b.userData.baseY + Math.sin(t * 1.6 + b.userData.bobPhase) * 0.1;
   }
 
   updateMovement(dt);
