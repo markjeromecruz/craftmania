@@ -462,6 +462,109 @@ renderer.domElement.addEventListener('pointermove', (e) => {
 });
 
 // ---------------------------------------------------------------------------
+// Collectible stars — walk into one (as your character) to collect it.
+// Each pop plays a chime, bumps the counter, and a fresh star appears.
+// ---------------------------------------------------------------------------
+function makeStarGeometry() {
+  const shape = new THREE.Shape();
+  const spikes = 5, outer = 0.6, inner = 0.28;
+  for (let i = 0; i < spikes * 2; i++) {
+    const r = i % 2 === 0 ? outer : inner;
+    const a = (i / (spikes * 2)) * Math.PI * 2 - Math.PI / 2;
+    const x = Math.cos(a) * r, y = Math.sin(a) * r;
+    i === 0 ? shape.moveTo(x, y) : shape.lineTo(x, y);
+  }
+  shape.closePath();
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth: 0.18, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.05, bevelSegments: 2,
+  });
+  geo.center();
+  return geo;
+}
+const STAR_GEO = makeStarGeometry();
+const STAR_MAT = new THREE.MeshStandardMaterial({
+  color: 0xffd54a, emissive: 0xffb300, emissiveIntensity: 0.6, roughness: 0.3, metalness: 0.3,
+});
+const STAR_COUNT = 14;
+const STAR_Y = 1.2;
+
+const collectibles = new THREE.Group();
+scene.add(collectibles);
+
+function spawnStar() {
+  const m = new THREE.Mesh(STAR_GEO, STAR_MAT);
+  const a = Math.random() * Math.PI * 2;
+  const r = 4 + Math.random() * (PLAY_RADIUS - 6); // spread across the play area
+  m.position.set(Math.cos(a) * r, STAR_Y, Math.sin(a) * r);
+  m.userData.spin = 1 + Math.random();
+  m.userData.bob = Math.random() * Math.PI * 2;
+  m.castShadow = true;
+  m.scale.setScalar(0);
+  animate(m.scale, { x: 1, y: 1, z: 1, duration: 400, ease: 'out(3)' });
+  collectibles.add(m);
+}
+for (let i = 0; i < STAR_COUNT; i++) spawnStar();
+
+// score
+let score = 0;
+const scoreEl = document.getElementById('score');
+function addScore() {
+  score += 1;
+  scoreEl.textContent = '⭐ ' + score;
+  animate(scoreEl, { scale: [1.4, 1], duration: 320, ease: 'out(3)' }); // little pop
+}
+
+// happy "ding" using the Web Audio API (no sound file needed).
+// Created lazily on first collect, which always follows a user gesture.
+let audioCtx = null;
+function playDing() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const now = audioCtx.currentTime;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(880, now);
+    o.frequency.exponentialRampToValueAtTime(1320, now + 0.12); // cheerful up-chirp
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(0.18, now + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.25);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(now);
+    o.stop(now + 0.26);
+  } catch (e) { /* audio not available — no problem */ }
+}
+
+const COLLECT_DIST2 = 1.7 * 1.7;
+function updateCollectibles(t, dt) {
+  // spin + bob every star
+  for (const s of collectibles.children) {
+    if (s.userData.collected) continue;
+    s.rotation.y += s.userData.spin * dt;
+    s.position.y = STAR_Y + Math.sin(t * 2 + s.userData.bob) * 0.18;
+  }
+  // collect when the player walks close enough
+  if (!player) return;
+  const px = player.position.x, pz = player.position.z;
+  for (const s of collectibles.children) {
+    if (s.userData.collected) continue;
+    const dx = s.position.x - px, dz = s.position.z - pz;
+    if (dx * dx + dz * dz < COLLECT_DIST2) {
+      s.userData.collected = true;
+      playDing();
+      addScore();
+      // sparkle up and shrink away, then remove and spawn a fresh one
+      animate(s.position, { y: s.position.y + 1.6, duration: 420, ease: 'out(2)' });
+      animate(s.rotation, { y: s.rotation.y + 6, duration: 420 });
+      animate(s.scale, {
+        x: 0, y: 0, z: 0, duration: 420, ease: 'in(2)',
+        onComplete: () => { collectibles.remove(s); spawnStar(); },
+      });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Post-processing — subtle bloom for that "production" glow
 // ---------------------------------------------------------------------------
 const composer = new EffectComposer(renderer);
@@ -556,6 +659,8 @@ function tick() {
 
   // Move first (player walks / free camera), then update characters' facing & bob.
   if (player) updatePlayer(dt); else updateMovement(dt);
+
+  updateCollectibles(t, dt);
 
   // Characters: wander around, face the camera (upright billboard), and bob/hop.
   for (const b of billboards) {
