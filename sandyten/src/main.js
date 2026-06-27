@@ -152,6 +152,57 @@ composer.addPass(bloom);
 composer.addPass(new OutputPass());
 
 // ---------------------------------------------------------------------------
+// Keyboard movement — arrow keys (and WASD) glide you across the world.
+// Movement is relative to where the camera faces: Up = forward, Down = back,
+// Left/Right = strafe. Drag-to-look and scroll-zoom still work alongside it.
+// ---------------------------------------------------------------------------
+const keys = new Set();
+const MOVE_SPEED = 12; // world units per second
+
+const MOVE_KEYS = {
+  ArrowUp: 'forward', KeyW: 'forward',
+  ArrowDown: 'back', KeyS: 'back',
+  ArrowLeft: 'left', KeyA: 'left',
+  ArrowRight: 'right', KeyD: 'right',
+};
+
+window.addEventListener('keydown', (e) => {
+  if (MOVE_KEYS[e.code]) { keys.add(MOVE_KEYS[e.code]); e.preventDefault(); }
+});
+window.addEventListener('keyup', (e) => {
+  if (MOVE_KEYS[e.code]) keys.delete(MOVE_KEYS[e.code]);
+});
+// Stop drifting if focus leaves the page mid-press.
+window.addEventListener('blur', () => keys.clear());
+
+const _forward = new THREE.Vector3();
+const _right = new THREE.Vector3();
+const _move = new THREE.Vector3();
+
+function updateMovement(dt) {
+  if (keys.size === 0) return;
+
+  // Camera forward, flattened onto the ground plane.
+  camera.getWorldDirection(_forward);
+  _forward.y = 0;
+  if (_forward.lengthSq() === 0) return;
+  _forward.normalize();
+  _right.crossVectors(_forward, camera.up).normalize();
+
+  _move.set(0, 0, 0);
+  if (keys.has('forward')) _move.add(_forward);
+  if (keys.has('back')) _move.sub(_forward);
+  if (keys.has('right')) _move.add(_right);
+  if (keys.has('left')) _move.sub(_right);
+  if (_move.lengthSq() === 0) return;
+
+  _move.normalize().multiplyScalar(MOVE_SPEED * dt);
+  // Move camera and look-at target together so you glide over the world.
+  camera.position.add(_move);
+  controls.target.add(_move);
+}
+
+// ---------------------------------------------------------------------------
 // Resize
 // ---------------------------------------------------------------------------
 window.addEventListener('resize', () => {
@@ -179,6 +230,7 @@ function tick() {
     c.position.y = c.userData.baseY + Math.sin(t * 1.2 + i) * 0.4;
   });
 
+  updateMovement(dt);
   controls.update();
   composer.render();
 
