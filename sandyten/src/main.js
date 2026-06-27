@@ -173,6 +173,28 @@ for (let i = 0; i < 6; i++) {
 loadModel('lantern.glb', { position: [3.5, 0, 3.5], rotationY: -0.6, scale: 2 });
 loadModel('lantern.glb', { position: [-3.5, 0, -3.5], rotationY: 2.4, scale: 2 });
 
+// Lamp posts around the courtyard that light up at night.
+const lampPosts = [];
+function makeLampPost(x, z) {
+  const g = new THREE.Group();
+  const pole = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.08, 0.12, 2.8, 8),
+    new THREE.MeshStandardMaterial({ color: 0x46484f, roughness: 0.7 })
+  );
+  pole.position.y = 1.4; pole.castShadow = true; g.add(pole);
+  const orbMat = new THREE.MeshStandardMaterial({ color: 0xfff2c0, emissive: 0xffd97a, emissiveIntensity: 0.15, roughness: 0.4 });
+  const orb = new THREE.Mesh(new THREE.SphereGeometry(0.24, 14, 12), orbMat);
+  orb.position.y = 2.95; g.add(orb);
+  const light = new THREE.PointLight(0xffcf7a, 0, 10, 2); // intensity toggled by day/night
+  light.position.set(0, 2.95, 0); g.add(light);
+  g.position.set(x, 0, z); scene.add(g);
+  lampPosts.push({ orbMat, light });
+}
+for (let i = 0; i < 6; i++) {
+  const a = (i / 6) * Math.PI * 2 + 0.4;
+  makeLampPost(Math.cos(a) * 9.5, Math.sin(a) * 9.5);
+}
+
 // ---------------------------------------------------------------------------
 // The girls' characters — 2D sprites standing in the 3D world.
 // Each is a flat plane that always turns to face the camera (billboard),
@@ -230,6 +252,21 @@ function makeNameLabel(text) {
   return sprite;
 }
 
+// A floating "💤" shown above a character while it sleeps.
+function makeZzzSprite() {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 128;
+  const x = c.getContext('2d');
+  x.font = '92px serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillText('💤', 64, 72);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+  s.scale.set(1.2, 1.2, 1);
+  s.visible = false;
+  return s;
+}
+
 // Soft round shadow blob placed on the ground under a character.
 function makeGroundShadow(radius) {
   const mesh = new THREE.Mesh(
@@ -282,6 +319,11 @@ function placeCharacter(char, index, total) {
   const label = makeNameLabel(char.name);
   label.position.set(0, CHAR_HEIGHT + 0.5, 0);
   holder.add(label);
+
+  const zzz = makeZzzSprite();
+  zzz.position.set(1.05, CHAR_HEIGHT + 1.0, 0);
+  holder.add(zzz);
+  holder.userData.zzz = zzz;
 
   characterGroup.add(holder);
   billboards.push(mesh);
@@ -676,6 +718,52 @@ function buildStore() {
 }
 buildStore();
 
+// The HOSPITAL — on the other (east) side of THE STORE.
+function buildHospital() {
+  const g = new THREE.Group();
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0xf2f4f6, roughness: 0.9 });
+  const roofMat = new THREE.MeshStandardMaterial({ color: 0xd2d8de, roughness: 0.8 });
+  const crossMat = new THREE.MeshStandardMaterial({ color: 0xe23b3b, roughness: 0.5, emissive: 0x4a0000, emissiveIntensity: 0.2 });
+  const floorMat = new THREE.MeshStandardMaterial({ color: 0xe3e8ec, roughness: 1 });
+  const bedW = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85 });
+  const bedFrame = new THREE.MeshStandardMaterial({ color: 0xb9c0c7, roughness: 0.6 });
+
+  const W = 9, D = 6, H = 4, T = 0.4, DOOR = 4;
+  const parts = [];
+  const box = (w, h, d, mat, x, y, z) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.set(x, y, z); parts.push(m); return m;
+  };
+  box(W, H, T, wallMat, 0, H / 2, -D / 2);
+  box(T, H, D, wallMat, -W / 2, H / 2, 0);
+  box(T, H, D, wallMat, W / 2, H / 2, 0);
+  const fw = (W - DOOR) / 2;
+  box(fw, H, T, wallMat, -(W / 2 - fw / 2), H / 2, D / 2);
+  box(fw, H, T, wallMat, (W / 2 - fw / 2), H / 2, D / 2);
+  box(DOOR, 0.9, T, wallMat, 0, H - 0.45, D / 2);
+  box(W + 0.9, 0.5, D + 0.9, roofMat, 0, H + 0.25, 0);
+  box(W, 0.1, D, floorMat, 0, 0.05, 0);
+  // red crosses on the two front wall pieces
+  for (const cx of [-(W / 2 - fw / 2), (W / 2 - fw / 2)]) {
+    box(0.35, 1.3, 0.1, crossMat, cx, 2.2, D / 2 + 0.06);
+    box(1.0, 0.4, 0.1, crossMat, cx, 2.2, D / 2 + 0.06);
+  }
+  // a hospital bed inside
+  box(2.0, 0.5, 1.0, bedFrame, -2.2, 0.3, -D / 2 + 1.6);
+  box(1.9, 0.22, 0.95, bedW, -2.2, 0.6, -D / 2 + 1.6);
+  box(0.55, 0.2, 0.85, bedW, -2.85, 0.78, -D / 2 + 1.6); // pillow
+
+  parts.forEach((m) => { m.castShadow = true; m.receiveShadow = true; g.add(m); });
+
+  const sign = makeSign('HOSPITAL');
+  sign.position.set(0, H + 1.3, D / 2 - 0.05);
+  g.add(sign);
+
+  g.position.set(14, 0, -14);
+  scene.add(g);
+}
+buildHospital();
+
 // Shopkeeper — a billboard sprite standing behind the counter (doesn't roam).
 const SHOPKEEPER_POS = new THREE.Vector3(0, 0, -17.6);
 function addShopkeeper() {
@@ -1035,9 +1123,10 @@ function placeHouses(roster) {
     homeById[c.id] = { x: cs * (R - 2), z: sn * (R - 2) };       // sleep spot inside the house
     buildPath(cs * 3, sn * 3, cs * (R - 2.5), sn * (R - 2.5));    // path out to this house
   });
-  // paths to THE STORE and the DRESSING ROOM
+  // paths to THE STORE, the DRESSING ROOM, and the HOSPITAL
   buildPath(0, -3, 0, -13);
   buildPath(-2.8, -2.1, DRESS_POS.x, DRESS_POS.z);
+  buildPath(2.8, -2.1, 14, -11);
 }
 
 // ---------------------------------------------------------------------------
@@ -1085,8 +1174,53 @@ function updateDayNight(t) {
   scene.fog.color.copy(_nightFog).lerp(_dayFog, dayness);
   starMat.opacity = Math.max(0, 1 - dayness * 3);
   isNight = (75 * sinE) < 3;
+  // lamp posts glow & cast light at night
+  const lampOn = Math.max(0, 1 - dayness * 2.4);
+  for (const lp of lampPosts) {
+    lp.light.intensity = lampOn * 1.7;
+    lp.orbMat.emissiveIntensity = 0.15 + lampOn * 1.1;
+  }
   const [name, icon] = phaseName(dayT);
   if (phaseEl) phaseEl.textContent = icon + ' ' + name;
+}
+
+// ---------------------------------------------------------------------------
+// A nocturnal owl — only comes out at night, circling slowly overhead.
+// ---------------------------------------------------------------------------
+let owl = null;
+function createOwl() {
+  const g = new THREE.Group();
+  const brown = new THREE.MeshStandardMaterial({ color: 0x7a5a3a, roughness: 0.85, side: THREE.DoubleSide });
+  const tan = new THREE.MeshStandardMaterial({ color: 0xcda36a, roughness: 0.85 });
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.42, 12, 10), brown); body.scale.set(1, 1.2, 1); g.add(body);
+  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.3, 10, 8), tan); belly.position.set(0, -0.05, 0.22); belly.scale.set(1, 1.1, 0.6); g.add(belly);
+  const eyeW = new THREE.MeshStandardMaterial({ color: 0xffffff });
+  const eyeB = new THREE.MeshStandardMaterial({ color: 0x1a1a1a });
+  for (const sx of [-0.16, 0.16]) {
+    const e = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 10), eyeW); e.position.set(sx, 0.18, 0.33); g.add(e);
+    const p = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 8), eyeB); p.position.set(sx, 0.18, 0.43); g.add(p);
+  }
+  const beak = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.18, 6), new THREE.MeshStandardMaterial({ color: 0xf2a93b }));
+  beak.position.set(0, 0.05, 0.42); beak.rotation.x = Math.PI / 2; g.add(beak);
+  const wingGeo = new THREE.PlaneGeometry(0.55, 0.55);
+  const wL = new THREE.Mesh(wingGeo, brown); wL.position.x = -0.45; g.add(wL);
+  const wR = new THREE.Mesh(wingGeo, brown); wR.position.x = 0.45; g.add(wR);
+  g.userData = { wL, wR };
+  g.visible = false;
+  scene.add(g);
+  owl = g;
+}
+createOwl();
+function updateOwl(t) {
+  if (!owl) return;
+  owl.visible = isNight;
+  if (!isNight) return;
+  const ang = -t * 0.16;
+  owl.position.set(Math.cos(ang) * 8.5, 7.5 + Math.sin(t * 0.5) * 0.5, Math.sin(ang) * 8.5);
+  owl.rotation.y = -ang + Math.PI;
+  const flap = Math.sin(t * 5) * 0.5;
+  owl.userData.wL.rotation.z = flap;
+  owl.userData.wR.rotation.z = -flap;
 }
 
 // ---------------------------------------------------------------------------
@@ -1422,6 +1556,7 @@ function tick() {
 
   updateDayNight(t);
   updateBirds(t);
+  updateOwl(t);
 
   // Move first (player walks / free camera), then update characters' facing & bob.
   if (player) updatePlayer(dt); else updateMovement(dt);
@@ -1439,13 +1574,14 @@ function tick() {
     // The player-controlled character (and the shopkeeper) skip roaming.
     // updatePlayer() sets the player's position/moving flag instead.
     if (!w.isPlayer && !w.isShopkeeper) {
+      w.sleeping = false;
       const cid = b.userData.char && b.userData.char.id;
       if (isNight && SLEEPERS.has(cid) && homeById[cid]) {
         // at night, half the characters head home to sleep
         const home = homeById[cid];
         _charDir.set(home.x - holder.position.x, 0, home.z - holder.position.z);
         const d = _charDir.length();
-        if (d < 0.4) { w.moving = false; } // tucked in at home
+        if (d < 0.4) { w.moving = false; w.sleeping = true; } // tucked in at home
         else { w.moving = true; const step = Math.min(w.speed * dt, d); holder.position.x += (_charDir.x / d) * step; holder.position.z += (_charDir.z / d) * step; }
       } else if (t >= w.pauseUntil) {
         _charDir.set(w.target.x - holder.position.x, 0, w.target.z - holder.position.z);
@@ -1475,6 +1611,12 @@ function tick() {
     b.position.y = w.moving
       ? b.userData.baseY + Math.abs(Math.sin(t * 9 + b.userData.bobPhase)) * 0.22
       : b.userData.baseY + Math.sin(t * 1.6 + b.userData.bobPhase) * 0.1;
+
+    // show a floating 💤 while sleeping
+    if (holder.userData.zzz) {
+      holder.userData.zzz.visible = !!w.sleeping;
+      if (w.sleeping) holder.userData.zzz.position.y = (CHAR_HEIGHT + 1.0) + Math.sin(t * 2 + b.userData.bobPhase) * 0.12;
+    }
   }
 
   // Keep an open speech bubble glued above its character, and auto-hide it.
