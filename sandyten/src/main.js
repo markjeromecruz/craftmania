@@ -413,6 +413,9 @@ function updatePlayer(dt) {
   let nz = player.position.z + _move.z;
   const r = Math.hypot(nx, nz);
   if (r > PLAY_RADIUS) { nx = (nx / r) * PLAY_RADIUS; nz = (nz / r) * PLAY_RADIUS; }
+  // walls block everyone except Boo the ghost (he phases right through)
+  const isBoo = player.userData.mesh?.userData.char?.id === 'boo';
+  if (!isBoo) { [nx, nz] = resolveWalls(nx, nz, player.position.x, player.position.z); }
   const ddx = nx - player.position.x, ddz = nz - player.position.z;
   player.position.x = nx; player.position.z = nz;
   // camera follows by the same amount, keeping your view steady
@@ -851,42 +854,111 @@ const HOUSE_COLORS = {
   lloyd:  { wall: 0xcdbfe0, roof: 0x6b4f9e },
 };
 
+// --- Wall collision: walls block everyone except Boo (the ghost). ---
+const wallSegments = [];      // world-space 2D line segments of solid walls
+const PLAYER_RADIUS = 0.55;
+function rotXZ(lx, lz, ry) { const c = Math.cos(ry), s = Math.sin(ry); return [lx * c + lz * s, -lx * s + lz * c]; }
+function addWall(gx, gz, ry, lx1, lz1, lx2, lz2) {
+  const [x1, z1] = rotXZ(lx1, lz1, ry);
+  const [x2, z2] = rotXZ(lx2, lz2, ry);
+  wallSegments.push({ x1: x1 + gx, z1: z1 + gz, x2: x2 + gx, z2: z2 + gz });
+}
+function resolveWalls(x, z, fromX, fromZ) {
+  for (const s of wallSegments) {
+    const dx = s.x2 - s.x1, dz = s.z2 - s.z1;
+    const L2 = dx * dx + dz * dz || 1;
+    let t = ((x - s.x1) * dx + (z - s.z1) * dz) / L2;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const cx = s.x1 + t * dx, cz = s.z1 + t * dz;
+    let ox = x - cx, oz = z - cz;
+    let d = Math.hypot(ox, oz);
+    if (d < PLAYER_RADIUS) {
+      if (d < 1e-4) { ox = x - fromX; oz = z - fromZ; d = Math.hypot(ox, oz) || 1; }
+      ox /= d; oz /= d;
+      const push = PLAYER_RADIUS - d;
+      x += ox * push; z += oz * push;
+    }
+  }
+  return [x, z];
+}
+
 function buildHouse({ x, z, rotationY, name, wall, roof }) {
   const g = new THREE.Group();
   const wallMat = new THREE.MeshStandardMaterial({ color: wall, roughness: 0.95 });
   const roofMat = new THREE.MeshStandardMaterial({ color: roof, roughness: 0.8 });
   const floorMat = new THREE.MeshStandardMaterial({ color: 0xcdbb98, roughness: 1 });
+  const winMat = new THREE.MeshStandardMaterial({ color: 0xbfe6ff, emissive: 0x8fd0ff, emissiveIntensity: 0.25, roughness: 0.2 });
 
-  const W = 5, D = 5, H = 3.2, T = 0.35, DOOR = 1.9;
+  const W = 5, D = 5, T = 0.35, DOOR = 1.9;
+  const H1 = 3.0, H2 = 2.4;                  // ground floor + second floor
+  const y2 = H1 + 0.12;                      // upper floor base height
   const parts = [];
   const box = (w, h, d, mat, px, py, pz) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
     m.position.set(px, py, pz); parts.push(m); return m;
   };
-  box(W, H, T, wallMat, 0, H / 2, -D / 2);                  // back wall
-  box(T, H, D, wallMat, -W / 2, H / 2, 0);                  // left wall
-  box(T, H, D, wallMat, W / 2, H / 2, 0);                   // right wall
-  const fw = (W - DOOR) / 2;                                // front, with a doorway
-  box(fw, H, T, wallMat, -(W / 2 - fw / 2), H / 2, D / 2);
-  box(fw, H, T, wallMat, (W / 2 - fw / 2), H / 2, D / 2);
-  box(DOOR, 0.6, T, wallMat, 0, H - 0.3, D / 2);            // lintel over the door
-  box(W, 0.1, D, floorMat, 0, 0.05, 0);                    // floor
 
-  const roofMesh = new THREE.Mesh(new THREE.ConeGeometry(W * 0.8, 1.8, 4), roofMat); // pyramid roof
-  roofMesh.position.set(0, H + 0.9, 0);
+  // ground floor (doorway in the front)
+  box(W, H1, T, wallMat, 0, H1 / 2, -D / 2);
+  box(T, H1, D, wallMat, -W / 2, H1 / 2, 0);
+  box(T, H1, D, wallMat, W / 2, H1 / 2, 0);
+  const fw = (W - DOOR) / 2;
+  box(fw, H1, T, wallMat, -(W / 2 - fw / 2), H1 / 2, D / 2);
+  box(fw, H1, T, wallMat, (W / 2 - fw / 2), H1 / 2, D / 2);
+  box(DOOR, 0.5, T, wallMat, 0, H1 - 0.25, D / 2);   // lintel over the door
+  box(W, 0.1, D, floorMat, 0, 0.05, 0);              // ground slab
+  box(W, 0.12, D, floorMat, 0, H1 + 0.06, 0);        // ceiling / second-floor slab
+
+  // second floor (enclosed, with a window on the front)
+  box(W, H2, T, wallMat, 0, y2 + H2 / 2, -D / 2);
+  box(T, H2, D, wallMat, -W / 2, y2 + H2 / 2, 0);
+  box(T, H2, D, wallMat, W / 2, y2 + H2 / 2, 0);
+  box(W, H2, T, wallMat, 0, y2 + H2 / 2, D / 2);
+  box(1.8, 1.2, 0.08, winMat, 0, y2 + H2 * 0.52, D / 2 + 0.05); // window
+
+  const roofMesh = new THREE.Mesh(new THREE.ConeGeometry(W * 0.82, 1.8, 4), roofMat); // pyramid roof
+  roofMesh.position.set(0, y2 + H2 + 0.9, 0);
   roofMesh.rotation.y = Math.PI / 4;
   parts.push(roofMesh);
 
   parts.forEach((m) => { m.castShadow = true; m.receiveShadow = true; g.add(m); });
 
+  // --- furniture (added so you can see it through the door) ---
+  const wood = new THREE.MeshStandardMaterial({ color: 0x9c6b3f, roughness: 0.9 });
+  const sheet = new THREE.MeshStandardMaterial({ color: 0xf4f0e6, roughness: 0.85 });
+  const accentMat = new THREE.MeshStandardMaterial({ color: roof, roughness: 0.8 });
+  const lampMat = new THREE.MeshStandardMaterial({ color: 0xfff2c0, emissive: 0xffd97a, emissiveIntensity: 0.7, roughness: 0.6 });
+  const furn = (geo, mat, px, py, pz) => { const m = new THREE.Mesh(geo, mat); m.position.set(px, py, pz); m.castShadow = true; m.receiveShadow = true; g.add(m); };
+  furn(new THREE.CylinderGeometry(1.25, 1.25, 0.04, 20), accentMat, 0, 0.09, 0.4);    // rug
+  furn(new THREE.BoxGeometry(2.1, 0.4, 1.05), wood, -1.0, 0.28, -1.35);               // bed base
+  furn(new THREE.BoxGeometry(2.0, 0.22, 0.95), sheet, -1.0, 0.56, -1.35);             // mattress
+  furn(new THREE.BoxGeometry(0.55, 0.2, 0.85), accentMat, -1.75, 0.72, -1.35);        // pillow
+  furn(new THREE.BoxGeometry(1.3, 0.16, 0.95), accentMat, -0.7, 0.68, -1.35);         // blanket
+  furn(new THREE.CylinderGeometry(0.6, 0.6, 0.12, 16), wood, 1.35, 1.0, -1.1);        // round table top
+  furn(new THREE.CylinderGeometry(0.12, 0.16, 1.0, 10), wood, 1.35, 0.5, -1.1);       // table pedestal
+  furn(new THREE.BoxGeometry(0.55, 0.1, 0.55), wood, 1.35, 0.62, 0.2);                // chair seat
+  furn(new THREE.BoxGeometry(0.55, 0.6, 0.1), wood, 1.35, 0.92, -0.05);               // chair back
+  furn(new THREE.CylinderGeometry(0.05, 0.05, 1.4, 8), wood, 1.95, 0.7, 1.35);        // lamp pole
+  furn(new THREE.ConeGeometry(0.34, 0.4, 12), lampMat, 1.95, 1.55, 1.35);             // lamp shade
+  // a little bed upstairs too
+  furn(new THREE.BoxGeometry(1.9, 0.35, 0.95), wood, -1.0, y2 + 0.28, -1.3);
+  furn(new THREE.BoxGeometry(1.8, 0.2, 0.85), sheet, -1.0, y2 + 0.52, -1.3);
+
   const sign = makeSign(name);
   sign.scale.setScalar(0.52);
-  sign.position.set(0, H + 0.15, D / 2 + 0.05);            // nameplate over the door
+  sign.position.set(0, H1 + 0.2, D / 2 + 0.05);     // nameplate over the door
   g.add(sign);
 
   g.position.set(x, 0, z);
   g.rotation.y = rotationY;
   scene.add(g);
+
+  // register the solid ground-floor walls for collision (doorway stays open)
+  addWall(x, z, rotationY, -W / 2, -D / 2, W / 2, -D / 2);  // back
+  addWall(x, z, rotationY, -W / 2, -D / 2, -W / 2, D / 2);  // left
+  addWall(x, z, rotationY, W / 2, -D / 2, W / 2, D / 2);    // right
+  addWall(x, z, rotationY, -W / 2, D / 2, -DOOR / 2, D / 2); // front (left of door)
+  addWall(x, z, rotationY, DOOR / 2, D / 2, W / 2, D / 2);   // front (right of door)
 }
 
 function placeHouses(roster) {
@@ -1291,4 +1363,4 @@ tick();
 runIntro();
 
 // Expose the scene graph for quick tinkering from the console / future code.
-window.SANDYTEN = { THREE, scene, camera, renderer, controls, composer, crystals, setSun, animate, utils };
+window.SANDYTEN = { THREE, scene, camera, renderer, controls, composer, crystals, setSun, animate, utils, wallSegments, resolveWalls };
