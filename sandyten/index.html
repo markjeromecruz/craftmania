@@ -159,6 +159,24 @@
     }
     .swatch:hover { transform: scale(1.18); }
     .swatch.sel { border-color: #fff; box-shadow: 0 0 0 2px var(--accent); }
+
+    /* ---------- Touch joystick (mobile only) ---------- */
+    #joystick {
+      position: fixed; left: 24px; bottom: 24px; z-index: 36;
+      width: 132px; height: 132px; border-radius: 50%;
+      background: rgba(13, 27, 42, .32); border: 2px solid rgba(255, 255, 255, .25);
+      display: none; align-items: center; justify-content: center;
+      touch-action: none; -webkit-tap-highlight-color: transparent;
+      backdrop-filter: blur(4px);
+    }
+    #joyknob {
+      width: 58px; height: 58px; border-radius: 50%; pointer-events: none;
+      background: rgba(255, 255, 255, .5); border: 2px solid rgba(255, 255, 255, .85);
+      transition: transform .04s linear;
+    }
+    /* show only on touch / coarse-pointer devices, or when JS flags touch */
+    @media (hover: none) and (pointer: coarse) { #joystick { display: flex; } }
+    body.touch #joystick { display: flex; }
   </style>
 </head>
 <body>
@@ -183,6 +201,9 @@
     </div>
     <div class="hint">Click a character to pick who you are!</div>
   </div>
+
+  <!-- Touch joystick (auto-shown on phones/tablets) -->
+  <div id="joystick" aria-hidden="true"><div id="joyknob"></div></div>
 
   <!-- Local, vendored libraries — no internet / no build step required -->
   <script type="importmap">

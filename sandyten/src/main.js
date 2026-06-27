@@ -383,7 +383,8 @@ function playAs(id) {
     || (window.SANDYTEN.roster.find((r) => r.id === id) || {}).name || 'your character';
   const strong = document.createElement('strong');
   strong.textContent = name;
-  hintEl.replaceChildren('Playing as ', strong, ' — arrow keys / WASD to move · drag to look');
+  const move = document.body.classList.contains('touch') ? 'joystick to move · drag to look' : 'arrow keys / WASD to move · drag to look';
+  hintEl.replaceChildren('Playing as ', strong, ' — ' + move);
   changeBtn.style.display = '';
 }
 
@@ -391,7 +392,7 @@ function playAs(id) {
 function updatePlayer(dt) {
   if (!player) return;
   const w = player.userData;
-  if (keys.size === 0) { w.moving = false; return; }
+  if (keys.size === 0 && !joyVec.active) { w.moving = false; return; }
 
   camera.getWorldDirection(_forward); _forward.y = 0;
   if (_forward.lengthSq() === 0) { w.moving = false; return; }
@@ -403,6 +404,7 @@ function updatePlayer(dt) {
   if (keys.has('back')) _move.sub(_forward);
   if (keys.has('right')) _move.add(_right);
   if (keys.has('left')) _move.sub(_right);
+  if (joyVec.active) { _move.addScaledVector(_forward, -joyVec.y); _move.addScaledVector(_right, joyVec.x); }
   if (_move.lengthSq() === 0) { w.moving = false; return; }
 
   _move.normalize().multiplyScalar(PLAYER_SPEED * dt);
@@ -1028,8 +1030,47 @@ const _forward = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _move = new THREE.Vector3();
 
+// On-screen joystick for touch devices (drives the same movement as the keys).
+// joyVec.x = right/left (-1..1), joyVec.y = down/up (-1..1, up = forward).
+const joyVec = { x: 0, y: 0, active: false };
+(function setupJoystick() {
+  const el = document.getElementById('joystick');
+  const knob = document.getElementById('joyknob');
+  if (!el || !knob) return;
+  // show the joystick on touch / coarse-pointer devices
+  if (window.matchMedia('(hover: none) and (pointer: coarse)').matches
+      || 'ontouchstart' in window || navigator.maxTouchPoints > 0) {
+    document.body.classList.add('touch');
+  }
+  const R = 48; // max knob travel in px
+  let id = null;
+  function moveKnob(e) {
+    const r = el.getBoundingClientRect();
+    let dx = e.clientX - (r.left + r.width / 2);
+    let dy = e.clientY - (r.top + r.height / 2);
+    const len = Math.hypot(dx, dy) || 1;
+    const k = Math.min(len, R) / len;
+    dx *= k; dy *= k;
+    knob.style.transform = `translate(${dx}px, ${dy}px)`;
+    joyVec.x = dx / R; joyVec.y = dy / R;
+  }
+  el.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); id = e.pointerId;
+    try { el.setPointerCapture(id); } catch (err) { /* ignore */ }
+    joyVec.active = true; moveKnob(e);
+  });
+  el.addEventListener('pointermove', (e) => { if (joyVec.active && e.pointerId === id) moveKnob(e); });
+  const release = (e) => {
+    if (e && e.pointerId !== id) return;
+    joyVec.active = false; joyVec.x = 0; joyVec.y = 0; id = null;
+    knob.style.transform = 'translate(0px, 0px)';
+  };
+  el.addEventListener('pointerup', release);
+  el.addEventListener('pointercancel', release);
+})();
+
 function updateMovement(dt) {
-  if (keys.size === 0) return;
+  if (keys.size === 0 && !joyVec.active) return;
 
   // Camera forward, flattened onto the ground plane.
   camera.getWorldDirection(_forward);
@@ -1043,6 +1084,7 @@ function updateMovement(dt) {
   if (keys.has('back')) _move.sub(_forward);
   if (keys.has('right')) _move.add(_right);
   if (keys.has('left')) _move.sub(_right);
+  if (joyVec.active) { _move.addScaledVector(_forward, -joyVec.y); _move.addScaledVector(_right, joyVec.x); }
   if (_move.lengthSq() === 0) return;
 
   _move.normalize().multiplyScalar(MOVE_SPEED * dt);
