@@ -8,6 +8,9 @@
     trimmed to 512×512 transparent PNGs. Stats + moves are in
     `characters/characters.json`.
   - These designs belong to the girls — they're the original creators. 🎨
+- **Shopkeeper** (`characters/shopkeeper.png`) — a friendly merchant critter for
+  THE STORE, generated in the same style (Higgsfield Nano Banana Pro) and
+  background-removed to a 512×512 transparent PNG.
 
 ## Models (CC0 — free, public domain)
 All models below are **CC0** — free to use, no attribution required — but we
