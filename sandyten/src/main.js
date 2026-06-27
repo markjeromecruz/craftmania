@@ -180,7 +180,9 @@ loadModel('lantern.glb', { position: [-3.5, 0, -3.5], rotationY: 2.4, scale: 2 }
 // ---------------------------------------------------------------------------
 const characterGroup = new THREE.Group();
 scene.add(characterGroup);
-const billboards = []; // meshes that turn to face the camera each frame
+const billboards = [];      // meshes that turn to face the camera each frame
+const holdersById = {};     // character id -> its holder Group (for the picker)
+let player = null;          // the holder the kid is currently controlling (or null)
 
 const textureLoader = new THREE.TextureLoader();
 const CHAR_HEIGHT = 3.4;        // how tall a character stands, in world units
@@ -269,6 +271,7 @@ function placeCharacter(char, index, total) {
 
   characterGroup.add(holder);
   billboards.push(mesh);
+  holdersById[char.id] = holder;
 
   // cute entrance: pop up from nothing
   mesh.scale.set(0, 0, 0);
@@ -283,8 +286,118 @@ fetch('./assets/characters/characters.json')
     roster.forEach((c, i) => placeCharacter(c, i, roster.length));
     // expose the roster + their stats for the game the girls build next
     window.SANDYTEN.roster = roster;
+    buildPicker(roster);
+    setTimeout(showPicker, 1400); // let them pop in, then ask who to be
   })
   .catch((err) => console.warn('Could not load characters.json', err));
+
+// ---------------------------------------------------------------------------
+// Choose-your-character + play as them (walk around, camera follows).
+// ---------------------------------------------------------------------------
+const PLAYER_SPEED = 7;     // how fast you walk as your character
+const PLAY_RADIUS = 26;     // how far you can wander from the center
+let pickerEl = null;
+let pickerReadyAt = 0; // clicks before this time (during fade-in) are ignored
+const hintEl = document.querySelector('#hud .hint');
+const changeBtn = document.getElementById('changeBtn');
+changeBtn.addEventListener('click', showPicker);
+
+function buildPicker(roster) {
+  pickerEl = document.createElement('div');
+  pickerEl.id = 'picker';
+  const panel = document.createElement('div');
+  panel.className = 'picker-panel';
+  const h = document.createElement('h2');
+  h.append('Choose your ', Object.assign(document.createElement('span'), { textContent: 'character' }), '!');
+  const grid = document.createElement('div');
+  grid.className = 'picker-grid';
+  roster.forEach((c) => {
+    const card = document.createElement('button');
+    card.className = 'picker-card';
+    const img = document.createElement('img');
+    img.src = `./assets/characters/${c.sprite}`;
+    img.alt = c.name;
+    const nm = document.createElement('span');
+    nm.textContent = c.name;
+    card.append(img, nm);
+    card.addEventListener('click', () => {
+      if (performance.now() < pickerReadyAt) return; // ignore clicks during fade-in
+      playAs(c.id); hidePicker();
+    });
+    grid.appendChild(card);
+  });
+  panel.append(h, grid);
+  pickerEl.appendChild(panel);
+  document.body.appendChild(pickerEl);
+}
+
+function showPicker() {
+  if (!pickerEl) return;
+  pickerEl.style.display = 'flex';
+  pickerReadyAt = performance.now() + 350; // brief no-click window during fade-in
+  animate(pickerEl, { opacity: [0, 1], duration: 280, ease: 'out(3)' });
+}
+function hidePicker() {
+  if (!pickerEl) return;
+  animate(pickerEl, { opacity: [1, 0], duration: 220, onComplete: () => { pickerEl.style.display = 'none'; } });
+}
+
+function playAs(id) {
+  const holder = holdersById[id];
+  if (!holder) return;
+  // release any previous character back into roaming
+  if (player) player.userData.isPlayer = false;
+  player = holder;
+  holder.userData.isPlayer = true;
+  holder.userData.moving = false;
+  holder.userData.pauseUntil = Infinity; // never roam while controlled
+
+  // frame the player with a friendly third-person camera
+  const p = holder.position;
+  controls.target.set(p.x, 1.5, p.z);
+  camera.position.set(p.x + 6, 4.5, p.z + 8);
+  controls.minDistance = 4;
+  controls.maxDistance = 30;
+  controls.update();
+
+  const name = holder.children.find((c) => c.userData?.char)?.userData.char.name
+    || (window.SANDYTEN.roster.find((r) => r.id === id) || {}).name || 'your character';
+  const strong = document.createElement('strong');
+  strong.textContent = name;
+  hintEl.replaceChildren('Playing as ', strong, ' — arrow keys / WASD to move · drag to look');
+  changeBtn.style.display = '';
+}
+
+// Walk around as the chosen character; the camera trails along.
+function updatePlayer(dt) {
+  if (!player) return;
+  const w = player.userData;
+  if (keys.size === 0) { w.moving = false; return; }
+
+  camera.getWorldDirection(_forward); _forward.y = 0;
+  if (_forward.lengthSq() === 0) { w.moving = false; return; }
+  _forward.normalize();
+  _right.crossVectors(_forward, camera.up).normalize();
+
+  _move.set(0, 0, 0);
+  if (keys.has('forward')) _move.add(_forward);
+  if (keys.has('back')) _move.sub(_forward);
+  if (keys.has('right')) _move.add(_right);
+  if (keys.has('left')) _move.sub(_right);
+  if (_move.lengthSq() === 0) { w.moving = false; return; }
+
+  _move.normalize().multiplyScalar(PLAYER_SPEED * dt);
+  let nx = player.position.x + _move.x;
+  let nz = player.position.z + _move.z;
+  const r = Math.hypot(nx, nz);
+  if (r > PLAY_RADIUS) { nx = (nx / r) * PLAY_RADIUS; nz = (nz / r) * PLAY_RADIUS; }
+  const ddx = nx - player.position.x, ddz = nz - player.position.z;
+  player.position.x = nx; player.position.z = nz;
+  // camera follows by the same amount, keeping your view steady
+  camera.position.x += ddx; camera.position.z += ddz;
+  controls.target.x += ddx; controls.target.z += ddz;
+  w.moving = true;
+}
 
 // ---------------------------------------------------------------------------
 // Click (or tap) a character to make it say something.
@@ -441,27 +554,34 @@ function tick() {
     c.position.y = c.userData.baseY + Math.sin(t * 1.2 + i) * 0.4;
   });
 
+  // Move first (player walks / free camera), then update characters' facing & bob.
+  if (player) updatePlayer(dt); else updateMovement(dt);
+
   // Characters: wander around, face the camera (upright billboard), and bob/hop.
   for (const b of billboards) {
     const holder = b.parent;
     const w = holder.userData;
 
-    // roam toward the current target, then pause and pick a new one
-    if (t >= w.pauseUntil) {
-      _charDir.set(w.target.x - holder.position.x, 0, w.target.z - holder.position.z);
-      const dist = _charDir.length();
-      if (dist < 0.25) {
-        w.moving = false;
-        w.pauseUntil = t + 0.6 + Math.random() * 1.8; // rest a moment
-        pickRoamTarget(holder);
+    // roam toward the current target, then pause and pick a new one.
+    // The player-controlled character skips roaming — updatePlayer() (run
+    // earlier this frame) sets its position and `moving` flag instead.
+    if (!w.isPlayer) {
+      if (t >= w.pauseUntil) {
+        _charDir.set(w.target.x - holder.position.x, 0, w.target.z - holder.position.z);
+        const dist = _charDir.length();
+        if (dist < 0.25) {
+          w.moving = false;
+          w.pauseUntil = t + 0.6 + Math.random() * 1.8; // rest a moment
+          pickRoamTarget(holder);
+        } else {
+          w.moving = true;
+          const step = Math.min(w.speed * dt, dist);
+          holder.position.x += (_charDir.x / dist) * step;
+          holder.position.z += (_charDir.z / dist) * step;
+        }
       } else {
-        w.moving = true;
-        const step = Math.min(w.speed * dt, dist);
-        holder.position.x += (_charDir.x / dist) * step;
-        holder.position.z += (_charDir.z / dist) * step;
+        w.moving = false;
       }
-    } else {
-      w.moving = false;
     }
 
     // always turn to face the camera, staying upright
@@ -488,7 +608,6 @@ function tick() {
     }
   }
 
-  updateMovement(dt);
   controls.update();
   composer.render();
 

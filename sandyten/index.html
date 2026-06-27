@@ -83,6 +83,38 @@
       display: block; font-size: 11px; letter-spacing: .5px;
       text-transform: uppercase; color: #8aa0bd; margin-bottom: 2px;
     }
+
+    /* ---------- Character picker ---------- */
+    #picker {
+      position: fixed; inset: 0; z-index: 40; display: none;
+      align-items: center; justify-content: center;
+      background: rgba(8, 17, 29, .78); backdrop-filter: blur(8px);
+    }
+    .picker-panel {
+      background: linear-gradient(180deg, #16314d, #0c1d30);
+      border: 1px solid rgba(127, 209, 255, .25); border-radius: 22px;
+      padding: 24px 26px; max-width: 680px; width: 92%;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, .55);
+    }
+    .picker-panel h2 { text-align: center; font-size: 24px; margin-bottom: 16px; }
+    .picker-panel h2 span { color: var(--accent); }
+    .picker-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .picker-card {
+      display: flex; flex-direction: column; align-items: center; gap: 6px;
+      cursor: pointer; color: #eaf4ff; font: inherit; font-weight: 700; font-size: 15px;
+      background: rgba(255, 255, 255, .06); border: 2px solid transparent;
+      border-radius: 16px; padding: 12px 8px;
+      transition: transform .12s ease, border-color .12s ease, background .12s ease;
+    }
+    .picker-card img { width: 96px; height: 96px; object-fit: contain; pointer-events: none; }
+    .picker-card:hover, .picker-card:focus {
+      transform: translateY(-4px); border-color: var(--accent);
+      background: rgba(255, 255, 255, .12); outline: none;
+    }
+    @media (max-width: 520px) {
+      .picker-grid { grid-template-columns: repeat(2, 1fr); }
+      .picker-card img { width: 76px; height: 76px; }
+    }
   </style>
 </head>
 <body>
@@ -99,9 +131,12 @@
   <div id="hud">
     <div class="topbar">
       <div class="brand">Sandy<span>ten</span></div>
-      <div class="pill" id="fps">– fps</div>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button class="pill" id="changeBtn" style="display:none; cursor:pointer;">⟳ Change character</button>
+        <div class="pill" id="fps">– fps</div>
+      </div>
     </div>
-    <div class="hint">Arrow keys / WASD to move · drag to look · scroll to zoom — <em>tell Claude what to build next</em></div>
+    <div class="hint">Click a character to pick who you are!</div>
   </div>
 
   <!-- Local, vendored libraries — no internet / no build step required -->
