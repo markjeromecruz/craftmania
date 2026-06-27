@@ -1019,19 +1019,20 @@ function placeHouses(roster) {
 
 // ---- Things you can buy, wear, and (for clothes) recolor ----
 const DRESS_ITEMS = [
+  // `layer` controls draw order so nothing z-fights: bottoms(1) < tops(2) < accessories(3).
   // accessories — fixed colors, sit on the head/face
-  { id: 'crown', name: 'Crown', emoji: '👑', price: 15, y: 1.05, scale: 1.7, recolor: false },
-  { id: 'hat', name: 'Party Hat', emoji: '🎉', price: 6, y: 1.2, scale: 1.7, recolor: false },
-  { id: 'glasses', name: 'Sunglasses', emoji: '🕶️', price: 8, y: 0.35, scale: 1.5, recolor: false },
-  { id: 'bow', name: 'Bow', emoji: '🎀', price: 5, y: 0.9, scale: 1.2, recolor: false },
+  { id: 'crown', name: 'Crown', emoji: '👑', price: 15, y: 1.05, scale: 1.7, recolor: false, layer: 3 },
+  { id: 'hat', name: 'Party Hat', emoji: '🎉', price: 6, y: 1.2, scale: 1.7, recolor: false, layer: 3 },
+  { id: 'glasses', name: 'Sunglasses', emoji: '🕶️', price: 8, y: 0.35, scale: 1.5, recolor: false, layer: 3 },
+  { id: 'bow', name: 'Bow', emoji: '🎀', price: 5, y: 0.9, scale: 1.2, recolor: false, layer: 3 },
   // clothes — white base, recolor them to any color to make your own outfit.
-  // Positioned on the lower body so they fit and never cover the face.
-  { id: 'tshirt', name: 'T-Shirt', emoji: '👕', price: 7, y: -0.55, scale: 1.5, recolor: true },
-  { id: 'croptop', name: 'Crop Top', emoji: '🎽', price: 7, y: -0.45, scale: 1.3, recolor: true },
-  { id: 'skirt', name: 'Skirt', emoji: '👗', price: 8, y: -0.95, scale: 1.5, recolor: true },
-  { id: 'shorts', name: 'Shorts', emoji: '🩳', price: 6, y: -1.05, scale: 1.4, recolor: true },
-  { id: 'pants', name: 'Pants', emoji: '👖', price: 9, y: -1.05, scale: 1.4, recolor: true },
-  { id: 'rippedpants', name: 'Ripped Pants', emoji: '👖', price: 11, y: -1.05, scale: 1.4, recolor: true },
+  // Tops cover the torso; bottoms cover the legs; tops draw over bottoms.
+  { id: 'tshirt', name: 'T-Shirt', emoji: '👕', price: 7, y: -0.5, scale: 1.4, recolor: true, layer: 2 },
+  { id: 'croptop', name: 'Crop Top', emoji: '🎽', price: 7, y: -0.4, scale: 1.2, recolor: true, layer: 2 },
+  { id: 'skirt', name: 'Skirt', emoji: '👗', price: 8, y: -0.95, scale: 1.5, recolor: true, layer: 1 },
+  { id: 'shorts', name: 'Shorts', emoji: '🩳', price: 6, y: -1.05, scale: 1.4, recolor: true, layer: 1 },
+  { id: 'pants', name: 'Pants', emoji: '👖', price: 9, y: -1.05, scale: 1.4, recolor: true, layer: 1 },
+  { id: 'rippedpants', name: 'Ripped Pants', emoji: '👖', price: 11, y: -1.05, scale: 1.4, recolor: true, layer: 1 },
 ];
 const PALETTE = [
   0xff7eb6, 0xff5a5a, 0xffa94d, 0xffe066, 0x74e08c,
@@ -1056,12 +1057,18 @@ function wearItem(charMesh, item) {
   const color = item.recolor
     ? (charMesh.userData.itemColors[item.id] ?? DEFAULT_CLOTHES_COLOR)
     : 0xffffff;
+  const layer = item.layer || 2;
   const m = new THREE.Mesh(
     new THREE.PlaneGeometry(item.scale, item.scale),
-    new THREE.MeshBasicMaterial({ map: getItemTexture(item.id), transparent: true, alphaTest: 0.4, side: THREE.DoubleSide, color })
+    new THREE.MeshBasicMaterial({
+      map: getItemTexture(item.id), transparent: true, alphaTest: 0.3,
+      side: THREE.DoubleSide, color,
+      depthWrite: false, // don't write depth, so layered clothes never z-fight
+    })
   );
-  m.position.set(0, item.y, item.recolor ? 0.03 : 0.05); // clothes just behind head accessories
-  m.renderOrder = item.recolor ? 1 : 2;
+  // hug the body (small z), and paint strictly by layer so tops cover bottoms
+  m.position.set(0, item.y, 0.02 + layer * 0.01);
+  m.renderOrder = 10 + layer;
   charMesh.add(m);
   charMesh.userData.accessories[item.id] = m;
   if (item.recolor) charMesh.userData.itemColors[item.id] = color;
