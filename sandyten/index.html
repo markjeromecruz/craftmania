@@ -62,6 +62,27 @@
       backdrop-filter: blur(6px); text-align: center;
     }
     a.notch { color: var(--glow); text-decoration: none; }
+
+    /* ---------- Character speech bubble ---------- */
+    .speech {
+      position: fixed; z-index: 30; pointer-events: none;
+      transform: translate(-50%, -100%);
+      background: #ffffff; color: #14233a;
+      font-weight: 600; font-size: 15px; line-height: 1.25;
+      padding: 9px 14px; border-radius: 16px;
+      max-width: 220px; text-align: center;
+      border: 2px solid var(--accent);
+      box-shadow: 0 8px 22px rgba(0,0,0,.28);
+    }
+    .speech::after {
+      content: ''; position: absolute; left: 50%; top: 100%;
+      transform: translateX(-50%);
+      border: 9px solid transparent; border-top-color: #ffffff;
+    }
+    .speech .who {
+      display: block; font-size: 11px; letter-spacing: .5px;
+      text-transform: uppercase; color: #8aa0bd; margin-bottom: 2px;
+    }
   </style>
 </head>
 <body>

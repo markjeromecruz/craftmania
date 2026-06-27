@@ -238,6 +238,7 @@ function placeCharacter(char, index, total) {
   });
   // Sprites are square (512x512); keep them square in-world.
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(CHAR_HEIGHT, CHAR_HEIGHT), mat);
+  mesh.userData.char = char; // so a click can find this character's name + lines
 
   const angle = (index / total) * Math.PI * 2;
   const x = Math.cos(angle) * CHAR_RING;
@@ -284,6 +285,68 @@ fetch('./assets/characters/characters.json')
     window.SANDYTEN.roster = roster;
   })
   .catch((err) => console.warn('Could not load characters.json', err));
+
+// ---------------------------------------------------------------------------
+// Click (or tap) a character to make it say something.
+// A speech bubble (HTML) pops up above whoever you clicked.
+// ---------------------------------------------------------------------------
+const raycaster = new THREE.Raycaster();
+const pointerNDC = new THREE.Vector2();
+const _headPos = new THREE.Vector3();
+
+const bubbleEl = document.createElement('div');
+bubbleEl.className = 'speech';
+bubbleEl.style.display = 'none';
+bubbleEl.style.opacity = '0';
+const bubbleWho = document.createElement('span');
+bubbleWho.className = 'who';
+const bubbleText = document.createTextNode('');
+bubbleEl.append(bubbleWho, bubbleText);
+document.body.appendChild(bubbleEl);
+let activeBubble = null; // { mesh, hideAt }
+
+function showSpeech(mesh) {
+  const char = mesh.userData.char;
+  if (!char) return;
+  const lines = (char.lines && char.lines.length) ? char.lines : ['Hi!'];
+  const text = lines[Math.floor(Math.random() * lines.length)];
+  bubbleWho.textContent = char.name;       // safe: no HTML injection
+  bubbleText.textContent = text;
+  bubbleEl.style.display = 'block';
+  positionBubble(mesh); // place it before fading in, so it doesn't jump
+  activeBubble = { mesh, hideAt: timer.getElapsed() + 3.4 };
+  animate(bubbleEl, { opacity: [0, 1], duration: 260, ease: 'out(3)' });
+}
+
+function positionBubble(mesh) {
+  mesh.getWorldPosition(_headPos);
+  _headPos.y += CHAR_HEIGHT * 0.5; // float above the head
+  _headPos.project(camera);
+  if (_headPos.z > 1) { bubbleEl.style.display = 'none'; return; } // behind camera
+  bubbleEl.style.left = ((_headPos.x * 0.5 + 0.5) * window.innerWidth) + 'px';
+  bubbleEl.style.top = ((-_headPos.y * 0.5 + 0.5) * window.innerHeight) + 'px';
+}
+
+// Tap detection: only count it as a click if the pointer barely moved
+// (so dragging to look around doesn't trigger a speech bubble).
+let downX = 0, downY = 0;
+renderer.domElement.addEventListener('pointerdown', (e) => { downX = e.clientX; downY = e.clientY; });
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (Math.hypot(e.clientX - downX, e.clientY - downY) > 6) return;
+  pointerNDC.x = (e.clientX / window.innerWidth) * 2 - 1;
+  pointerNDC.y = -(e.clientY / window.innerHeight) * 2 + 1;
+  raycaster.setFromCamera(pointerNDC, camera);
+  const hits = raycaster.intersectObjects(billboards, false);
+  if (hits.length) showSpeech(hits[0].object);
+});
+
+// Show a pointer cursor when hovering a character, to invite clicking.
+renderer.domElement.addEventListener('pointermove', (e) => {
+  pointerNDC.x = (e.clientX / window.innerWidth) * 2 - 1;
+  pointerNDC.y = -(e.clientY / window.innerHeight) * 2 + 1;
+  raycaster.setFromCamera(pointerNDC, camera);
+  renderer.domElement.style.cursor = raycaster.intersectObjects(billboards, false).length ? 'pointer' : '';
+});
 
 // ---------------------------------------------------------------------------
 // Post-processing — subtle bloom for that "production" glow
@@ -411,6 +474,18 @@ function tick() {
     b.position.y = w.moving
       ? b.userData.baseY + Math.abs(Math.sin(t * 9 + b.userData.bobPhase)) * 0.22
       : b.userData.baseY + Math.sin(t * 1.6 + b.userData.bobPhase) * 0.1;
+  }
+
+  // Keep an open speech bubble glued above its character, and auto-hide it.
+  if (activeBubble) {
+    if (t >= activeBubble.hideAt) {
+      activeBubble = null;
+      animate(bubbleEl, { opacity: 0, duration: 240, onComplete: () => {
+        if (!activeBubble) bubbleEl.style.display = 'none';
+      } });
+    } else {
+      positionBubble(activeBubble.mesh);
+    }
   }
 
   updateMovement(dt);
