@@ -16,6 +16,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 import { animate, createTimeline, stagger, utils } from 'animejs';
 
@@ -136,6 +137,40 @@ for (let i = 0; i < 5; i++) {
   mesh.scale.setScalar(0); // start hidden; anime.js pops them in
   crystals.add(mesh);
 }
+
+// ---------------------------------------------------------------------------
+// Loaded 3D assets — real CC0 models (Kenney Fantasy Town Kit).
+// This is the asset pipeline: drop a .glb in assets/models/ and load it here.
+// A cute fairy-tale courtyard: a fountain in the middle, trees around it.
+// ---------------------------------------------------------------------------
+const gltfLoader = new GLTFLoader();
+
+// helper: load a model, enable shadows, place + scale it, add to the scene.
+function loadModel(file, { position = [0, 0, 0], rotationY = 0, scale = 1 } = {}) {
+  gltfLoader.load(`./assets/models/${file}`, (gltf) => {
+    const model = gltf.scene;
+    model.position.set(...position);
+    model.rotation.y = rotationY;
+    model.scale.setScalar(scale);
+    model.traverse((o) => {
+      if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; }
+    });
+    scene.add(model);
+    // gentle "place down" pop using anime.js
+    model.scale.setScalar(scale * 0.001);
+    animate(model.scale, { x: scale, y: scale, z: scale, duration: 600, ease: 'out(3)' });
+  });
+}
+
+const TREE_RING = 11;
+loadModel('fountain-round.glb', { position: [0, 0, 0], scale: 2.4 });
+for (let i = 0; i < 6; i++) {
+  const a = (i / 6) * Math.PI * 2;
+  const file = i % 2 === 0 ? 'tree-high-round.glb' : 'tree.glb';
+  loadModel(file, { position: [Math.cos(a) * TREE_RING, 0, Math.sin(a) * TREE_RING], rotationY: a, scale: 2.2 });
+}
+loadModel('lantern.glb', { position: [3.5, 0, 3.5], rotationY: -0.6, scale: 2 });
+loadModel('lantern.glb', { position: [-3.5, 0, -3.5], rotationY: 2.4, scale: 2 });
 
 // ---------------------------------------------------------------------------
 // Post-processing — subtle bloom for that "production" glow
