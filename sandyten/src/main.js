@@ -298,6 +298,7 @@ fetch('./assets/characters/characters.json')
   .then((data) => {
     const roster = data.characters || [];
     roster.forEach((c, i) => placeCharacter(c, i, roster.length));
+    placeHouses(roster); // a little house for each character
     // expose the roster + their stats for the game the girls build next
     window.SANDYTEN.roster = roster;
     buildPicker(roster);
@@ -836,6 +837,72 @@ function buildDressingRoom() {
   scene.add(room);
 }
 buildDressingRoom();
+
+// ---------------------------------------------------------------------------
+// A little house for each character, ringed around the south of the world,
+// each colored to match its character, with a nameplate over the door.
+// ---------------------------------------------------------------------------
+const HOUSE_COLORS = {
+  kiki:   { wall: 0xbfe9f0, roof: 0xff9ec7 },
+  bronte: { wall: 0xcfe8b0, roof: 0x6fae54 },
+  spike:  { wall: 0xd6f0a0, roof: 0x7bc043 },
+  cliff:  { wall: 0xd9d2c5, roof: 0x8a8276 },
+  boo:    { wall: 0xece8f6, roof: 0xb9a7e0 },
+  lloyd:  { wall: 0xcdbfe0, roof: 0x6b4f9e },
+};
+
+function buildHouse({ x, z, rotationY, name, wall, roof }) {
+  const g = new THREE.Group();
+  const wallMat = new THREE.MeshStandardMaterial({ color: wall, roughness: 0.95 });
+  const roofMat = new THREE.MeshStandardMaterial({ color: roof, roughness: 0.8 });
+  const floorMat = new THREE.MeshStandardMaterial({ color: 0xcdbb98, roughness: 1 });
+
+  const W = 5, D = 5, H = 3.2, T = 0.35, DOOR = 1.9;
+  const parts = [];
+  const box = (w, h, d, mat, px, py, pz) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.set(px, py, pz); parts.push(m); return m;
+  };
+  box(W, H, T, wallMat, 0, H / 2, -D / 2);                  // back wall
+  box(T, H, D, wallMat, -W / 2, H / 2, 0);                  // left wall
+  box(T, H, D, wallMat, W / 2, H / 2, 0);                   // right wall
+  const fw = (W - DOOR) / 2;                                // front, with a doorway
+  box(fw, H, T, wallMat, -(W / 2 - fw / 2), H / 2, D / 2);
+  box(fw, H, T, wallMat, (W / 2 - fw / 2), H / 2, D / 2);
+  box(DOOR, 0.6, T, wallMat, 0, H - 0.3, D / 2);            // lintel over the door
+  box(W, 0.1, D, floorMat, 0, 0.05, 0);                    // floor
+
+  const roofMesh = new THREE.Mesh(new THREE.ConeGeometry(W * 0.8, 1.8, 4), roofMat); // pyramid roof
+  roofMesh.position.set(0, H + 0.9, 0);
+  roofMesh.rotation.y = Math.PI / 4;
+  parts.push(roofMesh);
+
+  parts.forEach((m) => { m.castShadow = true; m.receiveShadow = true; g.add(m); });
+
+  const sign = makeSign(name);
+  sign.scale.setScalar(0.52);
+  sign.position.set(0, H + 0.15, D / 2 + 0.05);            // nameplate over the door
+  g.add(sign);
+
+  g.position.set(x, 0, z);
+  g.rotation.y = rotationY;
+  scene.add(g);
+}
+
+function placeHouses(roster) {
+  const R = 17;
+  const startDeg = 18, endDeg = 180; // southern arc — away from the store (north)
+  roster.forEach((c, i) => {
+    const tt = roster.length <= 1 ? 0 : i / (roster.length - 1);
+    const a = (startDeg + tt * (endDeg - startDeg)) * Math.PI / 180;
+    const col = HOUSE_COLORS[c.id] || { wall: 0xe0d8c8, roof: 0xb08060 };
+    buildHouse({
+      x: Math.cos(a) * R, z: Math.sin(a) * R,
+      rotationY: -(a + Math.PI / 2), // face the doorway toward the center
+      name: c.name, wall: col.wall, roof: col.roof,
+    });
+  });
+}
 
 // ---- Things you can buy, wear, and (for clothes) recolor ----
 const DRESS_ITEMS = [
