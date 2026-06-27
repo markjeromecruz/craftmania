@@ -64,6 +64,14 @@ skyU.rayleigh.value = 1.1;      // softer blue gradient, not blown out
 skyU.mieCoefficient.value = 0.003;
 skyU.mieDirectionalG.value = 0.75;
 
+// Dim ONLY the sky by 50% (multiply its color before tone-mapping) so the sky
+// is calmer without darkening the ground or characters.
+sky.material.fragmentShader = sky.material.fragmentShader.replace(
+  'gl_FragColor = vec4( texColor, 1.0 );',
+  'gl_FragColor = vec4( texColor * 0.5, 1.0 );'
+);
+sky.material.needsUpdate = true;
+
 function setSun(elevationDeg, azimuthDeg) {
   const phi = THREE.MathUtils.degToRad(90 - elevationDeg);
   const theta = THREE.MathUtils.degToRad(azimuthDeg);
@@ -820,6 +828,24 @@ function buildCampfire(x, z) {
   }
   campfire.light = new THREE.PointLight(0xff8a30, 1.4, 13, 2);
   campfire.light.position.set(0, 1, 0); g.add(campfire.light);
+
+  // marshmallows roasting on sticks over the fire
+  const stickMat = new THREE.MeshStandardMaterial({ color: 0x8a6a45, roughness: 0.9 });
+  const mallowMat = new THREE.MeshStandardMaterial({ color: 0xfff6e8, roughness: 0.75, emissive: 0x3a2a18, emissiveIntensity: 0.15 });
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2 + 0.5;
+    const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.8, 6), stickMat);
+    stick.position.set(Math.cos(a) * 1.1, 0.7, Math.sin(a) * 1.1);
+    stick.rotation.z = Math.cos(a) * 0.7;
+    stick.rotation.x = -Math.sin(a) * 0.7;
+    g.add(stick);
+    // marshmallow at the inner (fire) end of the stick
+    const mallow = new THREE.Mesh(new THREE.CapsuleGeometry(0.13, 0.18, 4, 8), mallowMat);
+    mallow.position.set(Math.cos(a) * 0.35, 0.95, Math.sin(a) * 0.35);
+    mallow.castShadow = true;
+    g.add(mallow);
+  }
+
   g.position.set(x, 0, z); scene.add(g);
 }
 buildCampfire(0, 5.5);
@@ -864,6 +890,46 @@ function updateAmbulance(t) {
   const on = Math.sin(t * 6) > 0;
   ambulanceLights[0].emissiveIntensity = on ? 1.5 : 0.2; // red
   ambulanceLights[1].emissiveIntensity = on ? 0.2 : 1.5; // blue (alternates)
+}
+
+// ---------------------------------------------------------------------------
+// A pet dog that trots after the player (and climbs stairs with them).
+// ---------------------------------------------------------------------------
+let petDog = null;
+function createDog() {
+  const tex = textureLoader.load('./assets/characters/dog.png');
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  const size = 1.7;
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(size, size),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.5, side: THREE.DoubleSide })
+  );
+  mesh.position.y = size / 2;
+  const holder = new THREE.Group();
+  holder.position.set(4, 0, 7);
+  holder.add(mesh);
+  scene.add(holder);
+  petDog = { holder, mesh, baseY: size / 2 };
+}
+createDog();
+function updateDog(t, dt) {
+  if (!petDog) return;
+  const h = petDog.holder;
+  const tx = player ? player.position.x : 4;
+  const tz = player ? player.position.z : 7;
+  const dx = tx - h.position.x, dz = tz - h.position.z;
+  const d = Math.hypot(dx, dz);
+  let moving = false;
+  if (d > 1.6) { // trail a little behind the player
+    const step = Math.min(8 * dt, d - 1.4);
+    h.position.x += (dx / d) * step;
+    h.position.z += (dz / d) * step;
+    moving = true;
+  }
+  h.position.y = houseFloorHeight(h.position.x, h.position.z); // climbs stairs too
+  petDog.mesh.rotation.y = Math.atan2(camera.position.x - h.position.x, camera.position.z - h.position.z);
+  petDog.mesh.position.y = petDog.baseY + (moving ? Math.abs(Math.sin(t * 12)) * 0.18 : Math.sin(t * 2) * 0.06);
 }
 
 // ---- Shop UI: walk up to the shopkeeper to open it; spend stars to buy ----
@@ -1255,8 +1321,8 @@ function updateDayNight(t) {
   // lamp posts glow & cast light at night
   const lampOn = Math.max(0, 1 - dayness * 2.4);
   for (const lp of lampPosts) {
-    lp.light.intensity = lampOn * 1.7;
-    lp.orbMat.emissiveIntensity = 0.15 + lampOn * 1.1;
+    lp.light.intensity = lampOn * 2.6;   // brighter at night
+    lp.orbMat.emissiveIntensity = 0.15 + lampOn * 1.5;
   }
   const [name, icon] = phaseName(dayT);
   if (phaseEl) phaseEl.textContent = icon + ' ' + name;
@@ -1637,6 +1703,7 @@ function tick() {
   updateOwl(t);
   updateCampfire(t);
   updateAmbulance(t);
+  updateDog(t, dt);
 
   // Move first (player walks / free camera), then update characters' facing & bob.
   if (player) updatePlayer(dt); else updateMovement(dt);

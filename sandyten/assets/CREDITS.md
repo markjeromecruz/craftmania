@@ -12,6 +12,7 @@
   THE STORE, generated in the same style (Higgsfield Nano Banana Pro) and
   background-removed to a 512×512 transparent PNG.
 - **Doctor** (`characters/doctor.png`) — a friendly doctor critter inside the HOSPITAL, same style + workflow.
+- **Pet dog** (`characters/dog.png`) — a puppy that follows the player, same style + workflow.
 - **Accessories** (`accessories/*.png`: crown, hat, glasses, bow) — wearable
   dressing-room items, generated in the same style and background-removed to
   256×256 transparent PNGs.
