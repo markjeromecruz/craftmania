@@ -143,13 +143,22 @@
     /* ---------- Dressing room panel (left side) ---------- */
     #dressroom {
       position: fixed; z-index: 35; left: 18px; top: 50%;
-      transform: translateY(-50%); width: 280px; max-width: 86vw; display: none;
+      transform: translateY(-50%); width: 290px; max-width: 86vw; display: none;
+      max-height: 88vh; overflow-y: auto;
       background: linear-gradient(180deg, #3a2150, #1d1030);
       border: 1px solid rgba(231, 198, 224, .3); border-radius: 18px;
       padding: 16px 16px 14px; box-shadow: 0 16px 44px rgba(0, 0, 0, .5);
     }
     #dressroom h3 { text-align: center; font-size: 19px; margin-bottom: 2px; }
     #dressroom .shop-sub { color: #f0c6e8; }
+    .dress-entry { display: flex; flex-direction: column; gap: 5px; }
+    .swatches { display: flex; gap: 6px; flex-wrap: wrap; padding: 2px 4px 6px; }
+    .swatch {
+      width: 22px; height: 22px; border-radius: 50%; cursor: pointer; padding: 0;
+      border: 2px solid rgba(255, 255, 255, .35); transition: transform .1s;
+    }
+    .swatch:hover { transform: scale(1.18); }
+    .swatch.sel { border-color: #fff; box-shadow: 0 0 0 2px var(--accent); }
   </style>
 </head>
 <body>
