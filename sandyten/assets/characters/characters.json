@@ -1,5 +1,5 @@
 {
-  "_about": "Character roster designed by the girls (hand-drawn 'Game Character Ref' sheet). Sprites generated from those drawings. Stats/moves are theirs. 512x512 transparent PNGs in this folder.",
+  "_about": "Character roster designed by the girls (hand-drawn 'Game Character Ref' sheet). Sprites generated from those drawings. Stats/moves/lines are theirs. 512x512 transparent PNGs in this folder. 'lines' = what each character says when you click it.",
   "characters": [
     {
       "id": "kiki",
@@ -7,7 +7,8 @@
       "type": "Unicorn-Dino",
       "sprite": "kiki.png",
       "stats": { "hp": 50, "atk": 30, "spd": 70 },
-      "moves": ["Horn Stab", "Tail Whip"]
+      "moves": ["Horn Stab", "Tail Whip"],
+      "lines": ["Hi! I'm Kiki! ✨", "Wanna see my sparkly horn?", "Let's go on an adventure!", "Tee-hee! 🦄"]
     },
     {
       "id": "bronte",
@@ -15,7 +16,8 @@
       "type": "Stegosaurus",
       "sprite": "bronte.png",
       "stats": { "hp": 80, "atk": 70, "def": 90 },
-      "moves": ["Stomp", "Plate Shield"]
+      "moves": ["Stomp", "Plate Shield"],
+      "lines": ["Stomp stomp! I'm Brontë!", "My plates keep me super safe!", "Rawr! ...the friendly kind 🦕", "I'm the strong one!"]
     },
     {
       "id": "spike",
@@ -23,7 +25,8 @@
       "type": "Cactus Dino",
       "sprite": "spike.png",
       "stats": { "hp": 40, "atk": 50, "spd": 40 },
-      "moves": ["Quill Burst", "Sprout Barrier"]
+      "moves": ["Quill Burst", "Sprout Barrier"],
+      "lines": ["Careful, I'm a little pokey!", "I'm Spike! 🌵", "Boing! Quill power!", "Want a hug? ...maybe not!"]
     },
     {
       "id": "cliff",
@@ -31,7 +34,8 @@
       "type": "Rock Guardian",
       "sprite": "cliff.png",
       "stats": { "hp": 100, "def": 90, "spd": 20 },
-      "moves": ["Earth Shaker", "Boulder Barrage"]
+      "moves": ["Earth Shaker", "Boulder Barrage"],
+      "lines": ["I'm Cliff. Strong and steady!", "Nothing can knock me down!", "*rumble* ...that was me 🪨", "I'll protect everyone!"]
     },
     {
       "id": "boo",
@@ -39,7 +43,8 @@
       "type": "Ghostly Echo",
       "sprite": "boo.png",
       "stats": { "hp": 30, "spd": 70, "eva": 80 },
-      "moves": ["Phase Shift", "Misty Veil"]
+      "moves": ["Phase Shift", "Misty Veil"],
+      "lines": ["Boo! Did I scare you? 👻", "I can float through walls!", "Wheee, spooky-cute!", "You can't catch me!"]
     },
     {
       "id": "lloyd",
@@ -47,7 +52,8 @@
       "type": "Hooded Wraith",
       "sprite": "lloyd.png",
       "stats": { "hp": 60, "atk": 70, "spd": 80 },
-      "moves": ["Dark Bolt", "Soul Trap"]
+      "moves": ["Dark Bolt", "Soul Trap"],
+      "lines": ["Greetings... I am Lloyd.", "Spooky but friendly, promise!", "The shadows say hi 🖤", "Mwa-ha... I mean, hello!"]
     }
   ]
 }
