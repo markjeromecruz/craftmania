@@ -271,6 +271,8 @@ function placeCharacter(char, index, total) {
   mesh.position.y = baseY;
   mesh.userData.baseY = baseY;
   mesh.userData.bobPhase = index * 0.9;
+  mesh.userData.accessories = {}; // id -> accessory mesh worn by this character
+  holder.userData.mesh = mesh;    // quick handle for styling
   holder.add(mesh);
 
   const shadow = makeGroundShadow(CHAR_HEIGHT * 0.32);
@@ -356,8 +358,13 @@ function hidePicker() {
 function playAs(id) {
   const holder = holdersById[id];
   if (!holder) return;
-  // release any previous character back into roaming
-  if (player) player.userData.isPlayer = false;
+  // release the previous character back into roaming (don't leave it standing)
+  if (player && player !== holder) {
+    player.userData.isPlayer = false;
+    player.userData.moving = false;
+    player.userData.pauseUntil = 0; // start strolling again right away
+    pickRoamTarget(player);         // give it a fresh place to wander to
+  }
   player = holder;
   holder.userData.isPlayer = true;
   holder.userData.moving = false;
@@ -600,8 +607,13 @@ function makeSign(text) {
   x.beginPath(); x.roundRect(8, 8, 496, 112, 18); x.fill();
   x.lineWidth = 8; x.strokeStyle = '#c0563f'; x.stroke();
   x.fillStyle = '#c0563f';
-  x.font = 'bold 62px -apple-system, Segoe UI, sans-serif';
   x.textAlign = 'center'; x.textBaseline = 'middle';
+  let fontSize = 62; // shrink to fit long names like "DRESSING ROOM"
+  do {
+    x.font = `bold ${fontSize}px -apple-system, Segoe UI, sans-serif`;
+    if (x.measureText(text).width <= 460) break;
+    fontSize -= 4;
+  } while (fontSize > 26);
   x.fillText(text, 256, 68);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -777,6 +789,161 @@ function updateShop() {
 }
 
 // ---------------------------------------------------------------------------
+// DRESSING ROOM — walk in to buy accessories and style your character.
+// Accessories are little sprites layered over the character's head/face.
+// ---------------------------------------------------------------------------
+const DRESS_CENTER = new THREE.Vector3(-14, 0, -13);
+const DRESS_POS = new THREE.Vector3(-14, 0, -10.5); // where you stand to style
+
+function buildDressingRoom() {
+  const room = new THREE.Group();
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0xe7c6e0, roughness: 0.95 });
+  const roofMat = new THREE.MeshStandardMaterial({ color: 0x8e6fb0, roughness: 0.8 });
+  const mirrorFrame = new THREE.MeshStandardMaterial({ color: 0xb98bd6, roughness: 0.7 });
+  const mirrorGlass = new THREE.MeshStandardMaterial({ color: 0xd9f0ff, emissive: 0x9fd8ff, emissiveIntensity: 0.4, roughness: 0.1, metalness: 0.2 });
+  const floorMat = new THREE.MeshStandardMaterial({ color: 0xead2e6, roughness: 1 });
+
+  const W = 8, D = 6, H = 4, T = 0.4, DOOR = 4;
+  const parts = [];
+  const box = (w, h, d, mat, x, y, z) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.set(x, y, z); parts.push(m); return m;
+  };
+  box(W, H, T, wallMat, 0, H / 2, -D / 2);
+  box(T, H, D, wallMat, -W / 2, H / 2, 0);
+  box(T, H, D, wallMat, W / 2, H / 2, 0);
+  const fw = (W - DOOR) / 2;
+  box(fw, H, T, wallMat, -(W / 2 - fw / 2), H / 2, D / 2);
+  box(fw, H, T, wallMat, (W / 2 - fw / 2), H / 2, D / 2);
+  box(DOOR, 0.9, T, wallMat, 0, H - 0.45, D / 2);
+  box(W + 0.9, 0.5, D + 0.9, roofMat, 0, H + 0.25, 0);
+  box(W, 0.1, D, floorMat, 0, 0.05, 0);
+  // a mirror on the back wall
+  box(2.4, 3.2, 0.2, mirrorFrame, 2.2, 1.8, -D / 2 + 0.25);
+  const glass = new THREE.Mesh(new THREE.PlaneGeometry(1.9, 2.7), mirrorGlass);
+  glass.position.set(2.2, 1.8, -D / 2 + 0.36); parts.push(glass);
+
+  parts.forEach((m) => { m.castShadow = true; m.receiveShadow = true; room.add(m); });
+
+  const sign = makeSign('DRESSING ROOM');
+  sign.position.set(0, H + 1.3, D / 2 - 0.05);
+  room.add(sign);
+
+  room.position.copy(DRESS_CENTER);
+  scene.add(room);
+}
+buildDressingRoom();
+
+// ---- Accessories you can buy & wear ----
+const ACCESSORIES = [
+  { id: 'crown', name: 'Crown', emoji: '👑', price: 15, y: 1.05, scale: 1.7 },
+  { id: 'hat', name: 'Party Hat', emoji: '🎉', price: 6, y: 1.2, scale: 1.7 },
+  { id: 'glasses', name: 'Sunglasses', emoji: '🕶️', price: 8, y: 0.35, scale: 1.5 },
+  { id: 'bow', name: 'Bow', emoji: '🎀', price: 5, y: 0.9, scale: 1.2 },
+];
+const accessoryOwned = {}; // id -> true once bought
+const accTex = {};
+function getAccTexture(id) {
+  if (!accTex[id]) {
+    const t = textureLoader.load(`./assets/accessories/${id}.png`);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    accTex[id] = t;
+  }
+  return accTex[id];
+}
+function wearAccessory(charMesh, acc) {
+  if (!charMesh || charMesh.userData.accessories[acc.id]) return;
+  const m = new THREE.Mesh(
+    new THREE.PlaneGeometry(acc.scale, acc.scale),
+    new THREE.MeshBasicMaterial({ map: getAccTexture(acc.id), transparent: true, alphaTest: 0.4, side: THREE.DoubleSide })
+  );
+  m.position.set(0, acc.y, 0.04); // float just in front of the character
+  m.renderOrder = 2;
+  charMesh.add(m);
+  charMesh.userData.accessories[acc.id] = m;
+}
+function takeOffAccessory(charMesh, acc) {
+  const m = charMesh && charMesh.userData.accessories[acc.id];
+  if (m) { charMesh.remove(m); delete charMesh.userData.accessories[acc.id]; }
+}
+const isWearing = (charMesh, id) => !!(charMesh && charMesh.userData.accessories[id]);
+
+// ---- Dressing-room UI ----
+let dressEl = null, dressOpen = false, dressListEl = null, dressMsgEl = null;
+function buildDress() {
+  dressEl = document.createElement('div');
+  dressEl.id = 'dressroom';
+  dressEl.style.display = 'none';
+  const h = document.createElement('h3');
+  h.append('👗 DRESSING ROOM');
+  const sub = document.createElement('p');
+  sub.className = 'shop-sub';
+  sub.textContent = 'Buy & wear to style your character!';
+  dressListEl = document.createElement('div');
+  dressListEl.className = 'shop-list';
+  dressMsgEl = document.createElement('p');
+  dressMsgEl.className = 'shop-msg';
+  dressEl.append(h, sub, dressListEl, dressMsgEl);
+  document.body.appendChild(dressEl);
+}
+function refreshDress() {
+  if (!dressListEl) return;
+  const mesh = player && player.userData.mesh;
+  dressListEl.replaceChildren();
+  ACCESSORIES.forEach((acc) => {
+    const row = document.createElement('button');
+    row.className = 'shop-item';
+    const lbl = document.createElement('span');
+    lbl.textContent = `${acc.emoji} ${acc.name}`;
+    const action = document.createElement('span');
+    action.className = 'shop-price';
+    if (!accessoryOwned[acc.id]) {
+      action.textContent = `Buy ${acc.price} ⭐`;
+      row.addEventListener('click', () => buyAccessory(acc));
+    } else if (isWearing(mesh, acc.id)) {
+      action.textContent = 'Take off';
+      row.classList.add('worn');
+      row.addEventListener('click', () => { takeOffAccessory(mesh, acc); refreshDress(); });
+    } else {
+      action.textContent = 'Wear';
+      row.addEventListener('click', () => { wearAccessory(mesh, acc); refreshDress(); });
+    }
+    row.append(lbl, action);
+    dressListEl.appendChild(row);
+  });
+}
+function buyAccessory(acc) {
+  if (score < acc.price) {
+    dressMsgEl.textContent = `Not enough — you need ${acc.price} ⭐!`;
+    animate(dressMsgEl, { opacity: [0.3, 1], duration: 220 });
+    return;
+  }
+  score -= acc.price;
+  renderScore();
+  animate(scoreEl, { scale: [1.3, 1], duration: 300, ease: 'out(3)' });
+  accessoryOwned[acc.id] = true;
+  wearAccessory(player && player.userData.mesh, acc); // put it on right away
+  dressMsgEl.textContent = `You got the ${acc.emoji} ${acc.name}!`;
+  animate(dressMsgEl, { scale: [1.2, 1], opacity: [0.4, 1], duration: 300, ease: 'out(3)' });
+  refreshDress();
+}
+function openDress() { dressOpen = true; refreshDress(); dressEl.style.display = 'block'; animate(dressEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' }); }
+function closeDress() { dressOpen = false; animate(dressEl, { opacity: [1, 0], duration: 200, onComplete: () => { dressEl.style.display = 'none'; } }); }
+buildDress();
+
+function updateDress() {
+  let near = false;
+  if (player) {
+    const dx = player.position.x - DRESS_POS.x;
+    const dz = player.position.z - DRESS_POS.z;
+    near = (dx * dx + dz * dz) < 5.5 * 5.5;
+  }
+  if (near && !dressOpen) openDress();
+  else if (!near && dressOpen) closeDress();
+}
+
+// ---------------------------------------------------------------------------
 // Post-processing — subtle bloom for that "production" glow
 // ---------------------------------------------------------------------------
 const composer = new EffectComposer(renderer);
@@ -874,6 +1041,7 @@ function tick() {
 
   updateCollectibles(t, dt);
   updateShop();
+  updateDress();
 
   // Characters: wander around, face the camera (upright billboard), and bob/hop.
   for (const b of billboards) {
