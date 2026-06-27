@@ -128,9 +128,10 @@ for (let i = 0; i < 5; i++) {
     metalness: 0.1,
     flatShading: true,
   });
-  const mesh = new THREE.Mesh(new THREE.OctahedronGeometry(1.1, 0), mat);
+  const mesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.7, 0), mat);
   const angle = (i / 5) * Math.PI * 2;
-  mesh.position.set(Math.cos(angle) * 6, 3, Math.sin(angle) * 6);
+  // float high above the fountain as ambient sparkle (characters stand below)
+  mesh.position.set(Math.cos(angle) * 3.2, 6, Math.sin(angle) * 3.2);
   mesh.castShadow = true;
   mesh.userData.baseY = mesh.position.y;
   mesh.userData.spin = 0.3 + Math.random() * 0.5;
@@ -173,15 +174,109 @@ loadModel('lantern.glb', { position: [3.5, 0, 3.5], rotationY: -0.6, scale: 2 })
 loadModel('lantern.glb', { position: [-3.5, 0, -3.5], rotationY: 2.4, scale: 2 });
 
 // ---------------------------------------------------------------------------
+// The girls' characters — 2D sprites standing in the 3D world.
+// Each is a flat plane that always turns to face the camera (billboard),
+// like Paper Mario. Data + sprites come from assets/characters/.
+// ---------------------------------------------------------------------------
+const characterGroup = new THREE.Group();
+scene.add(characterGroup);
+const billboards = []; // meshes that turn to face the camera each frame
+
+const textureLoader = new THREE.TextureLoader();
+const CHAR_HEIGHT = 3.4;        // how tall a character stands, in world units
+const CHAR_RING = 6.5;          // distance from the central fountain
+
+// A small floating name tag drawn on a canvas, shown above each character.
+function makeNameLabel(text) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256; canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  ctx.font = 'bold 38px -apple-system, Segoe UI, sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  // pill background
+  const w = ctx.measureText(text).width + 36;
+  ctx.fillStyle = 'rgba(13,27,42,0.78)';
+  const x = 128 - w / 2;
+  ctx.beginPath(); ctx.roundRect(x, 10, w, 44, 22); ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(text, 128, 33);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+  sprite.scale.set(2.6, 0.65, 1);
+  return sprite;
+}
+
+// Soft round shadow blob placed on the ground under a character.
+function makeGroundShadow(radius) {
+  const mesh = new THREE.Mesh(
+    new THREE.CircleGeometry(radius, 24),
+    new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false })
+  );
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.y = 0.02;
+  return mesh;
+}
+
+function placeCharacter(char, index, total) {
+  const tex = textureLoader.load(`./assets/characters/${char.sprite}`);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+
+  const mat = new THREE.MeshBasicMaterial({
+    map: tex, transparent: true, alphaTest: 0.5, side: THREE.DoubleSide,
+  });
+  // Sprites are square (512x512); keep them square in-world.
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(CHAR_HEIGHT, CHAR_HEIGHT), mat);
+
+  const angle = (index / total) * Math.PI * 2;
+  const x = Math.cos(angle) * CHAR_RING;
+  const z = Math.sin(angle) * CHAR_RING;
+  const baseY = CHAR_HEIGHT / 2; // bottom of the plane sits on the ground
+
+  const holder = new THREE.Group();
+  holder.position.set(x, 0, z);
+  mesh.position.y = baseY;
+  mesh.userData.baseY = baseY;
+  mesh.userData.bobPhase = index * 0.9;
+  holder.add(mesh);
+
+  const shadow = makeGroundShadow(CHAR_HEIGHT * 0.32);
+  holder.add(shadow);
+
+  const label = makeNameLabel(char.name);
+  label.position.set(0, CHAR_HEIGHT + 0.5, 0);
+  holder.add(label);
+
+  characterGroup.add(holder);
+  billboards.push(mesh);
+
+  // cute entrance: pop up from nothing
+  mesh.scale.set(0, 0, 0);
+  animate(mesh.scale, { x: 1, y: 1, z: 1, duration: 600, delay: 200 + index * 120, ease: 'out(4)' });
+}
+
+// Load the roster (names, stats, moves) the girls designed, then place them.
+fetch('./assets/characters/characters.json')
+  .then((r) => r.json())
+  .then((data) => {
+    const roster = data.characters || [];
+    roster.forEach((c, i) => placeCharacter(c, i, roster.length));
+    // expose the roster + their stats for the game the girls build next
+    window.SANDYTEN.roster = roster;
+  })
+  .catch((err) => console.warn('Could not load characters.json', err));
+
+// ---------------------------------------------------------------------------
 // Post-processing — subtle bloom for that "production" glow
 // ---------------------------------------------------------------------------
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
 const bloom = new UnrealBloomPass(
   new THREE.Vector2(window.innerWidth, window.innerHeight),
-  0.5,  // strength
-  0.6,  // radius
-  0.85  // threshold
+  0.28, // strength — gentle, so bright sprites (like Boo) don't blow out
+  0.5,  // radius
+  0.92  // threshold — only the brightest pixels glow
 );
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
@@ -264,6 +359,16 @@ function tick() {
     c.rotation.y += c.userData.spin * dt;
     c.position.y = c.userData.baseY + Math.sin(t * 1.2 + i) * 0.4;
   });
+
+  // Characters: turn to face the camera (upright billboard) + gentle bob.
+  for (const b of billboards) {
+    const holder = b.parent;
+    b.rotation.y = Math.atan2(
+      camera.position.x - holder.position.x,
+      camera.position.z - holder.position.z
+    );
+    b.position.y = b.userData.baseY + Math.sin(t * 1.6 + b.userData.bobPhase) * 0.12;
+  }
 
   updateMovement(dt);
   controls.update();
