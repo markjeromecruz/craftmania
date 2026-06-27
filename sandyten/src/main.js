@@ -271,7 +271,8 @@ function placeCharacter(char, index, total) {
   mesh.position.y = baseY;
   mesh.userData.baseY = baseY;
   mesh.userData.bobPhase = index * 0.9;
-  mesh.userData.accessories = {}; // id -> accessory mesh worn by this character
+  mesh.userData.accessories = {}; // id -> worn item mesh for this character
+  mesh.userData.itemColors = {};  // id -> chosen tint for recolorable clothes
   holder.userData.mesh = mesh;    // quick handle for styling
   holder.add(mesh);
 
@@ -834,38 +835,62 @@ function buildDressingRoom() {
 }
 buildDressingRoom();
 
-// ---- Accessories you can buy & wear ----
-const ACCESSORIES = [
-  { id: 'crown', name: 'Crown', emoji: '👑', price: 15, y: 1.05, scale: 1.7 },
-  { id: 'hat', name: 'Party Hat', emoji: '🎉', price: 6, y: 1.2, scale: 1.7 },
-  { id: 'glasses', name: 'Sunglasses', emoji: '🕶️', price: 8, y: 0.35, scale: 1.5 },
-  { id: 'bow', name: 'Bow', emoji: '🎀', price: 5, y: 0.9, scale: 1.2 },
+// ---- Things you can buy, wear, and (for clothes) recolor ----
+const DRESS_ITEMS = [
+  // accessories — fixed colors, sit on the head/face
+  { id: 'crown', name: 'Crown', emoji: '👑', price: 15, y: 1.05, scale: 1.7, recolor: false },
+  { id: 'hat', name: 'Party Hat', emoji: '🎉', price: 6, y: 1.2, scale: 1.7, recolor: false },
+  { id: 'glasses', name: 'Sunglasses', emoji: '🕶️', price: 8, y: 0.35, scale: 1.5, recolor: false },
+  { id: 'bow', name: 'Bow', emoji: '🎀', price: 5, y: 0.9, scale: 1.2, recolor: false },
+  // clothes — white base, recolor them to any color to make your own outfit
+  { id: 'tshirt', name: 'T-Shirt', emoji: '👕', price: 7, y: 0.1, scale: 2.0, recolor: true },
+  { id: 'croptop', name: 'Crop Top', emoji: '🎽', price: 7, y: 0.2, scale: 1.9, recolor: true },
+  { id: 'skirt', name: 'Skirt', emoji: '👗', price: 8, y: -0.55, scale: 1.8, recolor: true },
+  { id: 'shorts', name: 'Shorts', emoji: '🩳', price: 6, y: -0.7, scale: 1.7, recolor: true },
+  { id: 'pants', name: 'Pants', emoji: '👖', price: 9, y: -0.8, scale: 1.7, recolor: true },
+  { id: 'rippedpants', name: 'Ripped Pants', emoji: '👖', price: 11, y: -0.8, scale: 1.7, recolor: true },
 ];
-const accessoryOwned = {}; // id -> true once bought
-const accTex = {};
-function getAccTexture(id) {
-  if (!accTex[id]) {
+const PALETTE = [
+  0xff7eb6, 0xff5a5a, 0xffa94d, 0xffe066, 0x74e08c,
+  0x57d7d7, 0x6aa6ff, 0xb18cff, 0xffffff, 0x4a4f5a,
+];
+const DEFAULT_CLOTHES_COLOR = 0xff7eb6; // clothes start pink, then recolor
+
+const itemOwned = {}; // id -> true once bought
+const itemTex = {};
+function getItemTexture(id) {
+  if (!itemTex[id]) {
     const t = textureLoader.load(`./assets/accessories/${id}.png`);
     t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = renderer.capabilities.getMaxAnisotropy();
-    accTex[id] = t;
+    itemTex[id] = t;
   }
-  return accTex[id];
+  return itemTex[id];
 }
-function wearAccessory(charMesh, acc) {
-  if (!charMesh || charMesh.userData.accessories[acc.id]) return;
+function wearItem(charMesh, item) {
+  if (!charMesh || charMesh.userData.accessories[item.id]) return;
+  // white clothes get tinted; accessories keep their own colors
+  const color = item.recolor
+    ? (charMesh.userData.itemColors[item.id] ?? DEFAULT_CLOTHES_COLOR)
+    : 0xffffff;
   const m = new THREE.Mesh(
-    new THREE.PlaneGeometry(acc.scale, acc.scale),
-    new THREE.MeshBasicMaterial({ map: getAccTexture(acc.id), transparent: true, alphaTest: 0.4, side: THREE.DoubleSide })
+    new THREE.PlaneGeometry(item.scale, item.scale),
+    new THREE.MeshBasicMaterial({ map: getItemTexture(item.id), transparent: true, alphaTest: 0.4, side: THREE.DoubleSide, color })
   );
-  m.position.set(0, acc.y, 0.04); // float just in front of the character
-  m.renderOrder = 2;
+  m.position.set(0, item.y, item.recolor ? 0.03 : 0.05); // clothes just behind head accessories
+  m.renderOrder = item.recolor ? 1 : 2;
   charMesh.add(m);
-  charMesh.userData.accessories[acc.id] = m;
+  charMesh.userData.accessories[item.id] = m;
+  if (item.recolor) charMesh.userData.itemColors[item.id] = color;
 }
-function takeOffAccessory(charMesh, acc) {
-  const m = charMesh && charMesh.userData.accessories[acc.id];
-  if (m) { charMesh.remove(m); delete charMesh.userData.accessories[acc.id]; }
+function takeOffItem(charMesh, item) {
+  const m = charMesh && charMesh.userData.accessories[item.id];
+  if (m) { charMesh.remove(m); delete charMesh.userData.accessories[item.id]; }
+}
+function recolorItem(charMesh, item, hex) {
+  charMesh.userData.itemColors[item.id] = hex;
+  const m = charMesh.userData.accessories[item.id];
+  if (m) m.material.color.set(hex);
 }
 const isWearing = (charMesh, id) => !!(charMesh && charMesh.userData.accessories[id]);
 
@@ -879,7 +904,7 @@ function buildDress() {
   h.append('👗 DRESSING ROOM');
   const sub = document.createElement('p');
   sub.className = 'shop-sub';
-  sub.textContent = 'Buy & wear to style your character!';
+  sub.textContent = 'Buy, wear & recolor — make your own outfit!';
   dressListEl = document.createElement('div');
   dressListEl.className = 'shop-list';
   dressMsgEl = document.createElement('p');
@@ -891,40 +916,58 @@ function refreshDress() {
   if (!dressListEl) return;
   const mesh = player && player.userData.mesh;
   dressListEl.replaceChildren();
-  ACCESSORIES.forEach((acc) => {
+  DRESS_ITEMS.forEach((item) => {
+    const entry = document.createElement('div');
+    entry.className = 'dress-entry';
     const row = document.createElement('button');
     row.className = 'shop-item';
     const lbl = document.createElement('span');
-    lbl.textContent = `${acc.emoji} ${acc.name}`;
+    lbl.textContent = `${item.emoji} ${item.name}`;
     const action = document.createElement('span');
     action.className = 'shop-price';
-    if (!accessoryOwned[acc.id]) {
-      action.textContent = `Buy ${acc.price} ⭐`;
-      row.addEventListener('click', () => buyAccessory(acc));
-    } else if (isWearing(mesh, acc.id)) {
+    if (!itemOwned[item.id]) {
+      action.textContent = `Buy ${item.price} ⭐`;
+      row.addEventListener('click', () => buyDressItem(item));
+    } else if (isWearing(mesh, item.id)) {
       action.textContent = 'Take off';
       row.classList.add('worn');
-      row.addEventListener('click', () => { takeOffAccessory(mesh, acc); refreshDress(); });
+      row.addEventListener('click', () => { takeOffItem(mesh, item); refreshDress(); });
     } else {
       action.textContent = 'Wear';
-      row.addEventListener('click', () => { wearAccessory(mesh, acc); refreshDress(); });
+      row.addEventListener('click', () => { wearItem(mesh, item); refreshDress(); });
     }
     row.append(lbl, action);
-    dressListEl.appendChild(row);
+    entry.appendChild(row);
+
+    // color swatches for clothes you're currently wearing
+    if (item.recolor && isWearing(mesh, item.id)) {
+      const sw = document.createElement('div');
+      sw.className = 'swatches';
+      const current = mesh.userData.itemColors[item.id];
+      PALETTE.forEach((hex) => {
+        const dot = document.createElement('button');
+        dot.className = 'swatch' + (current === hex ? ' sel' : '');
+        dot.style.background = '#' + hex.toString(16).padStart(6, '0');
+        dot.addEventListener('click', () => { recolorItem(mesh, item, hex); refreshDress(); });
+        sw.appendChild(dot);
+      });
+      entry.appendChild(sw);
+    }
+    dressListEl.appendChild(entry);
   });
 }
-function buyAccessory(acc) {
-  if (score < acc.price) {
-    dressMsgEl.textContent = `Not enough — you need ${acc.price} ⭐!`;
+function buyDressItem(item) {
+  if (score < item.price) {
+    dressMsgEl.textContent = `Not enough — you need ${item.price} ⭐!`;
     animate(dressMsgEl, { opacity: [0.3, 1], duration: 220 });
     return;
   }
-  score -= acc.price;
+  score -= item.price;
   renderScore();
   animate(scoreEl, { scale: [1.3, 1], duration: 300, ease: 'out(3)' });
-  accessoryOwned[acc.id] = true;
-  wearAccessory(player && player.userData.mesh, acc); // put it on right away
-  dressMsgEl.textContent = `You got the ${acc.emoji} ${acc.name}!`;
+  itemOwned[item.id] = true;
+  wearItem(player && player.userData.mesh, item); // put it on right away
+  dressMsgEl.textContent = `You got the ${item.emoji} ${item.name}!`;
   animate(dressMsgEl, { scale: [1.2, 1], opacity: [0.4, 1], duration: 300, ease: 'out(3)' });
   refreshDress();
 }
