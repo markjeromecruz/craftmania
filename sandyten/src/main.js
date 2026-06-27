@@ -1002,19 +1002,130 @@ function houseFloorHeight(wx, wz) {
   return 0;
 }
 
+// A flat dirt path strip from (x1,z1) to (x2,z2).
+function buildPath(x1, z1, x2, z2, width = 1.7) {
+  const dx = x2 - x1, dz = z2 - z1;
+  const len = Math.hypot(dx, dz);
+  const m = new THREE.Mesh(
+    new THREE.BoxGeometry(width, 0.08, len),
+    new THREE.MeshStandardMaterial({ color: 0xcdb892, roughness: 1 })
+  );
+  m.position.set((x1 + x2) / 2, 0.06, (z1 + z2) / 2);
+  m.rotation.y = Math.atan2(dx, dz);
+  m.receiveShadow = true;
+  scene.add(m);
+}
+
+const homeById = {};                                   // char id -> home spot (inside its house)
+const SLEEPERS = new Set(['kiki', 'bronte', 'spike']); // half go home to sleep at night
+
 function placeHouses(roster) {
   const R = 17;
   const startDeg = 18, endDeg = 180; // southern arc — away from the store (north)
   roster.forEach((c, i) => {
     const tt = roster.length <= 1 ? 0 : i / (roster.length - 1);
     const a = (startDeg + tt * (endDeg - startDeg)) * Math.PI / 180;
+    const cs = Math.cos(a), sn = Math.sin(a);
     const col = HOUSE_COLORS[c.id] || { wall: 0xe0d8c8, roof: 0xb08060 };
     buildHouse({
-      x: Math.cos(a) * R, z: Math.sin(a) * R,
+      x: cs * R, z: sn * R,
       rotationY: -(a + Math.PI / 2), // face the doorway toward the center
       name: c.name, wall: col.wall, roof: col.roof,
     });
+    homeById[c.id] = { x: cs * (R - 2), z: sn * (R - 2) };       // sleep spot inside the house
+    buildPath(cs * 3, sn * 3, cs * (R - 2.5), sn * (R - 2.5));    // path out to this house
   });
+  // paths to THE STORE and the DRESSING ROOM
+  buildPath(0, -3, 0, -13);
+  buildPath(-2.8, -2.1, DRESS_POS.x, DRESS_POS.z);
+}
+
+// ---------------------------------------------------------------------------
+// Day / night cycle: dawn → morning → day → sunset → night → midnight.
+// Drives the sun, sky, lights, fog and stars, and flags `isNight` for sleepers.
+// ---------------------------------------------------------------------------
+const DAY_LENGTH = 200;   // seconds for one full day
+const DAY_START = 0.18;   // start mid-morning so it's bright on load
+let isNight = false;
+const phaseEl = document.getElementById('timephase');
+
+// a starfield that fades in at night
+const starGeo = new THREE.BufferGeometry();
+const STAR_N = 700;
+const starPos = new Float32Array(STAR_N * 3);
+for (let i = 0; i < STAR_N; i++) {
+  const r = 600, u = (i * 2.3999) % (Math.PI * 2), v = (i / STAR_N);
+  const phi = Math.acos(1 - v * 0.9); // upper hemisphere
+  starPos[i * 3] = r * Math.sin(phi) * Math.cos(u);
+  starPos[i * 3 + 1] = r * Math.cos(phi) + 30;
+  starPos[i * 3 + 2] = r * Math.sin(phi) * Math.sin(u);
+}
+starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 2, sizeAttenuation: false, transparent: true, opacity: 0, depthWrite: false });
+const starField = new THREE.Points(starGeo, starMat);
+scene.add(starField);
+
+const _dayFog = new THREE.Color(0xbfd8ef), _nightFog = new THREE.Color(0x0a1326);
+function phaseName(dt) {
+  if (dt < 0.05) return ['dawn', '🌅'];
+  if (dt < 0.20) return ['morning', '🌄'];
+  if (dt < 0.44) return ['day', '☀️'];
+  if (dt < 0.52) return ['sunset', '🌇'];
+  if (dt < 0.84) return ['night', '🌙'];
+  return ['midnight', '🌌'];
+}
+function updateDayNight(t) {
+  const dayT = ((t / DAY_LENGTH) + DAY_START) % 1;
+  const sinE = Math.sin(2 * Math.PI * dayT);
+  setSun(75 * sinE, 70 + dayT * 220);          // elevation rises & sets; azimuth sweeps
+  const dayness = Math.max(0, sinE);           // 0 deep night … 1 high noon
+  sunLight.intensity = 0.1 + dayness * 2.5;
+  hemi.intensity = 0.2 + dayness * 0.5;
+  renderer.toneMappingExposure = 0.5 + dayness * 0.5;
+  scene.fog.color.copy(_nightFog).lerp(_dayFog, dayness);
+  starMat.opacity = Math.max(0, 1 - dayness * 3);
+  isNight = (75 * sinE) < 3;
+  const [name, icon] = phaseName(dayT);
+  if (phaseEl) phaseEl.textContent = icon + ' ' + name;
+}
+
+// ---------------------------------------------------------------------------
+// Birds that fly in slow circles overhead, flapping their wings.
+// ---------------------------------------------------------------------------
+const birds = [];
+function createBirds() {
+  const colors = [0xff7eb6, 0x6aa6ff, 0xffe066, 0xffffff, 0x9b8cff, 0x74e08c];
+  for (let i = 0; i < 7; i++) {
+    const color = colors[i % colors.length];
+    const g = new THREE.Group();
+    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.7, side: THREE.DoubleSide });
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6), mat); body.scale.z = 1.7; g.add(body);
+    const wingGeo = new THREE.PlaneGeometry(0.95, 0.42);
+    const wL = new THREE.Mesh(wingGeo, mat); wL.position.x = -0.5; g.add(wL);
+    const wR = new THREE.Mesh(wingGeo, mat); wR.position.x = 0.5; g.add(wR);
+    g.userData = {
+      wL, wR,
+      radius: 13 + Math.random() * 16,
+      height: 10 + Math.random() * 7,
+      speed: (0.12 + Math.random() * 0.18) * (Math.random() < 0.5 ? 1 : -1),
+      phase: Math.random() * Math.PI * 2,
+      flap: 7 + Math.random() * 4,
+    };
+    scene.add(g);
+    birds.push(g);
+  }
+}
+createBirds();
+function updateBirds(t) {
+  for (const b of birds) {
+    const u = b.userData;
+    const ang = u.phase + t * u.speed;
+    b.position.set(Math.cos(ang) * u.radius, u.height + Math.sin(t * 0.6 + u.phase) * 0.7, Math.sin(ang) * u.radius);
+    b.rotation.y = -ang + (u.speed > 0 ? 0 : Math.PI); // face the way it flies
+    const flap = Math.sin(t * u.flap + u.phase) * 0.7;
+    u.wL.rotation.z = flap;
+    u.wR.rotation.z = -flap;
+  }
 }
 
 // ---- Things you can buy, wear, and (for clothes) recolor ----
@@ -1309,6 +1420,9 @@ function tick() {
     c.position.y = c.userData.baseY + Math.sin(t * 1.2 + i) * 0.4;
   });
 
+  updateDayNight(t);
+  updateBirds(t);
+
   // Move first (player walks / free camera), then update characters' facing & bob.
   if (player) updatePlayer(dt); else updateMovement(dt);
 
@@ -1325,7 +1439,15 @@ function tick() {
     // The player-controlled character (and the shopkeeper) skip roaming.
     // updatePlayer() sets the player's position/moving flag instead.
     if (!w.isPlayer && !w.isShopkeeper) {
-      if (t >= w.pauseUntil) {
+      const cid = b.userData.char && b.userData.char.id;
+      if (isNight && SLEEPERS.has(cid) && homeById[cid]) {
+        // at night, half the characters head home to sleep
+        const home = homeById[cid];
+        _charDir.set(home.x - holder.position.x, 0, home.z - holder.position.z);
+        const d = _charDir.length();
+        if (d < 0.4) { w.moving = false; } // tucked in at home
+        else { w.moving = true; const step = Math.min(w.speed * dt, d); holder.position.x += (_charDir.x / d) * step; holder.position.z += (_charDir.z / d) * step; }
+      } else if (t >= w.pauseUntil) {
         _charDir.set(w.target.x - holder.position.x, 0, w.target.z - holder.position.z);
         const dist = _charDir.length();
         if (dist < 0.25) {
