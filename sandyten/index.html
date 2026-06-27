@@ -138,6 +138,18 @@
     .shop-item.cant-afford { opacity: .45; }
     .shop-msg { min-height: 18px; text-align: center; font-size: 13px; color: #9be6a6; margin-top: 10px; font-weight: 600; }
     .shop-owned { text-align: center; font-size: 16px; margin-top: 4px; }
+    .shop-item.worn { border-color: var(--accent); background: rgba(255, 209, 102, .16); }
+
+    /* ---------- Dressing room panel (left side) ---------- */
+    #dressroom {
+      position: fixed; z-index: 35; left: 18px; top: 50%;
+      transform: translateY(-50%); width: 280px; max-width: 86vw; display: none;
+      background: linear-gradient(180deg, #3a2150, #1d1030);
+      border: 1px solid rgba(231, 198, 224, .3); border-radius: 18px;
+      padding: 16px 16px 14px; box-shadow: 0 16px 44px rgba(0, 0, 0, .5);
+    }
+    #dressroom h3 { text-align: center; font-size: 19px; margin-bottom: 2px; }
+    #dressroom .shop-sub { color: #f0c6e8; }
   </style>
 </head>
 <body>
