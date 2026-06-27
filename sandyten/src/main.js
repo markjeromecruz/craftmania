@@ -59,10 +59,10 @@ scene.add(sky);
 
 const sun = new THREE.Vector3();
 const skyU = sky.material.uniforms;
-skyU.turbidity.value = 8;
-skyU.rayleigh.value = 2;
-skyU.mieCoefficient.value = 0.005;
-skyU.mieDirectionalG.value = 0.8;
+skyU.turbidity.value = 3;       // clearer sky, less white haze
+skyU.rayleigh.value = 1.1;      // softer blue gradient, not blown out
+skyU.mieCoefficient.value = 0.003;
+skyU.mieDirectionalG.value = 0.75;
 
 function setSun(elevationDeg, azimuthDeg) {
   const phi = THREE.MathUtils.degToRad(90 - elevationDeg);
@@ -764,10 +764,9 @@ function buildHospital() {
 }
 buildHospital();
 
-// Shopkeeper — a billboard sprite standing behind the counter (doesn't roam).
-const SHOPKEEPER_POS = new THREE.Vector3(0, 0, -17.6);
-function addShopkeeper() {
-  const tex = textureLoader.load('./assets/characters/shopkeeper.png');
+// A standing billboard NPC (shopkeeper, doctor, …) that never roams.
+function addStandee(file, name, pos) {
+  const tex = textureLoader.load(`./assets/characters/${file}`);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
   const mesh = new THREE.Mesh(
@@ -779,16 +778,93 @@ function addShopkeeper() {
   mesh.userData.baseY = baseY;
   mesh.userData.bobPhase = 0.5;
   const holder = new THREE.Group();
-  holder.position.copy(SHOPKEEPER_POS);
-  holder.userData = { isShopkeeper: true };
+  holder.position.copy(pos);
+  holder.userData = { isShopkeeper: true }; // "static NPC": doesn't roam, not collectible
   holder.add(mesh);
-  const label = makeNameLabel('Shopkeeper');
+  const label = makeNameLabel(name);
   label.position.set(0, CHAR_HEIGHT + 0.5, 0);
   holder.add(label);
   scene.add(holder);
   billboards.push(mesh);
 }
-addShopkeeper();
+const SHOPKEEPER_POS = new THREE.Vector3(0, 0, -17.6);
+addStandee('shopkeeper.png', 'Shopkeeper', SHOPKEEPER_POS);
+addStandee('doctor.png', 'Doctor', new THREE.Vector3(14, 0, -15.8)); // inside the hospital
+
+// ---------------------------------------------------------------------------
+// Campfire in the middle of town — stones, logs, flickering flames + warm light.
+// ---------------------------------------------------------------------------
+const campfire = { flames: [], light: null };
+function buildCampfire(x, z) {
+  const g = new THREE.Group();
+  const stoneMat = new THREE.MeshStandardMaterial({ color: 0x8c8782, roughness: 1 });
+  for (let i = 0; i < 9; i++) {
+    const a = (i / 9) * Math.PI * 2;
+    const s = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6), stoneMat);
+    s.position.set(Math.cos(a) * 0.85, 0.12, Math.sin(a) * 0.85); s.castShadow = true; g.add(s);
+  }
+  const logMat = new THREE.MeshStandardMaterial({ color: 0x6b4a2f, roughness: 0.9 });
+  for (let i = 0; i < 3; i++) {
+    const log = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 1.3, 7), logMat);
+    log.rotation.z = Math.PI / 2; log.rotation.y = i * 1.1; log.position.y = 0.16; log.castShadow = true; g.add(log);
+  }
+  const flameColors = [0xff5a1a, 0xffa523, 0xffe04a];
+  for (let i = 0; i < 3; i++) {
+    const f = new THREE.Mesh(
+      new THREE.ConeGeometry(0.3 - i * 0.07, 0.95 - i * 0.2, 8),
+      new THREE.MeshBasicMaterial({ color: flameColors[i] })
+    );
+    f.position.set((i - 1) * 0.08, 0.55 - i * 0.08, 0);
+    f.userData.phase = Math.random() * Math.PI * 2;
+    g.add(f); campfire.flames.push(f);
+  }
+  campfire.light = new THREE.PointLight(0xff8a30, 1.4, 13, 2);
+  campfire.light.position.set(0, 1, 0); g.add(campfire.light);
+  g.position.set(x, 0, z); scene.add(g);
+}
+buildCampfire(0, 5.5);
+function updateCampfire(t) {
+  const flick = 0.82 + Math.sin(t * 12) * 0.1 + Math.sin(t * 23.3) * 0.08;
+  for (const f of campfire.flames) {
+    f.scale.y = 0.85 + Math.sin(t * 10 + f.userData.phase) * 0.22;
+    f.rotation.y = t * 2 + f.userData.phase;
+  }
+  if (campfire.light) campfire.light.intensity = (isNight ? 2.4 : 1.1) * flick;
+}
+
+// ---------------------------------------------------------------------------
+// Ambulance parked by the hospital, with a blinking red/blue light bar.
+// ---------------------------------------------------------------------------
+const ambulanceLights = [];
+function buildAmbulance(x, z, ry) {
+  const g = new THREE.Group();
+  const white = new THREE.MeshStandardMaterial({ color: 0xf4f6f8, roughness: 0.55, metalness: 0.1 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x2a3038, roughness: 0.4 });
+  const red = new THREE.MeshStandardMaterial({ color: 0xe23b3b, roughness: 0.5 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.5, 1.6), white); body.position.y = 1.05; g.add(body);
+  const cab = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.1, 1.55), white); cab.position.set(1.7, 0.85, 0); g.add(cab);
+  const wind = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.6, 1.4), dark); wind.position.set(2.2, 1.1, 0); g.add(wind);
+  g.add(new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.8, 0.26), red).translateX(-0.4).translateY(1.1).translateZ(0.81));
+  g.add(new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.26, 0.8), red).translateX(-0.4).translateY(1.1).translateZ(0.81));
+  const wheelGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.3, 14);
+  for (const wx of [1.3, -1.1]) for (const wz of [0.82, -0.82]) {
+    const w = new THREE.Mesh(wheelGeo, dark); w.rotation.x = Math.PI / 2; w.position.set(wx, 0.4, wz); g.add(w);
+  }
+  const rl = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.18, 0.5), new THREE.MeshStandardMaterial({ color: 0xff3a3a, emissive: 0xff0000, emissiveIntensity: 0.6 }));
+  rl.position.set(0.25, 1.9, 0); g.add(rl);
+  const bl = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.18, 0.5), new THREE.MeshStandardMaterial({ color: 0x3a6bff, emissive: 0x0030ff, emissiveIntensity: 0.6 }));
+  bl.position.set(-0.25, 1.9, 0); g.add(bl);
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  g.position.set(x, 0, z); g.rotation.y = ry; scene.add(g);
+  ambulanceLights.push(rl.material, bl.material);
+}
+buildAmbulance(9.5, -9.5, -0.6);
+function updateAmbulance(t) {
+  if (ambulanceLights.length < 2) return;
+  const on = Math.sin(t * 6) > 0;
+  ambulanceLights[0].emissiveIntensity = on ? 1.5 : 0.2; // red
+  ambulanceLights[1].emissiveIntensity = on ? 0.2 : 1.5; // blue (alternates)
+}
 
 // ---- Shop UI: walk up to the shopkeeper to open it; spend stars to buy ----
 const SHOP_ITEMS = [
@@ -1170,7 +1246,9 @@ function updateDayNight(t) {
   const dayness = Math.max(0, sinE);           // 0 deep night … 1 high noon
   sunLight.intensity = 0.1 + dayness * 2.5;
   hemi.intensity = 0.2 + dayness * 0.5;
-  renderer.toneMappingExposure = 0.5 + dayness * 0.5;
+  // keep daytime exposure modest so the sky shows its blue and white sprites
+  // (like Boo) don't blow out; night stays a touch brighter for playability.
+  renderer.toneMappingExposure = 0.5 + dayness * 0.24;
   scene.fog.color.copy(_nightFog).lerp(_dayFog, dayness);
   starMat.opacity = Math.max(0, 1 - dayness * 3);
   isNight = (75 * sinE) < 3;
@@ -1428,9 +1506,9 @@ const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
 const bloom = new UnrealBloomPass(
   new THREE.Vector2(window.innerWidth, window.innerHeight),
-  0.28, // strength — gentle, so bright sprites (like Boo) don't blow out
+  0.18, // strength — subtle, so the sky and white sprites don't blow out
   0.5,  // radius
-  0.92  // threshold — only the brightest pixels glow
+  0.96  // threshold — only very bright (emissive) pixels glow
 );
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
@@ -1557,6 +1635,8 @@ function tick() {
   updateDayNight(t);
   updateBirds(t);
   updateOwl(t);
+  updateCampfire(t);
+  updateAmbulance(t);
 
   // Move first (player walks / free camera), then update characters' facing & bob.
   if (player) updatePlayer(dt); else updateMovement(dt);
