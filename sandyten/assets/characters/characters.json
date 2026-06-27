@@ -1,0 +1,53 @@
+{
+  "_about": "Character roster designed by the girls (hand-drawn 'Game Character Ref' sheet). Sprites generated from those drawings. Stats/moves are theirs. 512x512 transparent PNGs in this folder.",
+  "characters": [
+    {
+      "id": "kiki",
+      "name": "Kiki",
+      "type": "Unicorn-Dino",
+      "sprite": "kiki.png",
+      "stats": { "hp": 50, "atk": 30, "spd": 70 },
+      "moves": ["Horn Stab", "Tail Whip"]
+    },
+    {
+      "id": "bronte",
+      "name": "Brontë",
+      "type": "Stegosaurus",
+      "sprite": "bronte.png",
+      "stats": { "hp": 80, "atk": 70, "def": 90 },
+      "moves": ["Stomp", "Plate Shield"]
+    },
+    {
+      "id": "spike",
+      "name": "Spike",
+      "type": "Cactus Dino",
+      "sprite": "spike.png",
+      "stats": { "hp": 40, "atk": 50, "spd": 40 },
+      "moves": ["Quill Burst", "Sprout Barrier"]
+    },
+    {
+      "id": "cliff",
+      "name": "Cliff",
+      "type": "Rock Guardian",
+      "sprite": "cliff.png",
+      "stats": { "hp": 100, "def": 90, "spd": 20 },
+      "moves": ["Earth Shaker", "Boulder Barrage"]
+    },
+    {
+      "id": "boo",
+      "name": "Boo",
+      "type": "Ghostly Echo",
+      "sprite": "boo.png",
+      "stats": { "hp": 30, "spd": 70, "eva": 80 },
+      "moves": ["Phase Shift", "Misty Veil"]
+    },
+    {
+      "id": "lloyd",
+      "name": "Lloyd",
+      "type": "Hooded Wraith",
+      "sprite": "lloyd.png",
+      "stats": { "hp": 60, "atk": 70, "spd": 80 },
+      "moves": ["Dark Bolt", "Soul Trap"]
+    }
+  ]
+}
