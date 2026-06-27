@@ -193,6 +193,17 @@ const CHAR_RING = 6.5;          // starting distance from the central fountain
 const ROAM_INNER = 4, ROAM_OUTER = 9;
 const _charDir = new THREE.Vector3();
 function pickRoamTarget(holder) {
+  // Half the time, head for the nearest star (so NPCs collect stars too);
+  // otherwise wander to a random spot.
+  if (Math.random() < 0.5 && typeof collectibles !== 'undefined' && collectibles.children.length) {
+    let best = null, bestD = Infinity;
+    for (const s of collectibles.children) {
+      if (s.userData.collected) continue;
+      const d = (s.position.x - holder.position.x) ** 2 + (s.position.z - holder.position.z) ** 2;
+      if (d < bestD) { bestD = d; best = s; }
+    }
+    if (best) { holder.userData.target.set(best.position.x, 0, best.position.z); return; }
+  }
   const a = Math.random() * Math.PI * 2;
   const r = ROAM_INNER + Math.random() * (ROAM_OUTER - ROAM_INNER);
   holder.userData.target.set(Math.cos(a) * r, 0, Math.sin(a) * r);
@@ -510,7 +521,7 @@ let score = 0;
 const scoreEl = document.getElementById('score');
 function addScore() {
   score += 1;
-  scoreEl.textContent = '⭐ ' + score;
+  renderScore();
   animate(scoreEl, { scale: [1.4, 1], duration: 320, ease: 'out(3)' }); // little pop
 }
 
@@ -535,7 +546,20 @@ function playDing() {
   } catch (e) { /* audio not available — no problem */ }
 }
 
-const COLLECT_DIST2 = 1.7 * 1.7;
+function collectStar(s, byPlayer) {
+  s.userData.collected = true;
+  if (byPlayer) { playDing(); addScore(); } // only the player earns money
+  // sparkle up and shrink away, then remove and spawn a fresh one
+  animate(s.position, { y: s.position.y + 1.6, duration: 420, ease: 'out(2)' });
+  animate(s.rotation, { y: s.rotation.y + 6, duration: 420 });
+  animate(s.scale, {
+    x: 0, y: 0, z: 0, duration: 420, ease: 'in(2)',
+    onComplete: () => { collectibles.remove(s); spawnStar(); },
+  });
+}
+
+const COLLECT_DIST2 = 1.7 * 1.7;       // player reach
+const NPC_COLLECT_DIST2 = 1.3 * 1.3;   // NPCs need to be a bit closer
 function updateCollectibles(t, dt) {
   // spin + bob every star
   for (const s of collectibles.children) {
@@ -543,25 +567,213 @@ function updateCollectibles(t, dt) {
     s.rotation.y += s.userData.spin * dt;
     s.position.y = STAR_Y + Math.sin(t * 2 + s.userData.bob) * 0.18;
   }
-  // collect when the player walks close enough
-  if (!player) return;
-  const px = player.position.x, pz = player.position.z;
-  for (const s of collectibles.children) {
-    if (s.userData.collected) continue;
-    const dx = s.position.x - px, dz = s.position.z - pz;
-    if (dx * dx + dz * dz < COLLECT_DIST2) {
-      s.userData.collected = true;
-      playDing();
-      addScore();
-      // sparkle up and shrink away, then remove and spawn a fresh one
-      animate(s.position, { y: s.position.y + 1.6, duration: 420, ease: 'out(2)' });
-      animate(s.rotation, { y: s.rotation.y + 6, duration: 420 });
-      animate(s.scale, {
-        x: 0, y: 0, z: 0, duration: 420, ease: 'in(2)',
-        onComplete: () => { collectibles.remove(s); spawnStar(); },
-      });
+  // the player collects (and earns) when walking close enough
+  if (player) {
+    const px = player.position.x, pz = player.position.z;
+    for (const s of collectibles.children) {
+      if (s.userData.collected) continue;
+      const dx = s.position.x - px, dz = s.position.z - pz;
+      if (dx * dx + dz * dz < COLLECT_DIST2) collectStar(s, true);
     }
   }
+  // the other characters collect stars too (just for fun — no money)
+  for (const b of billboards) {
+    const h = b.parent;
+    if (h.userData.isPlayer || h.userData.isShopkeeper) continue;
+    for (const s of collectibles.children) {
+      if (s.userData.collected) continue;
+      const dx = s.position.x - h.position.x, dz = s.position.z - h.position.z;
+      if (dx * dx + dz * dz < NPC_COLLECT_DIST2) { collectStar(s, false); break; }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// THE STORE — a little building with a sign, a shopkeeper inside, and a shop
+// where you spend your collected stars on food, clothes, and more.
+// ---------------------------------------------------------------------------
+function makeSign(text) {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 128;
+  const x = c.getContext('2d');
+  x.fillStyle = '#fff8e7';
+  x.beginPath(); x.roundRect(8, 8, 496, 112, 18); x.fill();
+  x.lineWidth = 8; x.strokeStyle = '#c0563f'; x.stroke();
+  x.fillStyle = '#c0563f';
+  x.font = 'bold 62px -apple-system, Segoe UI, sans-serif';
+  x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillText(text, 256, 68);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const board = new THREE.Mesh(
+    new THREE.PlaneGeometry(6.4, 1.6),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide })
+  );
+  return board;
+}
+
+function buildStore() {
+  const store = new THREE.Group();
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0xead9b0, roughness: 0.95 });
+  const roofMat = new THREE.MeshStandardMaterial({ color: 0xc0563f, roughness: 0.8 });
+  const woodMat = new THREE.MeshStandardMaterial({ color: 0x9c6b3f, roughness: 0.9 });
+  const floorMat = new THREE.MeshStandardMaterial({ color: 0xd8c59a, roughness: 1 });
+
+  const W = 9, D = 6, H = 4, T = 0.4, DOOR = 4;
+  const parts = [];
+  const box = (w, h, d, mat, x, y, z) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.set(x, y, z); parts.push(m); return m;
+  };
+  box(W, H, T, wallMat, 0, H / 2, -D / 2);                       // back wall
+  box(T, H, D, wallMat, -W / 2, H / 2, 0);                       // left wall
+  box(T, H, D, wallMat, W / 2, H / 2, 0);                        // right wall
+  const fw = (W - DOOR) / 2;                                     // front: leave a doorway
+  box(fw, H, T, wallMat, -(W / 2 - fw / 2), H / 2, D / 2);
+  box(fw, H, T, wallMat, (W / 2 - fw / 2), H / 2, D / 2);
+  box(DOOR, 0.9, T, wallMat, 0, H - 0.45, D / 2);               // lintel over the door
+  box(W + 0.9, 0.5, D + 0.9, roofMat, 0, H + 0.25, 0);          // roof slab
+  box(W, 0.1, D, floorMat, 0, 0.05, 0);                        // floor
+  box(W - 2, 1.2, 0.8, woodMat, 0, 0.6, -D / 2 + 2);           // shop counter
+
+  parts.forEach((m) => { m.castShadow = true; m.receiveShadow = true; store.add(m); });
+
+  const sign = makeSign('THE STORE');
+  sign.position.set(0, H + 1.3, D / 2 - 0.05);                  // on top, facing the courtyard
+  store.add(sign);
+
+  store.position.set(0, 0, -16);
+  scene.add(store);
+}
+buildStore();
+
+// Shopkeeper — a billboard sprite standing behind the counter (doesn't roam).
+const SHOPKEEPER_POS = new THREE.Vector3(0, 0, -17.6);
+function addShopkeeper() {
+  const tex = textureLoader.load('./assets/characters/shopkeeper.png');
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(CHAR_HEIGHT, CHAR_HEIGHT),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.5, side: THREE.DoubleSide })
+  );
+  const baseY = CHAR_HEIGHT / 2;
+  mesh.position.y = baseY;
+  mesh.userData.baseY = baseY;
+  mesh.userData.bobPhase = 0.5;
+  const holder = new THREE.Group();
+  holder.position.copy(SHOPKEEPER_POS);
+  holder.userData = { isShopkeeper: true };
+  holder.add(mesh);
+  const label = makeNameLabel('Shopkeeper');
+  label.position.set(0, CHAR_HEIGHT + 0.5, 0);
+  holder.add(label);
+  scene.add(holder);
+  billboards.push(mesh);
+}
+addShopkeeper();
+
+// ---- Shop UI: walk up to the shopkeeper to open it; spend stars to buy ----
+const SHOP_ITEMS = [
+  { emoji: '🍎', name: 'Apple', price: 3 },
+  { emoji: '🍰', name: 'Cake', price: 5 },
+  { emoji: '🍕', name: 'Pizza', price: 7 },
+  { emoji: '🧢', name: 'Hat', price: 6 },
+  { emoji: '👗', name: 'Dress', price: 10 },
+  { emoji: '👑', name: 'Crown', price: 15 },
+  { emoji: '🪄', name: 'Star Wand', price: 20 },
+];
+const owned = {};
+let shopEl = null, shopOpen = false, shopMsgEl = null, ownedEl = null;
+const shopRows = [];
+
+function renderScore() { scoreEl.textContent = '⭐ ' + score; }
+
+function buildShop() {
+  shopEl = document.createElement('div');
+  shopEl.id = 'shop';
+  shopEl.style.display = 'none';
+  const h = document.createElement('h3');
+  h.append('🏪 THE STORE');
+  const sub = document.createElement('p');
+  sub.className = 'shop-sub';
+  sub.textContent = 'Pay with ⭐ stars!';
+  const list = document.createElement('div');
+  list.className = 'shop-list';
+  SHOP_ITEMS.forEach((item) => {
+    const row = document.createElement('button');
+    row.className = 'shop-item';
+    const lbl = document.createElement('span');
+    lbl.textContent = `${item.emoji} ${item.name}`;
+    const price = document.createElement('span');
+    price.className = 'shop-price';
+    price.textContent = `${item.price} ⭐`;
+    row.append(lbl, price);
+    row.addEventListener('click', () => buyItem(item));
+    list.appendChild(row);
+    shopRows.push({ item, row });
+  });
+  shopMsgEl = document.createElement('p');
+  shopMsgEl.className = 'shop-msg';
+  ownedEl = document.createElement('p');
+  ownedEl.className = 'shop-owned';
+  shopEl.append(h, sub, list, shopMsgEl, ownedEl);
+  document.body.appendChild(shopEl);
+}
+
+function refreshShop() {
+  shopRows.forEach(({ item, row }) => {
+    row.classList.toggle('cant-afford', score < item.price);
+  });
+}
+
+function updateOwned() {
+  const have = Object.entries(owned).filter(([, n]) => n > 0);
+  if (!have.length) { ownedEl.textContent = ''; return; }
+  const icons = SHOP_ITEMS.filter((i) => owned[i.name]).map((i) => i.emoji.repeat(owned[i.name])).join(' ');
+  ownedEl.textContent = 'Yours: ' + icons;
+}
+
+function buyItem(item) {
+  if (score < item.price) {
+    shopMsgEl.textContent = `Not enough — you need ${item.price} ⭐!`;
+    animate(shopMsgEl, { opacity: [0.3, 1], duration: 220 });
+    return;
+  }
+  score -= item.price;
+  renderScore();
+  animate(scoreEl, { scale: [1.3, 1], duration: 300, ease: 'out(3)' });
+  owned[item.name] = (owned[item.name] || 0) + 1;
+  shopMsgEl.textContent = `You bought ${item.emoji} ${item.name}!`;
+  animate(shopMsgEl, { scale: [1.2, 1], opacity: [0.4, 1], duration: 300, ease: 'out(3)' });
+  updateOwned();
+  refreshShop();
+}
+
+function openShop() {
+  shopOpen = true;
+  refreshShop();
+  shopEl.style.display = 'block';
+  // opacity only — the panel's vertical centering uses CSS transform, so we
+  // must not animate transform here or it would jump.
+  animate(shopEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' });
+}
+function closeShop() {
+  shopOpen = false;
+  animate(shopEl, { opacity: [1, 0], duration: 200, onComplete: () => { shopEl.style.display = 'none'; } });
+}
+buildShop();
+
+// Open the shop when the player walks up to the shopkeeper.
+function updateShop() {
+  let near = false;
+  if (player) {
+    const dx = player.position.x - SHOPKEEPER_POS.x;
+    const dz = player.position.z - SHOPKEEPER_POS.z;
+    near = (dx * dx + dz * dz) < 5.5 * 5.5;
+  }
+  if (near && !shopOpen) openShop();
+  else if (!near && shopOpen) closeShop();
 }
 
 // ---------------------------------------------------------------------------
@@ -661,6 +873,7 @@ function tick() {
   if (player) updatePlayer(dt); else updateMovement(dt);
 
   updateCollectibles(t, dt);
+  updateShop();
 
   // Characters: wander around, face the camera (upright billboard), and bob/hop.
   for (const b of billboards) {
@@ -668,9 +881,9 @@ function tick() {
     const w = holder.userData;
 
     // roam toward the current target, then pause and pick a new one.
-    // The player-controlled character skips roaming — updatePlayer() (run
-    // earlier this frame) sets its position and `moving` flag instead.
-    if (!w.isPlayer) {
+    // The player-controlled character (and the shopkeeper) skip roaming.
+    // updatePlayer() sets the player's position/moving flag instead.
+    if (!w.isPlayer && !w.isShopkeeper) {
       if (t >= w.pauseUntil) {
         _charDir.set(w.target.x - holder.position.x, 0, w.target.z - holder.position.z);
         const dist = _charDir.length();
