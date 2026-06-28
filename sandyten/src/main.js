@@ -239,6 +239,34 @@ function pickRoamTarget(holder) {
   holder.userData.target.set(Math.cos(a) * r, 0, Math.sin(a) * r);
 }
 
+// Characters trade goods when two of them bump into each other while roaming.
+const TRADE_GOODS = ['🍎', '🍞', '🧀', '🥕', '🐟', '🌸', '⭐', '🎁', '🍇', '🥚', '🍪', '🌽'];
+let nextTradeAt = 5;
+function updateTrades(t) {
+  if (t < nextTradeAt) return;
+  nextTradeAt = t + 2.5 + Math.random() * 3;
+  const avail = [];
+  for (const b of billboards) {
+    const w = b.parent.userData;
+    if (w.isPlayer || w.isShopkeeper || w.sleeping) continue;
+    if (w.tradeUntil && t < w.tradeUntil) continue;
+    avail.push(b.parent);
+  }
+  for (let i = 0; i < avail.length; i++) {
+    for (let j = i + 1; j < avail.length; j++) {
+      const a = avail[i], c = avail[j];
+      if (Math.hypot(a.position.x - c.position.x, a.position.z - c.position.z) < 3.6) {
+        const until = t + 3;        // pause & show the goods they're swapping
+        for (const holder of [a, c]) {
+          holder.userData.tradeUntil = until;
+          setEmoji(holder.userData.tradeSprite, TRADE_GOODS[Math.floor(Math.random() * TRADE_GOODS.length)]);
+        }
+        return;
+      }
+    }
+  }
+}
+
 // A small floating name tag drawn on a canvas, shown above each character.
 function makeNameLabel(text) {
   const canvas = document.createElement('canvas');
@@ -272,6 +300,28 @@ function makeZzzSprite() {
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
   s.scale.set(1.2, 1.2, 1);
   s.visible = false;
+  return s;
+}
+
+// A small sprite showing an emoji (used for "trading" goods above characters).
+function setEmoji(sprite, emoji) {
+  const { ctx, tex } = sprite.userData;
+  ctx.clearRect(0, 0, 128, 128);
+  ctx.font = '84px serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(emoji, 64, 70);
+  tex.needsUpdate = true;
+}
+function makeEmojiSprite(emoji) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128; canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+  s.scale.set(0.9, 0.9, 1);
+  s.visible = false;
+  s.userData = { canvas, ctx, tex };
+  setEmoji(s, emoji);
   return s;
 }
 
@@ -332,6 +382,11 @@ function placeCharacter(char, index, total) {
   zzz.position.set(1.05, CHAR_HEIGHT + 1.0, 0);
   holder.add(zzz);
   holder.userData.zzz = zzz;
+
+  const tradeSprite = makeEmojiSprite('🎁');
+  tradeSprite.position.set(-0.95, CHAR_HEIGHT + 0.35, 0);
+  holder.add(tradeSprite);
+  holder.userData.tradeSprite = tradeSprite;
 
   characterGroup.add(holder);
   billboards.push(mesh);
@@ -439,6 +494,10 @@ function playAs(id) {
   const move = document.body.classList.contains('touch') ? 'joystick to move · drag to look' : 'arrow keys / WASD to move · drag to look';
   hintEl.replaceChildren('Playing as ', strong, ' — ' + move);
   changeBtn.style.display = '';
+
+  // move Daisy's doghouse next to this character's home
+  const spot = (typeof doghouseSpotById !== 'undefined') && doghouseSpotById[id];
+  if (spot) doghouseTarget.set(spot.x, 0, spot.z);
 }
 
 // Walk around as the chosen character; the camera trails along.
@@ -655,11 +714,23 @@ function playWoof() {
   } catch (e) { /* no audio — no problem */ }
 }
 
-// ---- Happy party music (synthesized chiptune loop, toggleable) ----
-let musicOn = false, musicGain = null, musicTimer = null, musicStep = 0, nextNoteTime = 0;
-const MUS_EIGHTH = (60 / 126) / 2; // 126 BPM
-const MUS_MELODY = [0, 4, 7, 12, 7, 4, 5, 9, 0, 4, 7, 12, 9, 7, 4, 2]; // cheerful, major
-const MUS_BASS = [0, 7, 5, 7, 0, 7, 9, 5];
+// ---- Happy party music: several different tunes you can cycle through ----
+let musicOn = false, musicGain = null, musicTimer = null, musicStep = 0, nextNoteTime = 0, musicTrack = 0;
+// each track: name, BPM, lead wave, melody (semitones from C5) and bass (from C3)
+const MUSIC_TRACKS = [
+  { name: 'Party Pop', bpm: 126, lead: 'triangle',
+    melody: [0, 4, 7, 12, 7, 4, 5, 9, 0, 4, 7, 12, 9, 7, 4, 2],
+    bass:   [0, 7, 5, 7, 0, 7, 9, 5] },
+  { name: 'Bouncy', bpm: 138, lead: 'square',
+    melody: [0, 0, 7, 7, 9, 9, 7, 5, 4, 4, 2, 2, 0, 4, 7, 4],
+    bass:   [0, 0, 5, 5, 7, 7, 0, 0] },
+  { name: 'Skippy', bpm: 150, lead: 'triangle',
+    melody: [12, 11, 9, 7, 9, 11, 12, 14, 16, 14, 12, 11, 9, 7, 5, 7],
+    bass:   [0, 4, 5, 7, 9, 7, 5, 4] },
+  { name: 'Dreamy', bpm: 108, lead: 'sine',
+    melody: [7, 9, 11, 12, 11, 9, 7, 4, 5, 7, 9, 7, 4, 2, 0, 4],
+    bass:   [0, 0, 9, 9, 5, 5, 7, 7] },
+];
 const musFreq = (semi, base) => base * Math.pow(2, semi / 12);
 function musTone(freq, time, dur, type, gain) {
   const o = audioCtx.createOscillator(), g = audioCtx.createGain();
@@ -672,24 +743,32 @@ function musTone(freq, time, dur, type, gain) {
 }
 function scheduleMusic() {
   if (!musicOn) return;
+  const tr = MUSIC_TRACKS[musicTrack];
+  const eighth = (60 / tr.bpm) / 2;
   while (nextNoteTime < audioCtx.currentTime + 0.25) {
     const i = musicStep % 16;
-    musTone(musFreq(MUS_MELODY[i], 523.25), nextNoteTime, MUS_EIGHTH * 0.9, 'triangle', 0.12); // lead
-    if (i % 2 === 0) musTone(musFreq(MUS_BASS[(i / 2) % 8], 130.81), nextNoteTime, MUS_EIGHTH * 1.7, 'sine', 0.16); // bass
-    nextNoteTime += MUS_EIGHTH; musicStep++;
+    musTone(musFreq(tr.melody[i], 523.25), nextNoteTime, eighth * 0.9, tr.lead, 0.12); // lead
+    if (i % 2 === 0) musTone(musFreq(tr.bass[(i / 2) % 8], 130.81), nextNoteTime, eighth * 1.7, 'sine', 0.16); // bass
+    nextNoteTime += eighth; musicStep++;
   }
   musicTimer = setTimeout(scheduleMusic, 60);
 }
-function toggleMusic() {
+function startTrack() {
+  musicStep = 0; nextNoteTime = audioCtx.currentTime + 0.06; scheduleMusic();
+}
+// cycle: off -> track 0 -> track 1 -> ... -> off. Returns the current track name or null.
+function cycleMusic() {
   try {
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
     if (!musicGain) { musicGain = audioCtx.createGain(); musicGain.gain.value = 0.5; musicGain.connect(audioCtx.destination); }
     if (audioCtx.state === 'suspended') audioCtx.resume();
-    musicOn = !musicOn;
-    if (musicOn) { musicStep = 0; nextNoteTime = audioCtx.currentTime + 0.06; scheduleMusic(); }
-    else { clearTimeout(musicTimer); }
-  } catch (e) { /* no audio — no problem */ }
-  return musicOn;
+    clearTimeout(musicTimer);
+    if (!musicOn) { musicOn = true; musicTrack = 0; startTrack(); return MUSIC_TRACKS[0].name; }
+    musicTrack += 1;
+    if (musicTrack >= MUSIC_TRACKS.length) { musicOn = false; return null; } // turn off after the last
+    startTrack();
+    return MUSIC_TRACKS[musicTrack].name;
+  } catch (e) { return null; }
 }
 
 function collectStar(s, byPlayer) {
@@ -927,7 +1006,7 @@ function updateCampfire(t) {
     f.scale.y = 0.85 + Math.sin(t * 10 + f.userData.phase) * 0.22;
     f.rotation.y = t * 2 + f.userData.phase;
   }
-  if (campfire.light) campfire.light.intensity = (isNight ? 2.4 : 1.1) * flick;
+  if (campfire.light) campfire.light.intensity = (isNight ? 3.4 : 1.7) * flick;
 }
 
 // ---------------------------------------------------------------------------
@@ -1051,9 +1130,10 @@ function updateDog(t, dt) {
 }
 
 // ---------------------------------------------------------------------------
-// Daisy's doghouse — a little kennel that stays beside your character.
+// Daisy's doghouse — a little kennel that sits next to your character's home.
 // ---------------------------------------------------------------------------
 let doghouse = null;
+const doghouseTarget = new THREE.Vector3(3, 0, 3); // moves to your home when you pick a character
 function createDoghouse() {
   const g = new THREE.Group();
   const wallMat = new THREE.MeshStandardMaterial({ color: 0xc98a5a, roughness: 0.9 });
@@ -1075,21 +1155,11 @@ function createDoghouse() {
   doghouse = g;
 }
 createDoghouse();
-const _dhFwd = new THREE.Vector3(), _dhRight = new THREE.Vector3(), _dhTarget = new THREE.Vector3();
 function updateDoghouse(dt) {
   if (!doghouse) return;
-  if (player) {
-    camera.getWorldDirection(_dhFwd); _dhFwd.y = 0;
-    if (_dhFwd.lengthSq() === 0) _dhFwd.set(0, 0, -1);
-    _dhFwd.normalize();
-    _dhRight.crossVectors(_dhFwd, camera.up).normalize();
-    _dhTarget.set(player.position.x - _dhRight.x * 2.8, 0, player.position.z - _dhRight.z * 2.8); // to your left
-  } else {
-    _dhTarget.set(3, 0, 3);
-  }
-  const k = Math.min(1, dt * 3); // smooth glide
-  doghouse.position.x += (_dhTarget.x - doghouse.position.x) * k;
-  doghouse.position.z += (_dhTarget.z - doghouse.position.z) * k;
+  const k = Math.min(1, dt * 2.5); // smooth glide toward the home spot
+  doghouse.position.x += (doghouseTarget.x - doghouse.position.x) * k;
+  doghouse.position.z += (doghouseTarget.z - doghouse.position.z) * k;
   doghouse.position.y = houseFloorHeight(doghouse.position.x, doghouse.position.z);
 }
 
@@ -1445,6 +1515,7 @@ function buildPath(x1, z1, x2, z2, width = 1.7) {
 }
 
 const homeById = {};                                   // char id -> home spot (inside its house)
+const doghouseSpotById = {};                           // char id -> spot beside the house for the doghouse
 const SLEEPERS = new Set(['kiki', 'bronte', 'spike']); // half go home to sleep at night
 
 function placeHouses(roster) {
@@ -1461,6 +1532,9 @@ function placeHouses(roster) {
       name: c.name, wall: col.wall, roof: col.roof,
     });
     homeById[c.id] = { x: cs * (R - 2), z: sn * (R - 2) };       // sleep spot inside the house
+    // doghouse spot: in front of the house door (toward the courtyard) and to one side
+    const px = -sn, pz = cs; // perpendicular to the radial direction
+    doghouseSpotById[c.id] = { x: cs * (R - 4) + px * 2.6, z: sn * (R - 4) + pz * 2.6 };
     buildPath(cs * 3, sn * 3, cs * (R - 2.5), sn * (R - 2.5));    // path out to this house
   });
   // paths to THE STORE, the DRESSING ROOM, and the HOSPITAL
@@ -1508,7 +1582,7 @@ function updateDayNight(t) {
   const sinE = Math.sin(2 * Math.PI * dayT);
   setSun(75 * sinE, 70 + dayT * 220);          // elevation rises & sets; azimuth sweeps
   const dayness = Math.max(0, sinE);           // 0 deep night … 1 high noon
-  sunLight.intensity = 0.1 + dayness * 2.5;
+  sunLight.intensity = 0.1 + dayness * 1.25; // sun dimmed 50%
   hemi.intensity = 0.2 + dayness * 0.5;
   // keep daytime exposure modest so the sky shows its blue and white sprites
   // (like Boo) don't blow out; night stays a touch brighter for playability.
@@ -1519,8 +1593,8 @@ function updateDayNight(t) {
   // lamp posts glow & cast light at night
   const lampOn = Math.max(0, 1 - dayness * 2.4);
   for (const lp of lampPosts) {
-    lp.light.intensity = lampOn * 2.6;   // brighter at night
-    lp.orbMat.emissiveIntensity = 0.15 + lampOn * 1.5;
+    lp.light.intensity = lampOn * 3.6;   // brighter at night
+    lp.orbMat.emissiveIntensity = 0.15 + lampOn * 2.1;
   }
   const [name, icon] = phaseName(dayT);
   if (phaseEl) phaseEl.textContent = icon + ' ' + name;
@@ -1806,11 +1880,11 @@ window.addEventListener('blur', () => keys.clear());
 const throwBtnEl = document.getElementById('throwBtn');
 if (throwBtnEl) throwBtnEl.addEventListener('click', throwBall);
 
-// Party music toggle
+// Party music — each click changes the song, then turns it off
 const musicBtnEl = document.getElementById('musicBtn');
 if (musicBtnEl) musicBtnEl.addEventListener('click', () => {
-  const on = toggleMusic();
-  musicBtnEl.textContent = on ? '🎵 Music' : '🔇 Music';
+  const trackName = cycleMusic();
+  musicBtnEl.textContent = trackName ? '🎵 ' + trackName : '🔇 Music';
 });
 
 const _forward = new THREE.Vector3();
@@ -1924,6 +1998,7 @@ function tick() {
   updateCollectibles(t, dt);
   updateShop();
   updateDress();
+  updateTrades(t);
 
   // Characters: wander around, face the camera (upright billboard), and bob/hop.
   for (const b of billboards) {
@@ -1936,7 +2011,10 @@ function tick() {
     if (!w.isPlayer && !w.isShopkeeper) {
       w.sleeping = false;
       const cid = b.userData.char && b.userData.char.id;
-      if (isNight && SLEEPERS.has(cid) && homeById[cid]) {
+      const trading = w.tradeUntil && t < w.tradeUntil;
+      if (trading) {
+        w.moving = false; // pause to trade goods
+      } else if (isNight && SLEEPERS.has(cid) && homeById[cid]) {
         // at night, half the characters head home to sleep
         const home = homeById[cid];
         _charDir.set(home.x - holder.position.x, 0, home.z - holder.position.z);
@@ -1976,6 +2054,12 @@ function tick() {
     if (holder.userData.zzz) {
       holder.userData.zzz.visible = !!w.sleeping;
       if (w.sleeping) holder.userData.zzz.position.y = (CHAR_HEIGHT + 1.0) + Math.sin(t * 2 + b.userData.bobPhase) * 0.12;
+    }
+    // show the goods emoji while trading
+    if (holder.userData.tradeSprite) {
+      const trading = w.tradeUntil && t < w.tradeUntil;
+      holder.userData.tradeSprite.visible = !!trading;
+      if (trading) holder.userData.tradeSprite.position.y = (CHAR_HEIGHT + 0.35) + Math.sin(t * 3 + b.userData.bobPhase) * 0.1;
     }
   }
 
