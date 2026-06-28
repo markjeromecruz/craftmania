@@ -151,6 +151,17 @@
     }
     #dressroom h3 { text-align: center; font-size: 19px; margin-bottom: 2px; }
     #dressroom .shop-sub { color: #f0c6e8; }
+
+    /* ---------- Trading panel (right side, above the shop spot) ---------- */
+    #tradepanel {
+      position: fixed; z-index: 35; right: 18px; top: 16px;
+      width: 250px; max-width: 80vw; display: none; max-height: 80vh; overflow-y: auto;
+      background: linear-gradient(180deg, #163d2f, #0c2018);
+      border: 1px solid rgba(127, 255, 209, .25); border-radius: 18px;
+      padding: 14px 14px 12px; box-shadow: 0 16px 44px rgba(0, 0, 0, .5);
+    }
+    #tradepanel h3 { text-align: center; font-size: 18px; margin-bottom: 2px; }
+    #tradepanel .shop-sub { color: #9be6c0; }
     .dress-entry { display: flex; flex-direction: column; gap: 5px; }
     .swatches { display: flex; gap: 6px; flex-wrap: wrap; padding: 2px 4px 6px; }
     .swatch {
@@ -208,6 +219,7 @@
       <div style="display:flex; gap:8px; align-items:center;">
         <button class="pill" id="changeBtn" style="display:none; cursor:pointer;">⟳ Change character</button>
         <div class="pill" id="timephase">☀️ day</div>
+        <button class="pill" id="tradeBtn" style="cursor:pointer;">🤝 Trade</button>
         <button class="pill" id="musicBtn" style="cursor:pointer;">🔇 Music</button>
         <div class="pill" id="score">⭐ 0</div>
         <div class="pill" id="fps">– fps</div>
