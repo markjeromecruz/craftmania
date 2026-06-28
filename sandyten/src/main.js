@@ -1732,6 +1732,7 @@ moon.add(new THREE.Mesh(new THREE.SphereGeometry(64, 20, 16), new THREE.MeshBasi
 const moonLight = new THREE.DirectionalLight(0x9fb4ff, 0); // cool moonlight
 scene.add(moonLight); scene.add(moonLight.target);
 const _moonDir = new THREE.Vector3();
+const _moonTint = new THREE.Color(0x9fb6e8); // cool tint the moon ambient lerps toward
 
 // a starfield that fades in at night
 const starGeo = new THREE.BufferGeometry();
@@ -1779,7 +1780,10 @@ function updateDayNight(t) {
   const moonUp = Math.max(0, -sinE);     // 0 by day … 1 deep night
   moon.visible = moonUp > 0.02;
   moonLight.position.copy(_moonDir).multiplyScalar(100);
-  moonLight.intensity = moonUp * 0.7;
+  moonLight.intensity = moonUp * 0.5;    // gentle directional moonlight
+  // soft moonlit ambient so the WHOLE place is lit at night (kept modest)
+  hemi.intensity += moonUp * 0.45;
+  hemi.color.setHex(0xcfe8ff).lerp(_moonTint, moonUp * 0.6); // cool moonlit tint at night
   // lamp posts glow & cast light at night
   const lampOn = Math.max(0, 1 - dayness * 2.4);
   for (const lp of lampPosts) {
