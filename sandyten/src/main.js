@@ -545,7 +545,7 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   const obj = hits[0].object;
   if (petDog && obj === petDog.mesh) {        // clicked the puppy → bark!
     playWoof();
-    showBubble(petDog.mesh, 'Puppy', 'Woof! 🐶', 1.3);
+    showBubble(petDog.mesh, DOG_NAME, 'Woof! 🐶', 1.3);
     petDog.barkUntil = timer.getElapsed() + 0.4; // little excited hop
   } else {
     showSpeech(obj);
@@ -653,6 +653,43 @@ function playWoof() {
       o.stop(now + start + 0.16);
     }
   } catch (e) { /* no audio — no problem */ }
+}
+
+// ---- Happy party music (synthesized chiptune loop, toggleable) ----
+let musicOn = false, musicGain = null, musicTimer = null, musicStep = 0, nextNoteTime = 0;
+const MUS_EIGHTH = (60 / 126) / 2; // 126 BPM
+const MUS_MELODY = [0, 4, 7, 12, 7, 4, 5, 9, 0, 4, 7, 12, 9, 7, 4, 2]; // cheerful, major
+const MUS_BASS = [0, 7, 5, 7, 0, 7, 9, 5];
+const musFreq = (semi, base) => base * Math.pow(2, semi / 12);
+function musTone(freq, time, dur, type, gain) {
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, time);
+  g.gain.exponentialRampToValueAtTime(gain, time + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+  o.connect(g).connect(musicGain);
+  o.start(time); o.stop(time + dur + 0.03);
+}
+function scheduleMusic() {
+  if (!musicOn) return;
+  while (nextNoteTime < audioCtx.currentTime + 0.25) {
+    const i = musicStep % 16;
+    musTone(musFreq(MUS_MELODY[i], 523.25), nextNoteTime, MUS_EIGHTH * 0.9, 'triangle', 0.12); // lead
+    if (i % 2 === 0) musTone(musFreq(MUS_BASS[(i / 2) % 8], 130.81), nextNoteTime, MUS_EIGHTH * 1.7, 'sine', 0.16); // bass
+    nextNoteTime += MUS_EIGHTH; musicStep++;
+  }
+  musicTimer = setTimeout(scheduleMusic, 60);
+}
+function toggleMusic() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (!musicGain) { musicGain = audioCtx.createGain(); musicGain.gain.value = 0.5; musicGain.connect(audioCtx.destination); }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    musicOn = !musicOn;
+    if (musicOn) { musicStep = 0; nextNoteTime = audioCtx.currentTime + 0.06; scheduleMusic(); }
+    else { clearTimeout(musicTimer); }
+  } catch (e) { /* no audio — no problem */ }
+  return musicOn;
 }
 
 function collectStar(s, byPlayer) {
@@ -931,6 +968,7 @@ function updateAmbulance(t) {
 // A pet dog that trots after the player (and climbs stairs with them).
 // ---------------------------------------------------------------------------
 let petDog = null;
+const DOG_NAME = 'Daisy';
 function createDog() {
   const tex = textureLoader.load('./assets/characters/dog.png');
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -944,6 +982,10 @@ function createDog() {
   const holder = new THREE.Group();
   holder.position.set(4, 0, 7);
   holder.add(mesh);
+  const label = makeNameLabel(DOG_NAME);
+  label.position.set(0, size + 0.35, 0);
+  label.scale.set(2.0, 0.5, 1);
+  holder.add(label);
   scene.add(holder);
   petDog = { holder, mesh, baseY: size / 2 };
 }
@@ -1006,6 +1048,49 @@ function updateDog(t, dt) {
   const excited = petDog.barkUntil && t < petDog.barkUntil;
   petDog.mesh.rotation.y = Math.atan2(camera.position.x - h.position.x, camera.position.z - h.position.z);
   petDog.mesh.position.y = petDog.baseY + ((moving || excited) ? Math.abs(Math.sin(t * 12)) * 0.2 : Math.sin(t * 2) * 0.06);
+}
+
+// ---------------------------------------------------------------------------
+// Daisy's doghouse — a little kennel that stays beside your character.
+// ---------------------------------------------------------------------------
+let doghouse = null;
+function createDoghouse() {
+  const g = new THREE.Group();
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0xc98a5a, roughness: 0.9 });
+  const roofMat = new THREE.MeshStandardMaterial({ color: 0xb44a3a, roughness: 0.8 });
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x2a1c14, roughness: 1 });
+  const walls = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.0, 1.5), wallMat);
+  walls.position.y = 0.5; walls.castShadow = true; g.add(walls);
+  const roof = new THREE.Mesh(new THREE.ConeGeometry(1.15, 0.8, 4), roofMat);
+  roof.position.y = 1.35; roof.rotation.y = Math.PI / 4; roof.castShadow = true; g.add(roof);
+  const door = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.2, 16, 1, false, 0, Math.PI), darkMat);
+  door.rotation.x = Math.PI / 2; door.position.set(0, 0.45, 0.76); g.add(door); // arched doorway
+  const doorBase = new THREE.Mesh(new THREE.BoxGeometry(0.84, 0.45, 0.2), darkMat);
+  doorBase.position.set(0, 0.27, 0.76); g.add(doorBase);
+  const label = makeNameLabel(DOG_NAME);
+  label.position.set(0, 2.1, 0); label.scale.set(2.0, 0.5, 1);
+  g.add(label);
+  g.position.set(3, 0, 3);
+  scene.add(g);
+  doghouse = g;
+}
+createDoghouse();
+const _dhFwd = new THREE.Vector3(), _dhRight = new THREE.Vector3(), _dhTarget = new THREE.Vector3();
+function updateDoghouse(dt) {
+  if (!doghouse) return;
+  if (player) {
+    camera.getWorldDirection(_dhFwd); _dhFwd.y = 0;
+    if (_dhFwd.lengthSq() === 0) _dhFwd.set(0, 0, -1);
+    _dhFwd.normalize();
+    _dhRight.crossVectors(_dhFwd, camera.up).normalize();
+    _dhTarget.set(player.position.x - _dhRight.x * 2.8, 0, player.position.z - _dhRight.z * 2.8); // to your left
+  } else {
+    _dhTarget.set(3, 0, 3);
+  }
+  const k = Math.min(1, dt * 3); // smooth glide
+  doghouse.position.x += (_dhTarget.x - doghouse.position.x) * k;
+  doghouse.position.z += (_dhTarget.z - doghouse.position.z) * k;
+  doghouse.position.y = houseFloorHeight(doghouse.position.x, doghouse.position.z);
 }
 
 // ---- Shop UI: walk up to the shopkeeper to open it; spend stars to buy ----
@@ -1721,6 +1806,13 @@ window.addEventListener('blur', () => keys.clear());
 const throwBtnEl = document.getElementById('throwBtn');
 if (throwBtnEl) throwBtnEl.addEventListener('click', throwBall);
 
+// Party music toggle
+const musicBtnEl = document.getElementById('musicBtn');
+if (musicBtnEl) musicBtnEl.addEventListener('click', () => {
+  const on = toggleMusic();
+  musicBtnEl.textContent = on ? '🎵 Music' : '🔇 Music';
+});
+
 const _forward = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _move = new THREE.Vector3();
@@ -1823,6 +1915,7 @@ function tick() {
   updateAmbulance(t);
   updateBall(dt);
   updateDog(t, dt);
+  updateDoghouse(dt);
   updateBalloons(t);
 
   // Move first (player walks / free camera), then update characters' facing & bob.
