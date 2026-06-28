@@ -223,24 +223,29 @@ const CHAR_RING = 6.5;          // starting distance from the central fountain
 const ROAM_INNER = 4, ROAM_OUTER = 9;
 const _charDir = new THREE.Vector3();
 function pickRoamTarget(holder) {
-  // Half the time, head for the nearest star (so NPCs collect stars too);
-  // otherwise wander to a random spot.
-  if (Math.random() < 0.5 && typeof collectibles !== 'undefined' && collectibles.children.length) {
+  const w = holder.userData;
+  const cx = w.roamCenter ? w.roamCenter.x : 0;
+  const cz = w.roamCenter ? w.roamCenter.z : 0;
+  const inner = w.roamInner != null ? w.roamInner : ROAM_INNER;
+  const outer = w.roamRadius != null ? w.roamRadius : ROAM_OUTER;
+  // courtyard roamers sometimes go for the nearest star (NPCs collect too)
+  if (!w.roamCenter && Math.random() < 0.5 && typeof collectibles !== 'undefined' && collectibles.children.length) {
     let best = null, bestD = Infinity;
     for (const s of collectibles.children) {
       if (s.userData.collected) continue;
       const d = (s.position.x - holder.position.x) ** 2 + (s.position.z - holder.position.z) ** 2;
       if (d < bestD) { bestD = d; best = s; }
     }
-    if (best) { holder.userData.target.set(best.position.x, 0, best.position.z); return; }
+    if (best) { w.target.set(best.position.x, 0, best.position.z); return; }
   }
   const a = Math.random() * Math.PI * 2;
-  const r = ROAM_INNER + Math.random() * (ROAM_OUTER - ROAM_INNER);
-  holder.userData.target.set(Math.cos(a) * r, 0, Math.sin(a) * r);
+  const r = inner + Math.random() * (outer - inner);
+  w.target.set(cx + Math.cos(a) * r, 0, cz + Math.sin(a) * r);
 }
 
-// Characters trade goods when two of them bump into each other while roaming.
-const TRADE_GOODS = ['🍎', '🍞', '🧀', '🥕', '🐟', '🌸', '⭐', '🎁', '🍇', '🥚', '🍪', '🌽'];
+// Characters carry a "good" they're trading, and swap when two of them meet.
+const TRADE_GOODS = ['🍎', '🍞', '🧀', '🥕', '🐟', '🌸', '⭐', '🎁', '🍇', '🥚', '🍪', '🌽', '🍓', '🥨', '🧁'];
+const randomGood = () => TRADE_GOODS[Math.floor(Math.random() * TRADE_GOODS.length)];
 let nextTradeAt = 5;
 function updateTrades(t) {
   if (t < nextTradeAt) return;
@@ -248,7 +253,7 @@ function updateTrades(t) {
   const avail = [];
   for (const b of billboards) {
     const w = b.parent.userData;
-    if (w.isPlayer || w.isShopkeeper || w.sleeping) continue;
+    if (w.isPlayer || w.isShopkeeper || w.sleeping || w.child) continue;
     if (w.tradeUntil && t < w.tradeUntil) continue;
     avail.push(b.parent);
   }
@@ -256,16 +261,73 @@ function updateTrades(t) {
     for (let j = i + 1; j < avail.length; j++) {
       const a = avail[i], c = avail[j];
       if (Math.hypot(a.position.x - c.position.x, a.position.z - c.position.z) < 3.6) {
-        const until = t + 3;        // pause & show the goods they're swapping
-        for (const holder of [a, c]) {
-          holder.userData.tradeUntil = until;
-          setEmoji(holder.userData.tradeSprite, TRADE_GOODS[Math.floor(Math.random() * TRADE_GOODS.length)]);
-        }
+        // swap their goods, pause, and show what each gave away
+        const ga = a.userData.tradeGood || randomGood();
+        const gc = c.userData.tradeGood || randomGood();
+        a.userData.tradeGood = gc; c.userData.tradeGood = ga;
+        const until = t + 3;
+        a.userData.tradeUntil = until; c.userData.tradeUntil = until;
+        setEmoji(a.userData.tradeSprite, gc);
+        setEmoji(c.userData.tradeSprite, ga);
+        if (tradeOpen) refreshTradePanel();
         return;
       }
     }
   }
 }
+
+// ---- Trading list: see what everyone is trading, and trade with them ----
+let tradeEl = null, tradeOpen = false, tradeListEl = null, tradeMsgEl = null;
+function buildTradePanel() {
+  tradeEl = document.createElement('div');
+  tradeEl.id = 'tradepanel';
+  tradeEl.style.display = 'none';
+  const h = document.createElement('h3'); h.append('🤝 Trading');
+  const sub = document.createElement('p'); sub.className = 'shop-sub';
+  sub.textContent = "Everyone's goods — tap Trade to get one!";
+  tradeListEl = document.createElement('div'); tradeListEl.className = 'shop-list';
+  tradeMsgEl = document.createElement('p'); tradeMsgEl.className = 'shop-msg';
+  tradeEl.append(h, sub, tradeListEl, tradeMsgEl);
+  document.body.appendChild(tradeEl);
+}
+function refreshTradePanel() {
+  if (!tradeListEl) return;
+  tradeListEl.replaceChildren();
+  const seen = new Set();
+  for (const b of billboards) {
+    const ch = b.userData.char;
+    if (!ch || seen.has(ch.id) || b.parent.userData.child) continue;
+    seen.add(ch.id);
+    const holder = b.parent;
+    const row = document.createElement('div'); row.className = 'shop-item';
+    const lbl = document.createElement('span');
+    lbl.textContent = `${ch.name}  ${holder.userData.tradeGood || ''}`;
+    row.appendChild(lbl);
+    if (holder === player) {
+      const tag = document.createElement('span'); tag.className = 'shop-price'; tag.textContent = '(you)';
+      row.appendChild(tag);
+    } else {
+      const btn = document.createElement('button'); btn.className = 'shop-price'; btn.style.cursor = 'pointer';
+      btn.textContent = 'Trade';
+      btn.addEventListener('click', () => playerTradeWith(holder));
+      row.appendChild(btn);
+    }
+    tradeListEl.appendChild(row);
+  }
+}
+function playerTradeWith(holder) {
+  const good = holder.userData.tradeGood || randomGood();
+  holder.userData.tradeGood = randomGood();          // they restock with a new good
+  score += 1; renderScore();
+  animate(scoreEl, { scale: [1.3, 1], duration: 300, ease: 'out(3)' });
+  const nm = holder.userData.mesh?.userData.char?.name || 'them';
+  tradeMsgEl.textContent = `Traded with ${nm}: got ${good}! +1 ⭐`;
+  animate(tradeMsgEl, { scale: [1.2, 1], opacity: [0.4, 1], duration: 300, ease: 'out(3)' });
+  refreshTradePanel();
+}
+function openTrade() { tradeOpen = true; refreshTradePanel(); tradeEl.style.display = 'block'; animate(tradeEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' }); }
+function closeTrade() { tradeOpen = false; animate(tradeEl, { opacity: [1, 0], duration: 200, onComplete: () => { tradeEl.style.display = 'none'; } }); }
+buildTradePanel();
 
 // A small floating name tag drawn on a canvas, shown above each character.
 function makeNameLabel(text) {
@@ -387,6 +449,7 @@ function placeCharacter(char, index, total) {
   tradeSprite.position.set(-0.95, CHAR_HEIGHT + 0.35, 0);
   holder.add(tradeSprite);
   holder.userData.tradeSprite = tradeSprite;
+  holder.userData.tradeGood = randomGood(); // the item this character is trading
 
   characterGroup.add(holder);
   billboards.push(mesh);
@@ -404,6 +467,7 @@ fetch('./assets/characters/characters.json')
     const roster = data.characters || [];
     roster.forEach((c, i) => placeCharacter(c, i, roster.length));
     placeHouses(roster); // a little house for each character
+    buildNeighborhood(); // extra families + a park behind the houses
     // expose the roster + their stats for the game the girls build next
     window.SANDYTEN.roster = roster;
     buildPicker(roster);
@@ -1163,6 +1227,115 @@ function updateDoghouse(dt) {
   doghouse.position.y = houseFloorHeight(doghouse.position.x, doghouse.position.z);
 }
 
+// ---------------------------------------------------------------------------
+// Neighborhood + Park: extra families that roam the park with their kids.
+// ---------------------------------------------------------------------------
+const PARK = { x: -23, z: 6 };
+
+// A roaming billboard character (neighbor adult or trailing child).
+function spawnRoamer({ id, name, sprite, x, z, scale = 1, roamCenter, roamRadius, roamInner, child = false, parent = null, lines }) {
+  const tex = textureLoader.load(`./assets/characters/${sprite}`);
+  tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  const size = CHAR_HEIGHT * scale;
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(size, size),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.5, side: THREE.DoubleSide })
+  );
+  mesh.userData.char = { id, name, lines };
+  const baseY = size / 2;
+  mesh.position.y = baseY; mesh.userData.baseY = baseY; mesh.userData.bobPhase = Math.random() * 6;
+  mesh.userData.accessories = {}; mesh.userData.itemColors = {};
+  const holder = new THREE.Group();
+  holder.position.set(x, 0, z);
+  holder.userData = {
+    speed: 1.0 + Math.random() * 0.8,
+    target: new THREE.Vector3(x, 0, z),
+    pauseUntil: 1 + Math.random() * 2,
+    moving: false, mesh,
+    roamCenter, roamRadius, roamInner, child, parent,
+    tradeGood: randomGood(),
+  };
+  holder.add(mesh);
+  holder.add(makeGroundShadow(size * 0.32));
+  const label = makeNameLabel(name);
+  label.position.set(0, size + 0.5, 0);
+  if (child) label.scale.set(1.6, 0.42, 1);
+  holder.add(label);
+  const zzz = makeZzzSprite(); zzz.position.set(size * 0.3, size + 0.6, 0); holder.add(zzz); holder.userData.zzz = zzz;
+  const ts = makeEmojiSprite('🎁'); ts.position.set(-size * 0.28, size + 0.25, 0); holder.add(ts); holder.userData.tradeSprite = ts;
+  characterGroup.add(holder);
+  billboards.push(mesh);
+  return holder;
+}
+
+function buildPark() {
+  const grassMat = new THREE.MeshStandardMaterial({ color: 0x77b85a, roughness: 1 });
+  const grass = new THREE.Mesh(new THREE.CircleGeometry(13, 44), grassMat);
+  grass.rotation.x = -Math.PI / 2; grass.position.set(PARK.x, 0.04, PARK.z); grass.receiveShadow = true; scene.add(grass);
+  const sign = makeSign('PARK'); sign.scale.setScalar(0.7); sign.position.set(PARK.x, 3.4, PARK.z + 12.4); scene.add(sign);
+
+  const red = new THREE.MeshStandardMaterial({ color: 0xd64a4a, roughness: 0.6 });
+  const blue = new THREE.MeshStandardMaterial({ color: 0x4a8cd6, roughness: 0.6 });
+  const yellow = new THREE.MeshStandardMaterial({ color: 0xf2c14e, roughness: 0.6 });
+  const wood = new THREE.MeshStandardMaterial({ color: 0x9c6b3f, roughness: 0.9 });
+  const box = (g, w, h, d, mat, x, y, z, rx = 0) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.rotation.x = rx; m.castShadow = true; g.add(m); return m; };
+
+  // --- playground ---
+  const pg = new THREE.Group(); pg.position.set(PARK.x + 4, 0, PARK.z - 4); scene.add(pg);
+  // slide
+  box(pg, 1.0, 0.12, 1.0, yellow, -1, 2.0, 0);                 // top platform
+  box(pg, 0.18, 2.0, 0.18, red, -1.45, 1.0, 0.4);             // ladder posts
+  box(pg, 0.18, 2.0, 0.18, red, -1.45, 1.0, -0.4);
+  box(pg, 0.9, 0.1, 2.8, blue, 0.1, 1.05, 0.9, 0.5);          // slide ramp
+  // swing set (A-frames + bar + 2 seats)
+  const sw = new THREE.Group(); sw.position.set(2.6, 0, 0); pg.add(sw);
+  for (const sz of [-1.2, 1.2]) { box(sw, 0.15, 2.5, 0.15, red, -0.9, 1.25, sz); box(sw, 0.15, 2.5, 0.15, red, 0.9, 1.25, sz); }
+  box(sw, 0.16, 0.16, 2.7, red, 0, 2.45, 0);                  // top bar
+  for (const sx of [-0.45, 0.45]) { box(sw, 0.03, 1.3, 0.03, wood, sx, 1.75, 0); box(sw, 0.5, 0.1, 0.3, blue, sx, 1.1, 0); }
+  // see-saw
+  const ss = new THREE.Group(); ss.position.set(0, 0, 3); pg.add(ss);
+  box(ss, 0.4, 0.5, 0.4, wood, 0, 0.35, 0);                   // pivot
+  const plank = box(ss, 0.5, 0.12, 3.4, red, 0, 0.62, 0); plank.rotation.x = 0.12;
+
+  // --- dog park (fenced patch with a hoop and a ramp) ---
+  const dp = new THREE.Group(); dp.position.set(PARK.x - 5, 0, PARK.z + 5); scene.add(dp);
+  const fenceMat = new THREE.MeshStandardMaterial({ color: 0xcdb892, roughness: 0.9 });
+  const R = 4;
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * Math.PI * 2;
+    box(dp, 0.12, 0.9, 0.12, fenceMat, Math.cos(a) * R, 0.45, Math.sin(a) * R);
+  }
+  const hoop = new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.08, 8, 20), red);
+  hoop.position.set(0, 0.9, -1); dp.add(hoop);
+  box(dp, 1.6, 0.12, 1.0, blue, 1.2, 0.5, 1.2, 0.5);          // little ramp
+  const bone = makeSign('DOG PARK'); bone.scale.setScalar(0.5); bone.position.set(PARK.x - 5, 2.6, PARK.z + 9); scene.add(bone);
+}
+
+const NEIGHBORS = [
+  { id: 'pip', name: 'Pip', sprite: 'pip.png', wall: 0xe8e0ea, roof: 0x9aa6c9, lines: ['Hi neighbor!', 'Lovely day!', 'Hop hop!'] },
+  { id: 'coco', name: 'Coco', sprite: 'coco.png', wall: 0xf4dcb6, roof: 0xe08a4a, lines: ['Meow!', 'Off to the park!', 'Purr~'] },
+  { id: 'bruno', name: 'Bruno', sprite: 'bruno.png', wall: 0xe6cba0, roof: 0x8a5a36, lines: ['Hello there!', 'Nice to meet you!', 'Grr-iendly!'] },
+];
+function buildNeighborhood() {
+  buildPath(-4, 0, PARK.x + 8, PARK.z); // path from the courtyard out to the park
+  buildPark();
+  NEIGHBORS.forEach((n, i) => {
+    const ang = (i / NEIGHBORS.length) * Math.PI * 2; // ring of homes around the park
+    const hx = PARK.x + Math.cos(ang) * 11, hz = PARK.z + Math.sin(ang) * 11;
+    const ry = Math.atan2(PARK.x - hx, PARK.z - hz); // face the park
+    buildHouse({ x: hx, z: hz, rotationY: ry, name: n.name, wall: n.wall, roof: n.roof });
+    const parent = spawnRoamer({
+      id: n.id, name: n.name, sprite: n.sprite,
+      x: PARK.x + (i - 1) * 3, z: PARK.z + (i - 1) * 2,
+      roamCenter: PARK, roamInner: 2, roamRadius: 9, lines: n.lines,
+    });
+    spawnRoamer({ // one child trailing the parent
+      id: n.id + '_kid', name: n.name + ' Jr.', sprite: n.sprite,
+      x: PARK.x, z: PARK.z, scale: 0.6, child: true, parent, lines: ['Wheee!', 'Tag, you\'re it!', 'Hehe!'],
+    });
+  });
+}
+
 // ---- Shop UI: walk up to the shopkeeper to open it; spend stars to buy ----
 const SHOP_ITEMS = [
   { emoji: '🍎', name: 'Apple', price: 3 },
@@ -1547,10 +1720,18 @@ function placeHouses(roster) {
 // Day / night cycle: dawn → morning → day → sunset → night → midnight.
 // Drives the sun, sky, lights, fog and stars, and flags `isNight` for sleepers.
 // ---------------------------------------------------------------------------
-const DAY_LENGTH = 200;   // seconds for one full day
+const DAY_LENGTH = 320;   // seconds for one full day (longer so night comes slower)
 const DAY_START = 0.18;   // start mid-morning so it's bright on load
 let isNight = false;
 const phaseEl = document.getElementById('timephase');
+
+// Moon + soft moonlight that appear at night (opposite the sun).
+const moon = new THREE.Mesh(new THREE.SphereGeometry(42, 24, 18), new THREE.MeshBasicMaterial({ color: 0xeef0ff }));
+moon.visible = false; scene.add(moon);
+moon.add(new THREE.Mesh(new THREE.SphereGeometry(64, 20, 16), new THREE.MeshBasicMaterial({ color: 0xaab4ff, transparent: true, opacity: 0.22, depthWrite: false })));
+const moonLight = new THREE.DirectionalLight(0x9fb4ff, 0); // cool moonlight
+scene.add(moonLight); scene.add(moonLight.target);
+const _moonDir = new THREE.Vector3();
 
 // a starfield that fades in at night
 const starGeo = new THREE.BufferGeometry();
@@ -1590,6 +1771,15 @@ function updateDayNight(t) {
   scene.fog.color.copy(_nightFog).lerp(_dayFog, dayness);
   starMat.opacity = Math.max(0, 1 - dayness * 3);
   isNight = (75 * sinE) < 3;
+  // moon: opposite the sun, rises at night and casts soft moonlight
+  const moonPhi = (90 - (-75 * sinE)) * Math.PI / 180;
+  const moonAz = (70 + dayT * 220 + 180) * Math.PI / 180;
+  _moonDir.setFromSphericalCoords(1, moonPhi, moonAz);
+  moon.position.copy(_moonDir).multiplyScalar(1300);
+  const moonUp = Math.max(0, -sinE);     // 0 by day … 1 deep night
+  moon.visible = moonUp > 0.02;
+  moonLight.position.copy(_moonDir).multiplyScalar(100);
+  moonLight.intensity = moonUp * 0.7;
   // lamp posts glow & cast light at night
   const lampOn = Math.max(0, 1 - dayness * 2.4);
   for (const lp of lampPosts) {
@@ -1642,25 +1832,49 @@ function updateOwl(t) {
 // ---------------------------------------------------------------------------
 // Birds that fly in slow circles overhead, flapping their wings.
 // ---------------------------------------------------------------------------
+// A more bird-like model: tapered body, head, beak, tail, and two-segment
+// wings that flap from the shoulder with a bent tip.
 const birds = [];
 function createBirds() {
-  const colors = [0xff7eb6, 0x6aa6ff, 0xffe066, 0xffffff, 0x9b8cff, 0x74e08c];
-  for (let i = 0; i < 7; i++) {
+  const colors = [0x5a6e8c, 0x6f5a86, 0x8c5a5a, 0x4a4f5a, 0x6a8c5a, 0x8c7a5a]; // natural bird tones
+  for (let i = 0; i < 8; i++) {
     const color = colors[i % colors.length];
     const g = new THREE.Group();
-    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.7, side: THREE.DoubleSide });
-    const body = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6), mat); body.scale.z = 1.7; g.add(body);
-    const wingGeo = new THREE.PlaneGeometry(0.95, 0.42);
-    const wL = new THREE.Mesh(wingGeo, mat); wL.position.x = -0.5; g.add(wL);
-    const wR = new THREE.Mesh(wingGeo, mat); wR.position.x = 0.5; g.add(wR);
+    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.85, side: THREE.DoubleSide });
+    const beakMat = new THREE.MeshStandardMaterial({ color: 0xe6a23b, roughness: 0.7 });
+
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), mat);
+    body.scale.set(0.8, 0.8, 1.9); g.add(body);                       // tapered body
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), mat);
+    head.position.set(0, 0.06, 0.28); g.add(head);                   // head
+    const beak = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.16, 6), beakMat);
+    beak.position.set(0, 0.05, 0.42); beak.rotation.x = Math.PI / 2; g.add(beak);
+    const tail = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.4, 4), mat);
+    tail.position.set(0, 0, -0.42); tail.rotation.x = -Math.PI / 2; tail.scale.set(1, 1, 0.3); g.add(tail);
+
+    // two-segment wings (inner from shoulder, outer feather tip)
+    const wings = [];
+    for (const side of [-1, 1]) {
+      const shoulder = new THREE.Group();
+      shoulder.position.set(side * 0.13, 0.04, 0);
+      const inner = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.3), mat);
+      inner.position.x = side * 0.21; shoulder.add(inner);
+      const tip = new THREE.Group(); tip.position.x = side * 0.42; shoulder.add(tip);
+      const outer = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.24), mat);
+      outer.position.x = side * 0.2; tip.add(outer);
+      g.add(shoulder);
+      wings.push({ side, shoulder, tip });
+    }
+
     g.userData = {
-      wL, wR,
-      radius: 13 + Math.random() * 16,
-      height: 10 + Math.random() * 7,
-      speed: (0.12 + Math.random() * 0.18) * (Math.random() < 0.5 ? 1 : -1),
+      wings,
+      radius: 14 + Math.random() * 18,
+      height: 11 + Math.random() * 8,
+      speed: (0.1 + Math.random() * 0.16) * (Math.random() < 0.5 ? 1 : -1),
       phase: Math.random() * Math.PI * 2,
-      flap: 7 + Math.random() * 4,
+      flap: 5 + Math.random() * 3,
     };
+    g.scale.setScalar(1.3);
     scene.add(g);
     birds.push(g);
   }
@@ -1670,11 +1884,17 @@ function updateBirds(t) {
   for (const b of birds) {
     const u = b.userData;
     const ang = u.phase + t * u.speed;
-    b.position.set(Math.cos(ang) * u.radius, u.height + Math.sin(t * 0.6 + u.phase) * 0.7, Math.sin(ang) * u.radius);
-    b.rotation.y = -ang + (u.speed > 0 ? 0 : Math.PI); // face the way it flies
-    const flap = Math.sin(t * u.flap + u.phase) * 0.7;
-    u.wL.rotation.z = flap;
-    u.wR.rotation.z = -flap;
+    const climb = Math.sin(t * 0.5 + u.phase);
+    b.position.set(Math.cos(ang) * u.radius, u.height + climb * 1.1, Math.sin(ang) * u.radius);
+    b.rotation.y = -ang + (u.speed > 0 ? 0 : Math.PI); // face travel direction
+    b.rotation.z = -climb * 0.18 * Math.sign(u.speed);  // gentle banking
+    b.rotation.x = climb * 0.12;                         // pitch up/down with climb
+    // flap: shoulder up/down, wing-tip lags for a natural bend
+    const flap = Math.sin(t * u.flap + u.phase);
+    for (const w of u.wings) {
+      w.shoulder.rotation.z = -w.side * flap * 0.7;
+      w.tip.rotation.z = -w.side * Math.sin(t * u.flap + u.phase - 0.6) * 0.5;
+    }
   }
 }
 
@@ -1880,6 +2100,10 @@ window.addEventListener('blur', () => keys.clear());
 const throwBtnEl = document.getElementById('throwBtn');
 if (throwBtnEl) throwBtnEl.addEventListener('click', throwBall);
 
+// Trading list toggle
+const tradeBtnEl = document.getElementById('tradeBtn');
+if (tradeBtnEl) tradeBtnEl.addEventListener('click', () => { tradeOpen ? closeTrade() : openTrade(); });
+
 // Party music — each click changes the song, then turns it off
 const musicBtnEl = document.getElementById('musicBtn');
 if (musicBtnEl) musicBtnEl.addEventListener('click', () => {
@@ -2012,7 +2236,13 @@ function tick() {
       w.sleeping = false;
       const cid = b.userData.char && b.userData.char.id;
       const trading = w.tradeUntil && t < w.tradeUntil;
-      if (trading) {
+      if (w.child && w.parent) {
+        // children trail their parent around (and into the park)
+        _charDir.set(w.parent.position.x - holder.position.x, 0, w.parent.position.z - holder.position.z);
+        const d = _charDir.length();
+        if (d > 1.7) { w.moving = true; const step = Math.min(w.speed * 1.4 * dt, d - 1.4); holder.position.x += (_charDir.x / d) * step; holder.position.z += (_charDir.z / d) * step; }
+        else { w.moving = false; }
+      } else if (trading) {
         w.moving = false; // pause to trade goods
       } else if (isNight && SLEEPERS.has(cid) && homeById[cid]) {
         // at night, half the characters head home to sleep
