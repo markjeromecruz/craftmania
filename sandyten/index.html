@@ -116,6 +116,28 @@
       .picker-card img { width: 76px; height: 76px; }
     }
 
+    /* ---------- Start menu (New Game / Continue) ---------- */
+    #startmenu {
+      position: fixed; inset: 0; z-index: 45; display: none;
+      align-items: center; justify-content: center;
+      background: radial-gradient(circle at 50% 35%, #16314d 0%, #08111d 65%, #05070d 100%);
+    }
+    .start-panel { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 20px; }
+    .start-panel h1 {
+      font-size: clamp(44px, 10vw, 92px); font-weight: 800; letter-spacing: 2px;
+      background: linear-gradient(120deg, var(--glow), var(--accent));
+      -webkit-background-clip: text; background-clip: text; color: transparent; margin-bottom: 0;
+    }
+    .start-panel p { color: #9fc4e6; font-size: 15px; margin-bottom: 14px; }
+    .start-btn {
+      width: 280px; max-width: 80vw; cursor: pointer; font: inherit; font-weight: 700; font-size: 20px;
+      color: #eaf4ff; padding: 16px; border-radius: 16px;
+      background: rgba(255, 255, 255, .08); border: 2px solid rgba(127, 209, 255, .4);
+      transition: transform .1s ease, background .12s ease, border-color .12s ease;
+    }
+    .start-btn:hover { transform: translateY(-3px); background: rgba(127, 209, 255, .22); border-color: var(--accent); }
+    .start-btn.disabled { opacity: .4; cursor: default; transform: none; background: rgba(255,255,255,.05); border-color: rgba(255,255,255,.15); }
+
     /* ---------- Shop panel ---------- */
     #shop {
       position: fixed; z-index: 35; right: 18px; top: 50%;
@@ -221,7 +243,8 @@
         <div class="pill" id="timephase">☀️ day</div>
         <button class="pill" id="tradeBtn" style="cursor:pointer;">🤝 Trade</button>
         <button class="pill" id="musicBtn" style="cursor:pointer;">🔇 Music</button>
-        <div class="pill" id="score">⭐ 0</div>
+        <div class="pill" id="coins">🪙 20</div>
+        <div class="pill" id="level">✨ Lv 1</div>
         <div class="pill" id="fps">– fps</div>
       </div>
     </div>
