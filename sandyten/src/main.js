@@ -636,12 +636,12 @@ function playAs(id) {
   holder.userData.moving = false;
   holder.userData.pauseUntil = Infinity; // never roam while controlled
 
-  // frame the player with a friendly third-person camera
+  // frame the player with a zoomed-out third-person camera
   const p = holder.position;
   controls.target.set(p.x, 1.5, p.z);
-  camera.position.set(p.x + 6, 4.5, p.z + 8);
+  camera.position.set(p.x + 11, 9, p.z + 15);
   controls.minDistance = 4;
-  controls.maxDistance = 30;
+  controls.maxDistance = 40;
   controls.update();
 
   const name = holder.children.find((c) => c.userData?.char)?.userData.char.name
