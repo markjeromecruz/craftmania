@@ -181,6 +181,18 @@ for (let i = 0; i < 6; i++) {
 loadModel('lantern.glb', { position: [3.5, 0, 3.5], rotationY: -0.6, scale: 2 });
 loadModel('lantern.glb', { position: [-3.5, 0, -3.5], rotationY: 2.4, scale: 2 });
 
+// Lots more trees scattered around the world (avoiding the very center & far west park area).
+const TREE_FILES = ['tree.glb', 'tree-high-round.glb', 'tree-crooked.glb'];
+let _treeSeed = 1;
+const rnd = () => { _treeSeed = (_treeSeed * 1103515245 + 12345) & 0x7fffffff; return _treeSeed / 0x7fffffff; };
+for (let i = 0; i < 26; i++) {
+  const a = rnd() * Math.PI * 2;
+  const r = 13 + rnd() * 19; // ring from just outside the courtyard out past the houses
+  const x = Math.cos(a) * r, z = Math.sin(a) * r;
+  if (Math.hypot(x + 30, z + 8) < 18) continue; // keep the park clearing open
+  loadModel(TREE_FILES[i % TREE_FILES.length], { position: [x, 0, z], rotationY: rnd() * 6, scale: 1.8 + rnd() * 1.0 });
+}
+
 // Lamp posts around the courtyard that light up at night.
 const lampPosts = [];
 function makeLampPost(x, z) {
@@ -318,12 +330,12 @@ function refreshTradePanel() {
 function playerTradeWith(holder) {
   const good = holder.userData.tradeGood || randomGood();
   holder.userData.tradeGood = randomGood();          // they restock with a new good
-  score += 1; renderScore();
-  animate(scoreEl, { scale: [1.3, 1], duration: 300, ease: 'out(3)' });
+  addCoins(1);                                        // trading earns coins
   const nm = holder.userData.mesh?.userData.char?.name || 'them';
-  tradeMsgEl.textContent = `Traded with ${nm}: got ${good}! +1 ⭐`;
+  tradeMsgEl.textContent = `Traded with ${nm}: got ${good}! +1 🪙`;
   animate(tradeMsgEl, { scale: [1.2, 1], opacity: [0.4, 1], duration: 300, ease: 'out(3)' });
   refreshTradePanel();
+  if (typeof saveGame === 'function') saveGame();
 }
 function openTrade() { tradeOpen = true; refreshTradePanel(); tradeEl.style.display = 'block'; animate(tradeEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' }); }
 function closeTrade() { tradeOpen = false; animate(tradeEl, { opacity: [1, 0], duration: 200, onComplete: () => { tradeEl.style.display = 'none'; } }); }
@@ -451,6 +463,12 @@ function placeCharacter(char, index, total) {
   holder.userData.tradeSprite = tradeSprite;
   holder.userData.tradeGood = randomGood(); // the item this character is trading
 
+  const umbrella = makeEmojiSprite('☂️'); // shown when it rains
+  umbrella.position.set(0, CHAR_HEIGHT * 0.95, 0.06);
+  umbrella.scale.set(1.6, 1.6, 1);
+  holder.add(umbrella);
+  holder.userData.umbrella = umbrella;
+
   characterGroup.add(holder);
   billboards.push(mesh);
   holdersById[char.id] = holder;
@@ -471,7 +489,9 @@ fetch('./assets/characters/characters.json')
     // expose the roster + their stats for the game the girls build next
     window.SANDYTEN.roster = roster;
     buildPicker(roster);
-    setTimeout(showPicker, 1400); // let them pop in, then ask who to be
+    buildStartMenu();
+    setTimeout(showStartMenu, 1400); // New Game / Continue first
+
   })
   .catch((err) => console.warn('Could not load characters.json', err));
 
@@ -479,8 +499,9 @@ fetch('./assets/characters/characters.json')
 // Choose-your-character + play as them (walk around, camera follows).
 // ---------------------------------------------------------------------------
 const PLAYER_SPEED = 7;     // how fast you walk as your character
-const PLAY_RADIUS = 26;     // how far you can wander from the center
+const PLAY_RADIUS = 42;     // how far you can wander (out to the park & neighborhood)
 let pickerEl = null;
+let playerCharId = null;
 let pickerReadyAt = 0; // clicks before this time (during fade-in) are ignored
 const hintEl = document.querySelector('#hud .hint');
 const changeBtn = document.getElementById('changeBtn');
@@ -495,21 +516,23 @@ function buildPicker(roster) {
   h.append('Choose your ', Object.assign(document.createElement('span'), { textContent: 'character' }), '!');
   const grid = document.createElement('div');
   grid.className = 'picker-grid';
-  roster.forEach((c) => {
+  const addCard = (id, name, sprite) => {
     const card = document.createElement('button');
     card.className = 'picker-card';
     const img = document.createElement('img');
-    img.src = `./assets/characters/${c.sprite}`;
-    img.alt = c.name;
+    img.src = `./assets/characters/${sprite}`;
+    img.alt = name;
     const nm = document.createElement('span');
-    nm.textContent = c.name;
+    nm.textContent = name;
     card.append(img, nm);
     card.addEventListener('click', () => {
       if (performance.now() < pickerReadyAt) return; // ignore clicks during fade-in
-      playAs(c.id); hidePicker();
+      playAs(id); hidePicker();
     });
     grid.appendChild(card);
-  });
+  };
+  roster.forEach((c) => addCard(c.id, c.name, c.sprite));
+  if (typeof NEIGHBORS !== 'undefined') NEIGHBORS.forEach((n) => addCard(n.id, n.name, n.sprite)); // new neighbors
   panel.append(h, grid);
   pickerEl.appendChild(panel);
   document.body.appendChild(pickerEl);
@@ -526,6 +549,75 @@ function hidePicker() {
   animate(pickerEl, { opacity: [1, 0], duration: 220, onComplete: () => { pickerEl.style.display = 'none'; } });
 }
 
+// ---- Save / load progress (localStorage) ----
+const SAVE_KEY = 'sandyten_save_v1';
+let suppressSave = false;
+function saveGame() {
+  if (suppressSave) return;
+  try {
+    const outfits = {};
+    for (const id in holdersById) {
+      const mesh = holdersById[id].userData.mesh;
+      if (!mesh) continue;
+      const worn = Object.keys(mesh.userData.accessories || {});
+      if (worn.length || Object.keys(mesh.userData.itemColors || {}).length) {
+        outfits[id] = { worn, colors: { ...mesh.userData.itemColors } };
+      }
+    }
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ coins, stars, level, itemOwned, owned, playerId: playerCharId, outfits }));
+  } catch (e) { /* storage unavailable */ }
+}
+function hasSave() { try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; } }
+function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch (e) {} }
+function loadGame() {
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); } catch (e) { return null; }
+  if (!s) return null;
+  suppressSave = true;
+  coins = s.coins ?? coins; stars = s.stars ?? 0; level = s.level ?? 1;
+  Object.assign(itemOwned, s.itemOwned || {});
+  Object.assign(owned, s.owned || {});
+  renderCoins(); renderLevel();
+  for (const id in (s.outfits || {})) {
+    const holder = holdersById[id]; if (!holder || !holder.userData.mesh) continue;
+    const mesh = holder.userData.mesh, o = s.outfits[id];
+    Object.assign(mesh.userData.itemColors, o.colors || {});
+    for (const itemId of (o.worn || [])) {
+      const item = DRESS_ITEMS.find((it) => it.id === itemId);
+      if (item) wearItem(mesh, item);
+    }
+  }
+  suppressSave = false;
+  return s;
+}
+
+// ---- Start menu: New Game / Continue Game ----
+let startEl = null, startReadyAt = 0;
+function buildStartMenu() {
+  startEl = document.createElement('div');
+  startEl.id = 'startmenu';
+  const panel = document.createElement('div');
+  panel.className = 'start-panel';
+  const h = document.createElement('h1'); h.textContent = 'Sandyten';
+  const sub = document.createElement('p'); sub.textContent = 'A little world to explore 🌳🐶';
+  const newBtn = document.createElement('button'); newBtn.className = 'start-btn'; newBtn.textContent = '✨ New Game';
+  const contBtn = document.createElement('button'); contBtn.className = 'start-btn'; contBtn.textContent = '▶️ Continue Game';
+  if (!hasSave()) { contBtn.disabled = true; contBtn.classList.add('disabled'); }
+  newBtn.addEventListener('click', () => { if (performance.now() < startReadyAt) return; clearSave(); hideStartMenu(); showPicker(); });
+  contBtn.addEventListener('click', () => {
+    if (contBtn.disabled || performance.now() < startReadyAt) return;
+    const s = loadGame();
+    hideStartMenu();
+    if (s && s.playerId && holdersById[s.playerId]) playAs(s.playerId);
+    else showPicker();
+  });
+  panel.append(h, sub, newBtn, contBtn);
+  startEl.appendChild(panel);
+  document.body.appendChild(startEl);
+}
+function showStartMenu() { if (startEl) { startEl.style.display = 'flex'; startReadyAt = performance.now() + 500; animate(startEl, { opacity: [0, 1], duration: 280, ease: 'out(3)' }); } }
+function hideStartMenu() { if (startEl) animate(startEl, { opacity: [1, 0], duration: 220, onComplete: () => { startEl.style.display = 'none'; } }); }
+
 function playAs(id) {
   const holder = holdersById[id];
   if (!holder) return;
@@ -538,6 +630,7 @@ function playAs(id) {
     pickRoamTarget(player);         // give it a fresh place to wander to
   }
   player = holder;
+  playerCharId = id;
   holder.position.y = 0;            // start on the ground
   holder.userData.isPlayer = true;
   holder.userData.moving = false;
@@ -562,6 +655,7 @@ function playAs(id) {
   // move Daisy's doghouse next to this character's home
   const spot = (typeof doghouseSpotById !== 'undefined') && doghouseSpotById[id];
   if (spot) doghouseTarget.set(spot.x, 0, spot.z);
+  if (typeof saveGame === 'function') saveGame();
 }
 
 // Walk around as the chosen character; the camera trails along.
@@ -727,14 +821,29 @@ function spawnStar() {
 }
 for (let i = 0; i < STAR_COUNT; i++) spawnStar();
 
-// score
-let score = 0;
-const scoreEl = document.getElementById('score');
-function addScore() {
-  score += 1;
-  renderScore();
-  animate(scoreEl, { scale: [1.4, 1], duration: 320, ease: 'out(3)' }); // little pop
+// Coins = money (spent at the shop / dressing room, earned by trading).
+// Stars = experience: every 5 stars you level up.
+let coins = 20, stars = 0, level = 1;
+const STARS_PER_LEVEL = 5;
+const coinsEl = document.getElementById('coins');
+const levelEl = document.getElementById('level');
+function renderCoins() { if (coinsEl) coinsEl.textContent = '🪙 ' + coins; }
+function renderLevel() { if (levelEl) levelEl.textContent = '✨ Lv ' + level + ' (' + (stars % STARS_PER_LEVEL) + '/' + STARS_PER_LEVEL + ')'; }
+function addStar() { // collecting a star gives XP and can level you up
+  stars += 1;
+  const newLevel = 1 + Math.floor(stars / STARS_PER_LEVEL);
+  renderLevel();
+  if (levelEl) animate(levelEl, { scale: [1.4, 1], duration: 320, ease: 'out(3)' });
+  if (newLevel > level) { level = newLevel; playDing(); }
+  if (typeof saveGame === 'function') saveGame();
 }
+function addCoins(n) {
+  coins += n;
+  renderCoins();
+  if (coinsEl) animate(coinsEl, { scale: [1.3, 1], duration: 300, ease: 'out(3)' });
+}
+renderCoins();
+renderLevel();
 
 // happy "ding" using the Web Audio API (no sound file needed).
 // Created lazily on first collect, which always follows a user gesture.
@@ -837,7 +946,7 @@ function cycleMusic() {
 
 function collectStar(s, byPlayer) {
   s.userData.collected = true;
-  if (byPlayer) { playDing(); addScore(); } // only the player earns money
+  if (byPlayer) { playDing(); addStar(); } // the player gains a star (XP)
   // sparkle up and shrink away, then remove and spawn a fresh one
   animate(s.position, { y: s.position.y + 1.6, duration: 420, ease: 'out(2)' });
   animate(s.rotation, { y: s.rotation.y + 6, duration: 420 });
@@ -1230,7 +1339,10 @@ function updateDoghouse(dt) {
 // ---------------------------------------------------------------------------
 // Neighborhood + Park: extra families that roam the park with their kids.
 // ---------------------------------------------------------------------------
-const PARK = { x: -23, z: 6 };
+const PARK = { x: -30, z: -8 };
+const SLIDE_TOP = new THREE.Vector3();
+const SLIDE_BOT = new THREE.Vector3();
+const PLAYGROUND = new THREE.Vector3();
 
 // A roaming billboard character (neighbor adult or trailing child).
 function spawnRoamer({ id, name, sprite, x, z, scale = 1, roamCenter, roamRadius, roamInner, child = false, parent = null, lines }) {
@@ -1263,52 +1375,56 @@ function spawnRoamer({ id, name, sprite, x, z, scale = 1, roamCenter, roamRadius
   holder.add(label);
   const zzz = makeZzzSprite(); zzz.position.set(size * 0.3, size + 0.6, 0); holder.add(zzz); holder.userData.zzz = zzz;
   const ts = makeEmojiSprite('🎁'); ts.position.set(-size * 0.28, size + 0.25, 0); holder.add(ts); holder.userData.tradeSprite = ts;
+  const um = makeEmojiSprite('☂️'); um.position.set(0, size * 0.95, 0.06); um.scale.set(size * 0.45, size * 0.45, 1); holder.add(um); holder.userData.umbrella = um;
   characterGroup.add(holder);
   billboards.push(mesh);
+  if (!child) holdersById[id] = holder; // adult neighbors are playable
   return holder;
 }
 
 function buildPark() {
   const grassMat = new THREE.MeshStandardMaterial({ color: 0x77b85a, roughness: 1 });
-  const grass = new THREE.Mesh(new THREE.CircleGeometry(13, 44), grassMat);
+  const grass = new THREE.Mesh(new THREE.CircleGeometry(17, 48), grassMat); // big & spacious
   grass.rotation.x = -Math.PI / 2; grass.position.set(PARK.x, 0.04, PARK.z); grass.receiveShadow = true; scene.add(grass);
-  const sign = makeSign('PARK'); sign.scale.setScalar(0.7); sign.position.set(PARK.x, 3.4, PARK.z + 12.4); scene.add(sign);
+  const sign = makeSign('PARK'); sign.scale.setScalar(0.8); sign.position.set(PARK.x, 3.8, PARK.z - 16);
 
   const red = new THREE.MeshStandardMaterial({ color: 0xd64a4a, roughness: 0.6 });
   const blue = new THREE.MeshStandardMaterial({ color: 0x4a8cd6, roughness: 0.6 });
   const yellow = new THREE.MeshStandardMaterial({ color: 0xf2c14e, roughness: 0.6 });
   const wood = new THREE.MeshStandardMaterial({ color: 0x9c6b3f, roughness: 0.9 });
   const box = (g, w, h, d, mat, x, y, z, rx = 0) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.rotation.x = rx; m.castShadow = true; g.add(m); return m; };
+  scene.add(sign);
 
-  // --- playground ---
-  const pg = new THREE.Group(); pg.position.set(PARK.x + 4, 0, PARK.z - 4); scene.add(pg);
+  // --- playground (kept toward one side, with open grass to walk around) ---
+  const pgPos = new THREE.Vector3(PARK.x + 7, 0, PARK.z + 5);
+  PLAYGROUND.copy(pgPos);
+  const pg = new THREE.Group(); pg.position.copy(pgPos); scene.add(pg);
   // slide
-  box(pg, 1.0, 0.12, 1.0, yellow, -1, 2.0, 0);                 // top platform
-  box(pg, 0.18, 2.0, 0.18, red, -1.45, 1.0, 0.4);             // ladder posts
-  box(pg, 0.18, 2.0, 0.18, red, -1.45, 1.0, -0.4);
-  box(pg, 0.9, 0.1, 2.8, blue, 0.1, 1.05, 0.9, 0.5);          // slide ramp
-  // swing set (A-frames + bar + 2 seats)
-  const sw = new THREE.Group(); sw.position.set(2.6, 0, 0); pg.add(sw);
+  box(pg, 1.2, 0.12, 1.2, yellow, -1, 2.2, 0);                 // top platform
+  box(pg, 0.18, 2.2, 0.18, red, -1.5, 1.1, 0.45);
+  box(pg, 0.18, 2.2, 0.18, red, -1.5, 1.1, -0.45);
+  box(pg, 1.0, 0.1, 3.2, blue, 0.25, 1.15, 1.1, 0.5);         // slide ramp
+  SLIDE_TOP.set(pgPos.x - 1, 2.4, pgPos.z);
+  SLIDE_BOT.set(pgPos.x + 0.5, 0.4, pgPos.z + 2.5);
+  // swing set
+  const sw = new THREE.Group(); sw.position.set(3.4, 0, 0); pg.add(sw);
   for (const sz of [-1.2, 1.2]) { box(sw, 0.15, 2.5, 0.15, red, -0.9, 1.25, sz); box(sw, 0.15, 2.5, 0.15, red, 0.9, 1.25, sz); }
-  box(sw, 0.16, 0.16, 2.7, red, 0, 2.45, 0);                  // top bar
+  box(sw, 0.16, 0.16, 2.7, red, 0, 2.45, 0);
   for (const sx of [-0.45, 0.45]) { box(sw, 0.03, 1.3, 0.03, wood, sx, 1.75, 0); box(sw, 0.5, 0.1, 0.3, blue, sx, 1.1, 0); }
   // see-saw
-  const ss = new THREE.Group(); ss.position.set(0, 0, 3); pg.add(ss);
-  box(ss, 0.4, 0.5, 0.4, wood, 0, 0.35, 0);                   // pivot
+  const ss = new THREE.Group(); ss.position.set(0, 0, 3.5); pg.add(ss);
+  box(ss, 0.4, 0.5, 0.4, wood, 0, 0.35, 0);
   const plank = box(ss, 0.5, 0.12, 3.4, red, 0, 0.62, 0); plank.rotation.x = 0.12;
 
-  // --- dog park (fenced patch with a hoop and a ramp) ---
-  const dp = new THREE.Group(); dp.position.set(PARK.x - 5, 0, PARK.z + 5); scene.add(dp);
+  // --- dog park (on the far side, with open space between) ---
+  const dp = new THREE.Group(); dp.position.set(PARK.x - 7, 0, PARK.z - 6); scene.add(dp);
   const fenceMat = new THREE.MeshStandardMaterial({ color: 0xcdb892, roughness: 0.9 });
-  const R = 4;
-  for (let i = 0; i < 16; i++) {
-    const a = (i / 16) * Math.PI * 2;
-    box(dp, 0.12, 0.9, 0.12, fenceMat, Math.cos(a) * R, 0.45, Math.sin(a) * R);
-  }
+  const R = 4.5;
+  for (let i = 0; i < 18; i++) { const a = (i / 18) * Math.PI * 2; box(dp, 0.12, 0.9, 0.12, fenceMat, Math.cos(a) * R, 0.45, Math.sin(a) * R); }
   const hoop = new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.08, 8, 20), red);
   hoop.position.set(0, 0.9, -1); dp.add(hoop);
-  box(dp, 1.6, 0.12, 1.0, blue, 1.2, 0.5, 1.2, 0.5);          // little ramp
-  const bone = makeSign('DOG PARK'); bone.scale.setScalar(0.5); bone.position.set(PARK.x - 5, 2.6, PARK.z + 9); scene.add(bone);
+  box(dp, 1.6, 0.12, 1.0, blue, 1.2, 0.5, 1.2, 0.5);
+  const bone = makeSign('DOG PARK'); bone.scale.setScalar(0.5); bone.position.set(PARK.x - 7, 2.6, PARK.z - 11); scene.add(bone);
 }
 
 const NEIGHBORS = [
@@ -1317,22 +1433,22 @@ const NEIGHBORS = [
   { id: 'bruno', name: 'Bruno', sprite: 'bruno.png', wall: 0xe6cba0, roof: 0x8a5a36, lines: ['Hello there!', 'Nice to meet you!', 'Grr-iendly!'] },
 ];
 function buildNeighborhood() {
-  buildPath(-4, 0, PARK.x + 8, PARK.z); // path from the courtyard out to the park
+  // path from the courtyard out to the park
+  buildPath(-6, 0, -18, -4); buildPath(-18, -4, PARK.x + 2, PARK.z);
   buildPark();
+  const R2 = 28;                         // neighbor homes BEHIND the six houses
+  const angs = [42, 90, 138];
   NEIGHBORS.forEach((n, i) => {
-    const ang = (i / NEIGHBORS.length) * Math.PI * 2; // ring of homes around the park
-    const hx = PARK.x + Math.cos(ang) * 11, hz = PARK.z + Math.sin(ang) * 11;
-    const ry = Math.atan2(PARK.x - hx, PARK.z - hz); // face the park
-    buildHouse({ x: hx, z: hz, rotationY: ry, name: n.name, wall: n.wall, roof: n.roof });
+    const a = angs[i] * Math.PI / 180, cs = Math.cos(a), sn = Math.sin(a);
+    const hx = cs * R2, hz = sn * R2;
+    buildHouse({ x: hx, z: hz, rotationY: Math.atan2(-hx, -hz), name: n.name, wall: n.wall, roof: n.roof });
+    buildPath(cs * 19, sn * 19, cs * (R2 - 2.5), sn * (R2 - 2.5)); // path behind the six to this home
     const parent = spawnRoamer({
       id: n.id, name: n.name, sprite: n.sprite,
-      x: PARK.x + (i - 1) * 3, z: PARK.z + (i - 1) * 2,
-      roamCenter: PARK, roamInner: 2, roamRadius: 9, lines: n.lines,
+      x: PARK.x + (i - 1) * 4, z: PARK.z + (i - 1) * 3,
+      roamCenter: PARK, roamInner: 2, roamRadius: 13, lines: n.lines, // roam the spacious park
     });
-    spawnRoamer({ // one child trailing the parent
-      id: n.id + '_kid', name: n.name + ' Jr.', sprite: n.sprite,
-      x: PARK.x, z: PARK.z, scale: 0.6, child: true, parent, lines: ['Wheee!', 'Tag, you\'re it!', 'Hehe!'],
-    });
+    spawnRoamer({ id: n.id + '_kid', name: n.name + ' Jr.', sprite: n.sprite, x: PARK.x, z: PARK.z, scale: 0.6, child: true, parent, lines: ['Wheee!', 'Tag, you\'re it!', 'Hehe!'] });
   });
 }
 
@@ -1350,8 +1466,6 @@ const owned = {};
 let shopEl = null, shopOpen = false, shopMsgEl = null, ownedEl = null;
 const shopRows = [];
 
-function renderScore() { scoreEl.textContent = '⭐ ' + score; }
-
 function buildShop() {
   shopEl = document.createElement('div');
   shopEl.id = 'shop';
@@ -1360,7 +1474,7 @@ function buildShop() {
   h.append('🏪 THE STORE');
   const sub = document.createElement('p');
   sub.className = 'shop-sub';
-  sub.textContent = 'Pay with ⭐ stars!';
+  sub.textContent = 'Pay with 🪙 coins!';
   const list = document.createElement('div');
   list.className = 'shop-list';
   SHOP_ITEMS.forEach((item) => {
@@ -1370,7 +1484,7 @@ function buildShop() {
     lbl.textContent = `${item.emoji} ${item.name}`;
     const price = document.createElement('span');
     price.className = 'shop-price';
-    price.textContent = `${item.price} ⭐`;
+    price.textContent = `${item.price} 🪙`;
     row.append(lbl, price);
     row.addEventListener('click', () => buyItem(item));
     list.appendChild(row);
@@ -1386,7 +1500,7 @@ function buildShop() {
 
 function refreshShop() {
   shopRows.forEach(({ item, row }) => {
-    row.classList.toggle('cant-afford', score < item.price);
+    row.classList.toggle('cant-afford', coins < item.price);
   });
 }
 
@@ -1398,19 +1512,18 @@ function updateOwned() {
 }
 
 function buyItem(item) {
-  if (score < item.price) {
-    shopMsgEl.textContent = `Not enough — you need ${item.price} ⭐!`;
+  if (coins < item.price) {
+    shopMsgEl.textContent = `Not enough — you need ${item.price} 🪙!`;
     animate(shopMsgEl, { opacity: [0.3, 1], duration: 220 });
     return;
   }
-  score -= item.price;
-  renderScore();
-  animate(scoreEl, { scale: [1.3, 1], duration: 300, ease: 'out(3)' });
+  addCoins(-item.price);
   owned[item.name] = (owned[item.name] || 0) + 1;
   shopMsgEl.textContent = `You bought ${item.emoji} ${item.name}!`;
   animate(shopMsgEl, { scale: [1.2, 1], opacity: [0.4, 1], duration: 300, ease: 'out(3)' });
   updateOwned();
   refreshShop();
+  if (typeof saveGame === 'function') saveGame();
 }
 
 function openShop() {
@@ -1764,7 +1877,7 @@ function updateDayNight(t) {
   const sinE = Math.sin(2 * Math.PI * dayT);
   setSun(75 * sinE, 70 + dayT * 220);          // elevation rises & sets; azimuth sweeps
   const dayness = Math.max(0, sinE);           // 0 deep night … 1 high noon
-  sunLight.intensity = 0.1 + dayness * 1.25; // sun dimmed 50%
+  sunLight.intensity = 0.1 + dayness * 0.75; // sun softened to ~60% (less bright)
   hemi.intensity = 0.2 + dayness * 0.5;
   // keep daytime exposure modest so the sky shows its blue and white sprites
   // (like Boo) don't blow out; night stays a touch brighter for playability.
@@ -1838,6 +1951,47 @@ function updateOwl(t) {
 // ---------------------------------------------------------------------------
 // A more bird-like model: tapered body, head, beak, tail, and two-segment
 // wings that flap from the shoulder with a bent tip.
+// ---------------------------------------------------------------------------
+// Weather: sometimes sunny, sometimes rainy. Rain darkens the sky a little and
+// the roaming characters put up umbrellas.
+// ---------------------------------------------------------------------------
+let weather = 'sunny', rainAmt = 0, nextWeatherAt = 30;
+const RAIN_N = 1400;
+const rainGeo = new THREE.BufferGeometry();
+const rainPos = new Float32Array(RAIN_N * 3);
+const rainVel = new Float32Array(RAIN_N);
+for (let i = 0; i < RAIN_N; i++) {
+  rainPos[i * 3] = (Math.random() - 0.5) * 64;
+  rainPos[i * 3 + 1] = Math.random() * 30;
+  rainPos[i * 3 + 2] = (Math.random() - 0.5) * 64;
+  rainVel[i] = 20 + Math.random() * 12;
+}
+rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos, 3));
+const rainMat = new THREE.PointsMaterial({ color: 0xbcd6ff, size: 0.45, transparent: true, opacity: 0, depthWrite: false });
+const rain = new THREE.Points(rainGeo, rainMat);
+rain.frustumCulled = false; scene.add(rain);
+const _rainGray = new THREE.Color(0x6b7686);
+function updateWeather(t, dt) {
+  if (t > nextWeatherAt) { weather = weather === 'sunny' ? 'rainy' : 'sunny'; nextWeatherAt = t + 35 + Math.random() * 45; }
+  rainAmt += ((weather === 'rainy' ? 1 : 0) - rainAmt) * Math.min(1, dt * 0.5);
+  rainMat.opacity = rainAmt * 0.85;
+  rain.visible = rainAmt > 0.02;
+  if (rain.visible) {
+    rain.position.set(controls.target.x, 0, controls.target.z); // rain follows your view
+    const p = rainGeo.attributes.position.array;
+    for (let i = 0; i < RAIN_N; i++) {
+      p[i * 3 + 1] -= rainVel[i] * dt;
+      if (p[i * 3 + 1] < 0) { p[i * 3 + 1] = 26 + Math.random() * 6; p[i * 3] = (Math.random() - 0.5) * 64; p[i * 3 + 2] = (Math.random() - 0.5) * 64; }
+    }
+    rainGeo.attributes.position.needsUpdate = true;
+  }
+  // gray & darken a little while raining
+  renderer.toneMappingExposure *= (1 - rainAmt * 0.28);
+  scene.fog.color.lerp(_rainGray, rainAmt * 0.55);
+  // characters put up umbrellas
+  for (const b of billboards) { const um = b.parent.userData.umbrella; if (um) um.visible = rainAmt > 0.4; }
+}
+
 const birds = [];
 function createBirds() {
   const colors = [0x5a6e8c, 0x6f5a86, 0x8c5a5a, 0x4a4f5a, 0x6a8c5a, 0x8c7a5a]; // natural bird tones
@@ -1873,26 +2027,33 @@ function createBirds() {
     g.userData = {
       wings,
       radius: 14 + Math.random() * 18,
-      height: 11 + Math.random() * 8,
+      height: 14 + Math.random() * 9,
       speed: (0.1 + Math.random() * 0.16) * (Math.random() < 0.5 ? 1 : -1),
       phase: Math.random() * Math.PI * 2,
       flap: 5 + Math.random() * 3,
     };
-    g.scale.setScalar(1.3);
+    g.scale.setScalar(1.0 + Math.random() * 0.4);
     scene.add(g);
     birds.push(g);
   }
 }
 createBirds();
+const _birdNext = new THREE.Vector3();
+function birdPos(u, tt, out) {
+  const ang = u.phase + tt * u.speed;
+  const driftX = Math.sin(tt * 0.13 + u.phase) * 7;       // wander so paths aren't perfect circles
+  const driftZ = Math.cos(tt * 0.11 + u.phase * 1.3) * 7;
+  const climb = Math.sin(tt * 0.5 + u.phase) * 1.4;
+  out.set(Math.cos(ang) * u.radius + driftX, u.height + climb, Math.sin(ang) * u.radius + driftZ);
+  return out;
+}
 function updateBirds(t) {
   for (const b of birds) {
     const u = b.userData;
-    const ang = u.phase + t * u.speed;
-    const climb = Math.sin(t * 0.5 + u.phase);
-    b.position.set(Math.cos(ang) * u.radius, u.height + climb * 1.1, Math.sin(ang) * u.radius);
-    b.rotation.y = -ang + (u.speed > 0 ? 0 : Math.PI); // face travel direction
-    b.rotation.z = -climb * 0.18 * Math.sign(u.speed);  // gentle banking
-    b.rotation.x = climb * 0.12;                         // pitch up/down with climb
+    birdPos(u, t, b.position);
+    birdPos(u, t + 0.12, _birdNext);
+    b.lookAt(_birdNext);                                   // face the real travel direction
+    b.rotateZ(-Math.sin(t * 0.5 + u.phase) * 0.16);        // bank into turns
     // flap: shoulder up/down, wing-tip lags for a natural bend
     const flap = Math.sin(t * u.flap + u.phase);
     for (const w of u.wings) {
@@ -1957,15 +2118,18 @@ function wearItem(charMesh, item) {
   charMesh.add(m);
   charMesh.userData.accessories[item.id] = m;
   if (item.recolor) charMesh.userData.itemColors[item.id] = color;
+  if (typeof saveGame === 'function') saveGame();
 }
 function takeOffItem(charMesh, item) {
   const m = charMesh && charMesh.userData.accessories[item.id];
   if (m) { charMesh.remove(m); delete charMesh.userData.accessories[item.id]; }
+  if (typeof saveGame === 'function') saveGame();
 }
 function recolorItem(charMesh, item, hex) {
   charMesh.userData.itemColors[item.id] = hex;
   const m = charMesh.userData.accessories[item.id];
   if (m) m.material.color.set(hex);
+  if (typeof saveGame === 'function') saveGame();
 }
 const isWearing = (charMesh, id) => !!(charMesh && charMesh.userData.accessories[id]);
 
@@ -2001,7 +2165,7 @@ function refreshDress() {
     const action = document.createElement('span');
     action.className = 'shop-price';
     if (!itemOwned[item.id]) {
-      action.textContent = `Buy ${item.price} ⭐`;
+      action.textContent = `Buy ${item.price} 🪙`;
       row.addEventListener('click', () => buyDressItem(item));
     } else if (isWearing(mesh, item.id)) {
       action.textContent = 'Take off';
@@ -2032,19 +2196,18 @@ function refreshDress() {
   });
 }
 function buyDressItem(item) {
-  if (score < item.price) {
-    dressMsgEl.textContent = `Not enough — you need ${item.price} ⭐!`;
+  if (coins < item.price) {
+    dressMsgEl.textContent = `Not enough — you need ${item.price} 🪙!`;
     animate(dressMsgEl, { opacity: [0.3, 1], duration: 220 });
     return;
   }
-  score -= item.price;
-  renderScore();
-  animate(scoreEl, { scale: [1.3, 1], duration: 300, ease: 'out(3)' });
+  addCoins(-item.price);
   itemOwned[item.id] = true;
   wearItem(player && player.userData.mesh, item); // put it on right away
   dressMsgEl.textContent = `You got the ${item.emoji} ${item.name}!`;
   animate(dressMsgEl, { scale: [1.2, 1], opacity: [0.4, 1], duration: 300, ease: 'out(3)' });
   refreshDress();
+  if (typeof saveGame === 'function') saveGame();
 }
 function openDress() { dressOpen = true; refreshDress(); dressEl.style.display = 'block'; animate(dressEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' }); }
 function closeDress() { dressOpen = false; animate(dressEl, { opacity: [1, 0], duration: 200, onComplete: () => { dressEl.style.display = 'none'; } }); }
@@ -2211,6 +2374,7 @@ function tick() {
   });
 
   updateDayNight(t);
+  updateWeather(t, dt);
   updateBirds(t);
   updateOwl(t);
   updateCampfire(t);
@@ -2241,11 +2405,30 @@ function tick() {
       const cid = b.userData.char && b.userData.char.id;
       const trading = w.tradeUntil && t < w.tradeUntil;
       if (w.child && w.parent) {
-        // children trail their parent around (and into the park)
-        _charDir.set(w.parent.position.x - holder.position.x, 0, w.parent.position.z - holder.position.z);
-        const d = _charDir.length();
-        if (d > 1.7) { w.moving = true; const step = Math.min(w.speed * 1.4 * dt, d - 1.4); holder.position.x += (_charDir.x / d) * step; holder.position.z += (_charDir.z / d) * step; }
-        else { w.moving = false; }
+        if (w.sliding) {
+          // whee! slide down the slide
+          const k = (t - w.sliding.t0) / w.sliding.dur;
+          if (k >= 1) { w.sliding = null; holder.position.y = 0; w.slideCooldown = t + 7; }
+          else {
+            const f = w.sliding.from;
+            holder.position.x = f.x + (SLIDE_BOT.x - f.x) * k;
+            holder.position.z = f.z + (SLIDE_BOT.z - f.z) * k;
+            holder.position.y = f.y + (SLIDE_BOT.y - f.y) * k;
+            w.moving = false;
+          }
+        } else {
+          const nearPg = Math.hypot(holder.position.x - PLAYGROUND.x, holder.position.z - PLAYGROUND.z) < 5.5;
+          if (nearPg && (!w.slideCooldown || t > w.slideCooldown) && Math.random() < 0.02) {
+            holder.position.set(SLIDE_TOP.x, SLIDE_TOP.y, SLIDE_TOP.z); // climb to the top
+            w.sliding = { t0: t, dur: 1.1, from: SLIDE_TOP.clone() };
+          } else {
+            // trail the parent around (and into the park)
+            _charDir.set(w.parent.position.x - holder.position.x, 0, w.parent.position.z - holder.position.z);
+            const d = _charDir.length();
+            if (d > 1.7) { w.moving = true; const step = Math.min(w.speed * 1.4 * dt, d - 1.4); holder.position.x += (_charDir.x / d) * step; holder.position.z += (_charDir.z / d) * step; }
+            else { w.moving = false; }
+          }
+        }
       } else if (trading) {
         w.moving = false; // pause to trade goods
       } else if (isNight && SLEEPERS.has(cid) && homeById[cid]) {
