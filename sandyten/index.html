@@ -177,6 +177,18 @@
     /* show only on touch / coarse-pointer devices, or when JS flags touch */
     @media (hover: none) and (pointer: coarse) { #joystick { display: flex; } }
     body.touch #joystick { display: flex; }
+
+    /* ---------- Throw ball button ---------- */
+    #throwBtn {
+      position: fixed; right: 24px; bottom: 30px; z-index: 36;
+      width: 72px; height: 72px; border-radius: 50%; cursor: pointer;
+      font-size: 34px; line-height: 1; padding: 0;
+      background: rgba(13, 27, 42, .5); border: 2px solid rgba(255, 255, 255, .3);
+      backdrop-filter: blur(6px); -webkit-tap-highlight-color: transparent;
+      transition: transform .08s ease, background .1s ease;
+    }
+    #throwBtn:hover { background: rgba(127, 209, 255, .3); }
+    #throwBtn:active { transform: scale(.9); }
   </style>
 </head>
 <body>
@@ -205,6 +217,9 @@
 
   <!-- Touch joystick (auto-shown on phones/tablets) -->
   <div id="joystick" aria-hidden="true"><div id="joyknob"></div></div>
+
+  <!-- Throw-the-ball button (bottom-right) -->
+  <button id="throwBtn" title="Throw the ball (Space)">🎾</button>
 
   <!-- Local, vendored libraries — no internet / no build step required -->
   <script type="importmap">
