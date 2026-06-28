@@ -503,22 +503,25 @@ bubbleEl.append(bubbleWho, bubbleText);
 document.body.appendChild(bubbleEl);
 let activeBubble = null; // { mesh, hideAt }
 
+function showBubble(mesh, name, text, offsetY) {
+  bubbleWho.textContent = name;            // safe: no HTML injection
+  bubbleText.textContent = text;
+  bubbleEl.style.display = 'block';
+  activeBubble = { mesh, hideAt: timer.getElapsed() + 3.4, offsetY };
+  positionBubble(mesh);                    // place it before fading in
+  animate(bubbleEl, { opacity: [0, 1], duration: 260, ease: 'out(3)' });
+}
+
 function showSpeech(mesh) {
   const char = mesh.userData.char;
   if (!char) return;
   const lines = (char.lines && char.lines.length) ? char.lines : ['Hi!'];
-  const text = lines[Math.floor(Math.random() * lines.length)];
-  bubbleWho.textContent = char.name;       // safe: no HTML injection
-  bubbleText.textContent = text;
-  bubbleEl.style.display = 'block';
-  positionBubble(mesh); // place it before fading in, so it doesn't jump
-  activeBubble = { mesh, hideAt: timer.getElapsed() + 3.4 };
-  animate(bubbleEl, { opacity: [0, 1], duration: 260, ease: 'out(3)' });
+  showBubble(mesh, char.name, lines[Math.floor(Math.random() * lines.length)], CHAR_HEIGHT * 0.5);
 }
 
 function positionBubble(mesh) {
   mesh.getWorldPosition(_headPos);
-  _headPos.y += CHAR_HEIGHT * 0.5; // float above the head
+  _headPos.y += (activeBubble ? activeBubble.offsetY : CHAR_HEIGHT * 0.5); // float above
   _headPos.project(camera);
   if (_headPos.z > 1) { bubbleEl.style.display = 'none'; return; } // behind camera
   bubbleEl.style.left = ((_headPos.x * 0.5 + 0.5) * window.innerWidth) + 'px';
@@ -529,21 +532,32 @@ function positionBubble(mesh) {
 // (so dragging to look around doesn't trigger a speech bubble).
 let downX = 0, downY = 0;
 renderer.domElement.addEventListener('pointerdown', (e) => { downX = e.clientX; downY = e.clientY; });
+function clickTargets() {
+  return petDog ? billboards.concat(petDog.mesh) : billboards;
+}
 renderer.domElement.addEventListener('pointerup', (e) => {
   if (Math.hypot(e.clientX - downX, e.clientY - downY) > 6) return;
   pointerNDC.x = (e.clientX / window.innerWidth) * 2 - 1;
   pointerNDC.y = -(e.clientY / window.innerHeight) * 2 + 1;
   raycaster.setFromCamera(pointerNDC, camera);
-  const hits = raycaster.intersectObjects(billboards, false);
-  if (hits.length) showSpeech(hits[0].object);
+  const hits = raycaster.intersectObjects(clickTargets(), false);
+  if (!hits.length) return;
+  const obj = hits[0].object;
+  if (petDog && obj === petDog.mesh) {        // clicked the puppy → bark!
+    playWoof();
+    showBubble(petDog.mesh, 'Puppy', 'Woof! 🐶', 1.3);
+    petDog.barkUntil = timer.getElapsed() + 0.4; // little excited hop
+  } else {
+    showSpeech(obj);
+  }
 });
 
-// Show a pointer cursor when hovering a character, to invite clicking.
+// Show a pointer cursor when hovering a character or the puppy.
 renderer.domElement.addEventListener('pointermove', (e) => {
   pointerNDC.x = (e.clientX / window.innerWidth) * 2 - 1;
   pointerNDC.y = -(e.clientY / window.innerHeight) * 2 + 1;
   raycaster.setFromCamera(pointerNDC, camera);
-  renderer.domElement.style.cursor = raycaster.intersectObjects(billboards, false).length ? 'pointer' : '';
+  renderer.domElement.style.cursor = raycaster.intersectObjects(clickTargets(), false).length ? 'pointer' : '';
 });
 
 // ---------------------------------------------------------------------------
@@ -618,6 +632,27 @@ function playDing() {
     o.start(now);
     o.stop(now + 0.26);
   } catch (e) { /* audio not available — no problem */ }
+}
+
+// a cute "woof woof" for the puppy
+function playWoof() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const now = audioCtx.currentTime;
+    for (const start of [0, 0.18]) {
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(440, now + start);
+      o.frequency.exponentialRampToValueAtTime(230, now + start + 0.13);
+      g.gain.setValueAtTime(0.0001, now + start);
+      g.gain.exponentialRampToValueAtTime(0.16, now + start + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + start + 0.15);
+      o.connect(g).connect(audioCtx.destination);
+      o.start(now + start);
+      o.stop(now + start + 0.16);
+    }
+  } catch (e) { /* no audio — no problem */ }
 }
 
 function collectStar(s, byPlayer) {
@@ -913,23 +948,64 @@ function createDog() {
   petDog = { holder, mesh, baseY: size / 2 };
 }
 createDog();
+
+// ---- A ball you can throw for the dog to fetch ----
+const BALL_R = 0.28;
+let ballState = 'idle';            // idle | flying | onground | carried
+const ballVel = new THREE.Vector3();
+const ball = new THREE.Mesh(
+  new THREE.SphereGeometry(BALL_R, 16, 12),
+  new THREE.MeshStandardMaterial({ color: 0xd7f25a, roughness: 0.6 })
+);
+ball.castShadow = true; ball.visible = false; scene.add(ball);
+const _throwDir = new THREE.Vector3();
+function throwBall() {
+  if (!player || ballState !== 'idle') return; // one ball at a time
+  ball.position.set(player.position.x, player.position.y + 1.4, player.position.z);
+  camera.getWorldDirection(_throwDir); _throwDir.y = 0;
+  if (_throwDir.lengthSq() === 0) _throwDir.set(0, 0, -1);
+  _throwDir.normalize();
+  ballVel.copy(_throwDir).multiplyScalar(10); ballVel.y = 7; // forward + up
+  ball.visible = true; ballState = 'flying';
+}
+function updateBall(dt) {
+  if (ballState !== 'flying') return;
+  ballVel.y -= 18 * dt;            // gravity
+  ball.position.addScaledVector(ballVel, dt);
+  const groundY = houseFloorHeight(ball.position.x, ball.position.z) + BALL_R;
+  if (ball.position.y <= groundY) { ball.position.y = groundY; ballState = 'onground'; }
+}
+
 function updateDog(t, dt) {
   if (!petDog) return;
   const h = petDog.holder;
-  const tx = player ? player.position.x : 4;
-  const tz = player ? player.position.z : 7;
+  // pick a target: fetch the ball, carry it back, or follow the player
+  let tx, tz, speed = 8, keep = 1.6;
+  if (ballState === 'onground') { tx = ball.position.x; tz = ball.position.z; speed = 12; keep = 0.6; }
+  else if (ballState === 'carried') { tx = player ? player.position.x : h.position.x; tz = player ? player.position.z : h.position.z; speed = 12; keep = 1.5; }
+  else { tx = player ? player.position.x : 4; tz = player ? player.position.z : 7; }
+
   const dx = tx - h.position.x, dz = tz - h.position.z;
   const d = Math.hypot(dx, dz);
   let moving = false;
-  if (d > 1.6) { // trail a little behind the player
-    const step = Math.min(8 * dt, d - 1.4);
+  if (d > keep) {
+    const step = Math.min(speed * dt, d - keep * 0.7);
     h.position.x += (dx / d) * step;
     h.position.z += (dz / d) * step;
     moving = true;
   }
   h.position.y = houseFloorHeight(h.position.x, h.position.z); // climbs stairs too
+
+  // fetch state transitions
+  if (ballState === 'onground' && d <= keep + 0.3) { ballState = 'carried'; }
+  if (ballState === 'carried') {
+    ball.position.set(h.position.x, h.position.y + 0.55, h.position.z); // in the puppy's mouth
+    if (d <= keep + 0.3) { ballState = 'idle'; ball.visible = false; }  // returned to player
+  }
+
+  const excited = petDog.barkUntil && t < petDog.barkUntil;
   petDog.mesh.rotation.y = Math.atan2(camera.position.x - h.position.x, camera.position.z - h.position.z);
-  petDog.mesh.position.y = petDog.baseY + (moving ? Math.abs(Math.sin(t * 12)) * 0.18 : Math.sin(t * 2) * 0.06);
+  petDog.mesh.position.y = petDog.baseY + ((moving || excited) ? Math.abs(Math.sin(t * 12)) * 0.2 : Math.sin(t * 2) * 0.06);
 }
 
 // ---- Shop UI: walk up to the shopkeeper to open it; spend stars to buy ----
@@ -1129,6 +1205,37 @@ const LOFT_Y = HOUSE_H1 + 0.1;                 // height you stand at on the lof
 const STAIR_FRONT_Z = 0.8, STAIR_BACK_Z = -0.6; // stairs run between these (local z)
 const houses = []; // { x, z, ry } for the floor-height lookup
 
+// Party balloons tied to the houses.
+const PARTY_COLORS = [0xff5a5a, 0x6aa6ff, 0xffe066, 0x74e08c, 0xff7eb6, 0xb18cff];
+const balloonBunches = [];
+function makeBalloonBunch() {
+  const g = new THREE.Group();
+  const stringMat = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, roughness: 0.9 });
+  for (let i = 0; i < 3; i++) {
+    const color = PARTY_COLORS[Math.floor(Math.random() * PARTY_COLORS.length)];
+    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.05 });
+    const ox = (i - 1) * 0.45, oy = 1.7 + Math.random() * 0.4, oz = (Math.random() - 0.5) * 0.4;
+    const balloon = new THREE.Mesh(new THREE.SphereGeometry(0.32, 14, 12), mat);
+    balloon.scale.set(1, 1.25, 1); balloon.position.set(ox, oy, oz); balloon.castShadow = true; g.add(balloon);
+    const knot = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.1, 6), mat);
+    knot.position.set(ox, oy - 0.42, oz); g.add(knot);
+    // string from the knot down to the tie point at the origin
+    const end = new THREE.Vector3(ox, oy - 0.45, oz);
+    const len = end.length();
+    const str = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, len, 4), stringMat);
+    str.position.copy(end.clone().multiplyScalar(0.5));
+    str.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), end.clone().normalize());
+    g.add(str);
+  }
+  return g;
+}
+function updateBalloons(t) {
+  for (const b of balloonBunches) {
+    b.g.position.y = b.baseY + Math.sin(t * 0.9 + b.phase) * 0.12;
+    b.g.rotation.z = Math.sin(t * 0.7 + b.phase) * 0.09;
+  }
+}
+
 function buildHouse({ x, z, rotationY, name, wall, roof }) {
   const g = new THREE.Group();
   const W = HOUSE_W, D = HOUSE_D, T = HOUSE_T, DOOR = HOUSE_DOOR, H1 = HOUSE_H1, H2 = HOUSE_H2;
@@ -1204,6 +1311,12 @@ function buildHouse({ x, z, rotationY, name, wall, roof }) {
   sign.scale.setScalar(0.52);
   sign.position.set(0, H1 + 0.2, D / 2 + 0.05);     // nameplate over the door
   g.add(sign);
+
+  // party balloons tied by the front door
+  const bunch = makeBalloonBunch();
+  bunch.position.set(W / 2 - 0.4, H1 - 0.3, D / 2 - 0.1);
+  g.add(bunch);
+  balloonBunches.push({ g: bunch, phase: Math.random() * Math.PI * 2, baseY: bunch.position.y });
 
   g.position.set(x, 0, z);
   g.rotation.y = rotationY;
@@ -1596,12 +1709,17 @@ const MOVE_KEYS = {
 
 window.addEventListener('keydown', (e) => {
   if (MOVE_KEYS[e.code]) { keys.add(MOVE_KEYS[e.code]); e.preventDefault(); }
+  if (e.code === 'Space') { e.preventDefault(); throwBall(); } // throw the ball for the dog
 });
 window.addEventListener('keyup', (e) => {
   if (MOVE_KEYS[e.code]) keys.delete(MOVE_KEYS[e.code]);
 });
 // Stop drifting if focus leaves the page mid-press.
 window.addEventListener('blur', () => keys.clear());
+
+// Throw button (works on touch + desktop)
+const throwBtnEl = document.getElementById('throwBtn');
+if (throwBtnEl) throwBtnEl.addEventListener('click', throwBall);
 
 const _forward = new THREE.Vector3();
 const _right = new THREE.Vector3();
@@ -1703,7 +1821,9 @@ function tick() {
   updateOwl(t);
   updateCampfire(t);
   updateAmbulance(t);
+  updateBall(dt);
   updateDog(t, dt);
+  updateBalloons(t);
 
   // Move first (player walks / free camera), then update characters' facing & bob.
   if (player) updatePlayer(dt); else updateMovement(dt);
