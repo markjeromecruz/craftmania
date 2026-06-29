@@ -181,16 +181,23 @@ for (let i = 0; i < 6; i++) {
 loadModel('lantern.glb', { position: [3.5, 0, 3.5], rotationY: -0.6, scale: 2 });
 loadModel('lantern.glb', { position: [-3.5, 0, -3.5], rotationY: 2.4, scale: 2 });
 
-// Lots more trees scattered around the world (avoiding the very center & far west park area).
+// Trees are scattered AFTER the buildings exist, avoiding building footprints.
+const noTreeZones = []; // {x, z, r} areas to keep clear of trees
 const TREE_FILES = ['tree.glb', 'tree-high-round.glb', 'tree-crooked.glb'];
-let _treeSeed = 1;
-const rnd = () => { _treeSeed = (_treeSeed * 1103515245 + 12345) & 0x7fffffff; return _treeSeed / 0x7fffffff; };
-for (let i = 0; i < 26; i++) {
-  const a = rnd() * Math.PI * 2;
-  const r = 13 + rnd() * 19; // ring from just outside the courtyard out past the houses
-  const x = Math.cos(a) * r, z = Math.sin(a) * r;
-  if (Math.hypot(x + 30, z + 8) < 18) continue; // keep the park clearing open
-  loadModel(TREE_FILES[i % TREE_FILES.length], { position: [x, 0, z], rotationY: rnd() * 6, scale: 1.8 + rnd() * 1.0 });
+function scatterTrees() {
+  let seed = 7;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  let placed = 0, tries = 0;
+  while (placed < 30 && tries < 500) {
+    tries++;
+    const a = rnd() * Math.PI * 2, r = 13 + rnd() * 22;
+    const x = Math.cos(a) * r, z = Math.sin(a) * r;
+    let blocked = false;
+    for (const zn of noTreeZones) { if (Math.hypot(x - zn.x, z - zn.z) < zn.r) { blocked = true; break; } }
+    if (blocked) continue;
+    loadModel(TREE_FILES[placed % TREE_FILES.length], { position: [x, 0, z], rotationY: rnd() * 6, scale: 1.8 + rnd() * 1.0 });
+    placed++;
+  }
 }
 
 // Lamp posts around the courtyard that light up at night.
@@ -331,13 +338,14 @@ function playerTradeWith(holder) {
   const good = holder.userData.tradeGood || randomGood();
   holder.userData.tradeGood = randomGood();          // they restock with a new good
   addCoins(1);                                        // trading earns coins
+  if (typeof onTrade === 'function') onTrade();        // quest progress
   const nm = holder.userData.mesh?.userData.char?.name || 'them';
   tradeMsgEl.textContent = `Traded with ${nm}: got ${good}! +1 🪙`;
   animate(tradeMsgEl, { scale: [1.2, 1], opacity: [0.4, 1], duration: 300, ease: 'out(3)' });
   refreshTradePanel();
   if (typeof saveGame === 'function') saveGame();
 }
-function openTrade() { tradeOpen = true; refreshTradePanel(); tradeEl.style.display = 'block'; animate(tradeEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' }); }
+function openTrade() { if (typeof questOpen !== 'undefined' && questOpen) closeQuests(); tradeOpen = true; refreshTradePanel(); tradeEl.style.display = 'block'; animate(tradeEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' }); }
 function closeTrade() { tradeOpen = false; animate(tradeEl, { opacity: [1, 0], duration: 200, onComplete: () => { tradeEl.style.display = 'none'; } }); }
 buildTradePanel();
 
@@ -486,6 +494,8 @@ fetch('./assets/characters/characters.json')
     roster.forEach((c, i) => placeCharacter(c, i, roster.length));
     placeHouses(roster); // a little house for each character
     buildNeighborhood(); // extra families + a park behind the houses
+    buildForest();       // a little forest where the quest animals live
+    scatterTrees();      // trees everywhere except on the buildings & park
     // expose the roster + their stats for the game the girls build next
     window.SANDYTEN.roster = roster;
     buildPicker(roster);
@@ -564,7 +574,7 @@ function saveGame() {
         outfits[id] = { worn, colors: { ...mesh.userData.itemColors } };
       }
     }
-    localStorage.setItem(SAVE_KEY, JSON.stringify({ coins, stars, level, itemOwned, owned, playerId: playerCharId, outfits }));
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ coins, level, levelStars, itemOwned, owned, playerId: playerCharId, outfits, questState: (typeof getQuestSave === 'function' ? getQuestSave() : null) }));
   } catch (e) { /* storage unavailable */ }
 }
 function hasSave() { try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; } }
@@ -574,7 +584,8 @@ function loadGame() {
   try { s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); } catch (e) { return null; }
   if (!s) return null;
   suppressSave = true;
-  coins = s.coins ?? coins; stars = s.stars ?? 0; level = s.level ?? 1;
+  coins = s.coins ?? coins; level = s.level ?? 1; levelStars = s.levelStars ?? 0;
+  if (typeof setQuestSave === 'function' && s.questState) setQuestSave(s.questState);
   Object.assign(itemOwned, s.itemOwned || {});
   Object.assign(owned, s.owned || {});
   renderCoins(); renderLevel();
@@ -603,7 +614,13 @@ function buildStartMenu() {
   const newBtn = document.createElement('button'); newBtn.className = 'start-btn'; newBtn.textContent = '✨ New Game';
   const contBtn = document.createElement('button'); contBtn.className = 'start-btn'; contBtn.textContent = '▶️ Continue Game';
   if (!hasSave()) { contBtn.disabled = true; contBtn.classList.add('disabled'); }
-  newBtn.addEventListener('click', () => { if (performance.now() < startReadyAt) return; clearSave(); hideStartMenu(); showPicker(); });
+  newBtn.addEventListener('click', () => {
+    if (performance.now() < startReadyAt) return;
+    clearSave();
+    coins = 20; level = 1; levelStars = 0; renderCoins(); renderLevel();
+    if (typeof resetQuests === 'function') resetQuests();
+    hideStartMenu(); showPicker();
+  });
   contBtn.addEventListener('click', () => {
     if (contBtn.disabled || performance.now() < startReadyAt) return;
     const s = loadGame();
@@ -764,6 +781,7 @@ renderer.domElement.addEventListener('pointerup', (e) => {
     playWoof();
     showBubble(petDog.mesh, DOG_NAME, 'Woof! 🐶', 1.3);
     petDog.barkUntil = timer.getElapsed() + 0.4; // little excited hop
+    if (typeof onPetDog === 'function') onPetDog(); // quest progress
   } else {
     showSpeech(obj);
   }
@@ -781,34 +799,20 @@ renderer.domElement.addEventListener('pointermove', (e) => {
 // Collectible stars — walk into one (as your character) to collect it.
 // Each pop plays a chime, bumps the counter, and a fresh star appears.
 // ---------------------------------------------------------------------------
-function makeStarGeometry() {
-  const shape = new THREE.Shape();
-  const spikes = 5, outer = 0.6, inner = 0.28;
-  for (let i = 0; i < spikes * 2; i++) {
-    const r = i % 2 === 0 ? outer : inner;
-    const a = (i / (spikes * 2)) * Math.PI * 2 - Math.PI / 2;
-    const x = Math.cos(a) * r, y = Math.sin(a) * r;
-    i === 0 ? shape.moveTo(x, y) : shape.lineTo(x, y);
-  }
-  shape.closePath();
-  const geo = new THREE.ExtrudeGeometry(shape, {
-    depth: 0.18, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.05, bevelSegments: 2,
-  });
-  geo.center();
-  return geo;
-}
-const STAR_GEO = makeStarGeometry();
-const STAR_MAT = new THREE.MeshStandardMaterial({
-  color: 0xffd54a, emissive: 0xffb300, emissiveIntensity: 0.6, roughness: 0.3, metalness: 0.3,
+// Collectible coins scattered around the world (money you pick up).
+const COIN_GEO = new THREE.CylinderGeometry(0.42, 0.42, 0.13, 22);
+COIN_GEO.rotateX(Math.PI / 2); // disc faces forward so it reads as a spinning coin
+const COIN_MAT = new THREE.MeshStandardMaterial({
+  color: 0xffd54a, emissive: 0xffb300, emissiveIntensity: 0.4, roughness: 0.25, metalness: 0.6,
 });
-const STAR_COUNT = 14;
+const STAR_COUNT = 16;
 const STAR_Y = 1.2;
 
 const collectibles = new THREE.Group();
 scene.add(collectibles);
 
 function spawnStar() {
-  const m = new THREE.Mesh(STAR_GEO, STAR_MAT);
+  const m = new THREE.Mesh(COIN_GEO, COIN_MAT);
   const a = Math.random() * Math.PI * 2;
   const r = 4 + Math.random() * (PLAY_RADIUS - 6); // spread across the play area
   m.position.set(Math.cos(a) * r, STAR_Y, Math.sin(a) * r);
@@ -821,20 +825,21 @@ function spawnStar() {
 }
 for (let i = 0; i < STAR_COUNT; i++) spawnStar();
 
-// Coins = money (spent at the shop / dressing room, earned by trading).
-// Stars = experience: every 5 stars you level up.
-let coins = 20, stars = 0, level = 1;
-const STARS_PER_LEVEL = 5;
+// Coins = money (collected in the world, spent at the shop / dressing room).
+// Stars = experience from quests; each level needs more (5, 10, 15, 20, …).
+let coins = 20, level = 1, levelStars = 0;
 const coinsEl = document.getElementById('coins');
 const levelEl = document.getElementById('level');
+const starsToNext = () => level * 5; // +5 every level
 function renderCoins() { if (coinsEl) coinsEl.textContent = '🪙 ' + coins; }
-function renderLevel() { if (levelEl) levelEl.textContent = '✨ Lv ' + level + ' (' + (stars % STARS_PER_LEVEL) + '/' + STARS_PER_LEVEL + ')'; }
-function addStar() { // collecting a star gives XP and can level you up
-  stars += 1;
-  const newLevel = 1 + Math.floor(stars / STARS_PER_LEVEL);
+function renderLevel() { if (levelEl) levelEl.textContent = '✨ Lv ' + level + ' (' + levelStars + '/' + starsToNext() + ')'; }
+function addStars(n) { // earn quest stars; level up when you fill the bar
+  for (let k = 0; k < n; k++) {
+    levelStars += 1;
+    if (levelStars >= starsToNext()) { levelStars -= starsToNext(); level += 1; playDing(); }
+  }
   renderLevel();
   if (levelEl) animate(levelEl, { scale: [1.4, 1], duration: 320, ease: 'out(3)' });
-  if (newLevel > level) { level = newLevel; playDing(); }
   if (typeof saveGame === 'function') saveGame();
 }
 function addCoins(n) {
@@ -946,7 +951,7 @@ function cycleMusic() {
 
 function collectStar(s, byPlayer) {
   s.userData.collected = true;
-  if (byPlayer) { playDing(); addStar(); } // the player gains a star (XP)
+  if (byPlayer) { playDing(); addCoins(1); if (typeof onCoinCollected === 'function') onCoinCollected(); } // coins = money
   // sparkle up and shrink away, then remove and spawn a fresh one
   animate(s.position, { y: s.position.y + 1.6, duration: 420, ease: 'out(2)' });
   animate(s.rotation, { y: s.rotation.y + 6, duration: 420 });
@@ -1047,6 +1052,7 @@ function buildStore() {
 
   store.position.set(0, 0, -16);
   scene.add(store);
+  noTreeZones.push({ x: 0, z: -16, r: 9 });
 }
 buildStore();
 
@@ -1093,6 +1099,7 @@ function buildHospital() {
 
   g.position.set(14, 0, -14);
   scene.add(g);
+  noTreeZones.push({ x: 14, z: -14, r: 9 });
 }
 buildHospital();
 
@@ -1386,6 +1393,7 @@ function buildPark() {
   const grassMat = new THREE.MeshStandardMaterial({ color: 0x77b85a, roughness: 1 });
   const grass = new THREE.Mesh(new THREE.CircleGeometry(17, 48), grassMat); // big & spacious
   grass.rotation.x = -Math.PI / 2; grass.position.set(PARK.x, 0.04, PARK.z); grass.receiveShadow = true; scene.add(grass);
+  noTreeZones.push({ x: PARK.x, z: PARK.z, r: 18 });
   const sign = makeSign('PARK'); sign.scale.setScalar(0.8); sign.position.set(PARK.x, 3.8, PARK.z - 16);
 
   const red = new THREE.MeshStandardMaterial({ color: 0xd64a4a, roughness: 0.6 });
@@ -1451,6 +1459,182 @@ function buildNeighborhood() {
     spawnRoamer({ id: n.id + '_kid', name: n.name + ' Jr.', sprite: n.sprite, x: PARK.x, z: PARK.z, scale: 0.6, child: true, parent, lines: ['Wheee!', 'Tag, you\'re it!', 'Hehe!'] });
   });
 }
+
+// ---------------------------------------------------------------------------
+// Quests & side quests — earn stars (XP) from a mini-puzzle and by helping
+// cute animals that come out of the forest looking for lost things.
+// ---------------------------------------------------------------------------
+const FOREST = { x: 30, z: 8 };
+function buildForest() {
+  let seed = 99; const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  const files = ['tree-high-round.glb', 'tree.glb', 'tree-crooked.glb'];
+  for (let i = 0; i < 16; i++) {
+    const a = rnd() * Math.PI * 2, r = rnd() * 8;
+    loadModel(files[i % 3], { position: [FOREST.x + Math.cos(a) * r, 0, FOREST.z + Math.sin(a) * r], rotationY: rnd() * 6, scale: 2.0 + rnd() * 1.3 });
+  }
+  noTreeZones.push({ x: FOREST.x, z: FOREST.z, r: 12 });
+}
+
+const quests = [
+  { id: 'coins', name: 'Collect 12 coins', target: 12, prog: 0, reward: 5, done: false },
+  { id: 'trade', name: 'Trade with 3 friends', target: 3, prog: 0, reward: 5, done: false },
+  { id: 'pet', name: 'Pet Daisy 3 times', target: 3, prog: 0, reward: 5, done: false },
+  { id: 'puzzle', name: 'Win the Memory game', target: 1, prog: 0, reward: 10, done: false, puzzle: true },
+];
+function questBump(id) {
+  const q = quests.find((x) => x.id === id);
+  if (!q || q.done) return;
+  q.prog = Math.min(q.target, q.prog + 1);
+  if (q.prog >= q.target) completeQuest(q);
+  else if (questOpen) refreshQuests();
+}
+function completeQuest(q) {
+  if (q.done) return;
+  q.done = true; addStars(q.reward);
+  questToast(`✅ ${q.name} — +${q.reward} ✨`);
+  if (questOpen) refreshQuests();
+  if (typeof saveGame === 'function') saveGame();
+}
+function onCoinCollected() { questBump('coins'); }
+function onTrade() { questBump('trade'); }
+function onPetDog() { questBump('pet'); }
+function resetQuests() {
+  for (const q of quests) { q.prog = 0; q.done = false; }
+  if (sideQuest) { scene.remove(sideQuest.item); scene.remove(sideQuest.animal); sideQuest = null; }
+  nextSideQuestAt = 25;
+  if (questOpen) refreshQuests();
+}
+function getQuestSave() { return { done: quests.filter((q) => q.done).map((q) => q.id), prog: Object.fromEntries(quests.map((q) => [q.id, q.prog])) }; }
+function setQuestSave(s) { for (const q of quests) { if (s.done && s.done.includes(q.id)) q.done = true; if (s.prog && s.prog[q.id] != null) q.prog = s.prog[q.id]; } if (questOpen) refreshQuests(); }
+
+// ---- Quest panel UI ----
+let questEl = null, questOpen = false, questListEl = null;
+function buildQuestPanel() {
+  questEl = document.createElement('div'); questEl.id = 'questpanel'; questEl.style.display = 'none';
+  const h = document.createElement('h3'); h.append('🎯 Quests');
+  const sub = document.createElement('p'); sub.className = 'shop-sub'; sub.textContent = 'Finish quests to earn ✨ stars & level up!';
+  questListEl = document.createElement('div'); questListEl.className = 'shop-list';
+  questEl.append(h, sub, questListEl);
+  document.body.appendChild(questEl);
+}
+function refreshQuests() {
+  if (!questListEl) return;
+  questListEl.replaceChildren();
+  quests.forEach((q) => {
+    const row = document.createElement('div'); row.className = 'shop-item';
+    if (q.done) row.classList.add('worn');
+    const lbl = document.createElement('span'); lbl.textContent = `${q.name}`;
+    const right = document.createElement('span'); right.className = 'shop-price';
+    if (q.done) right.textContent = '✓ done';
+    else if (q.puzzle) { const b = document.createElement('button'); b.className = 'shop-price'; b.style.cursor = 'pointer'; b.textContent = '▶ Play'; b.addEventListener('click', startPuzzle); right.appendChild(b); }
+    else right.textContent = `${q.prog}/${q.target}  +${q.reward}✨`;
+    row.append(lbl, right);
+    questListEl.appendChild(row);
+  });
+  // active side quest, if any
+  if (sideQuest) {
+    const row = document.createElement('div'); row.className = 'shop-item';
+    row.append(Object.assign(document.createElement('span'), { textContent: `Find the lost ${sideQuest.emoji}` }),
+      Object.assign(document.createElement('span'), { className: 'shop-price', textContent: `+8✨` }));
+    questListEl.appendChild(row);
+  }
+}
+function openQuests() { if (typeof tradeOpen !== 'undefined' && tradeOpen) closeTrade(); questOpen = true; refreshQuests(); questEl.style.display = 'block'; animate(questEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' }); }
+function closeQuests() { questOpen = false; animate(questEl, { opacity: [1, 0], duration: 200, onComplete: () => { questEl.style.display = 'none'; } }); }
+let toastEl = null;
+function questToast(msg) {
+  if (!toastEl) { toastEl = document.createElement('div'); toastEl.id = 'questtoast'; document.body.appendChild(toastEl); }
+  toastEl.textContent = msg; toastEl.style.display = 'block';
+  animate(toastEl, { opacity: [0, 1], translateY: [12, 0], duration: 300, ease: 'out(3)' });
+  clearTimeout(toastEl._t); toastEl._t = setTimeout(() => { animate(toastEl, { opacity: 0, duration: 400, onComplete: () => { toastEl.style.display = 'none'; } }); }, 2600);
+}
+
+// ---- Memory mini-puzzle (repeat the color pattern) ----
+let puzzleEl = null, puzzlePads = [], puzzleSeq = [], puzzleInput = [], puzzleLocked = true;
+const PUZZLE_COLORS = [0xff5a5a, 0x74e08c, 0x6aa6ff, 0xffe066];
+function buildPuzzle() {
+  puzzleEl = document.createElement('div'); puzzleEl.id = 'puzzle'; puzzleEl.style.display = 'none';
+  const panel = document.createElement('div'); panel.className = 'puzzle-panel';
+  const h = document.createElement('h3'); h.textContent = '🧠 Memory Game';
+  const msg = document.createElement('p'); msg.className = 'puzzle-msg'; msg.textContent = 'Watch the colors, then repeat!';
+  const grid = document.createElement('div'); grid.className = 'puzzle-grid';
+  PUZZLE_COLORS.forEach((c, i) => {
+    const pad = document.createElement('button'); pad.className = 'puzzle-pad';
+    pad.style.background = '#' + c.toString(16).padStart(6, '0');
+    pad.addEventListener('click', () => padClick(i));
+    grid.appendChild(pad); puzzlePads.push(pad);
+  });
+  const close = document.createElement('button'); close.className = 'puzzle-close'; close.textContent = 'Close';
+  close.addEventListener('click', () => { puzzleEl.style.display = 'none'; });
+  puzzleEl._msg = msg;
+  panel.append(h, msg, grid, close);
+  puzzleEl.appendChild(panel); document.body.appendChild(puzzleEl);
+}
+function flashPad(i) { const p = puzzlePads[i]; p.classList.add('lit'); setTimeout(() => p.classList.remove('lit'), 360); }
+function startPuzzle() {
+  if (!puzzleEl) return;
+  puzzleEl.style.display = 'flex'; puzzleEl._msg.textContent = 'Watch carefully…';
+  puzzleSeq = Array.from({ length: 4 }, () => Math.floor(Math.random() * 4));
+  puzzleInput = []; puzzleLocked = true;
+  let k = 0;
+  const tick = () => {
+    if (k >= puzzleSeq.length) { puzzleLocked = false; puzzleEl._msg.textContent = 'Now repeat it!'; return; }
+    flashPad(puzzleSeq[k]); k++; setTimeout(tick, 620);
+  };
+  setTimeout(tick, 600);
+}
+function padClick(i) {
+  if (puzzleLocked || puzzleEl.style.display === 'none') return;
+  flashPad(i); puzzleInput.push(i);
+  const idx = puzzleInput.length - 1;
+  if (puzzleInput[idx] !== puzzleSeq[idx]) { puzzleEl._msg.textContent = 'Oops! Try again 🙂'; puzzleLocked = true; setTimeout(startPuzzle, 900); return; }
+  if (puzzleInput.length === puzzleSeq.length) {
+    puzzleLocked = true; puzzleEl._msg.textContent = 'You did it! 🎉';
+    const q = quests.find((x) => x.id === 'puzzle'); if (q && !q.done) completeQuest(q);
+    setTimeout(() => { puzzleEl.style.display = 'none'; }, 1100);
+  }
+}
+
+// ---- Animal helper side quest ----
+let sideQuest = null, nextSideQuestAt = 25;
+const LOST_ITEMS = ['🧦', '👒', '🧤', '🎀', '🧣', '👟', '🧢'];
+const _spDir = new THREE.Vector3();
+function startSideQuest(t) {
+  const emoji = LOST_ITEMS[Math.floor(Math.random() * LOST_ITEMS.length)];
+  // a cute animal at the forest edge
+  const sprite = NEIGHBORS[Math.floor(Math.random() * NEIGHBORS.length)].sprite;
+  const tex = textureLoader.load(`./assets/characters/${sprite}`); tex.colorSpace = THREE.SRGBColorSpace;
+  const animal = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 2.6), new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.5, side: THREE.DoubleSide }));
+  animal.position.set(FOREST.x - 9, 1.3, FOREST.z - 2);
+  scene.add(animal);
+  const ask = makeEmojiSprite('❓'); ask.position.set(0, 1.9, 0); ask.visible = true; animal.add(ask);
+  // the lost item somewhere reachable
+  const a = Math.random() * Math.PI * 2, r = 8 + Math.random() * 22;
+  const item = makeEmojiSprite(emoji); item.visible = true; item.scale.set(1.4, 1.4, 1);
+  item.position.set(Math.cos(a) * r, 1.3, Math.sin(a) * r);
+  scene.add(item);
+  sideQuest = { emoji, animal, item };
+  questToast(`An animal lost their ${emoji} — go find it!`);
+  if (questOpen) refreshQuests();
+}
+function updateSideQuests(t) {
+  if (!sideQuest) { if (player && t > nextSideQuestAt) startSideQuest(t); return; }
+  // bob the lost item; the animal faces the camera
+  sideQuest.item.position.y = 1.3 + Math.sin(t * 2) * 0.18;
+  sideQuest.animal.rotation.y = Math.atan2(camera.position.x - sideQuest.animal.position.x, camera.position.z - sideQuest.animal.position.z);
+  if (player) {
+    const d = Math.hypot(player.position.x - sideQuest.item.position.x, player.position.z - sideQuest.item.position.z);
+    if (d < 2.4) { // found it!
+      scene.remove(sideQuest.item); scene.remove(sideQuest.animal);
+      addStars(8); questToast(`You found the lost ${sideQuest.emoji}! +8 ✨`);
+      sideQuest = null; nextSideQuestAt = t + 55 + Math.random() * 30;
+      if (questOpen) refreshQuests();
+    }
+  }
+}
+
+buildQuestPanel();
+buildPuzzle();
 
 // ---- Shop UI: walk up to the shopkeeper to open it; spend stars to buy ----
 const SHOP_ITEMS = [
@@ -1595,6 +1779,7 @@ function buildDressingRoom() {
 
   room.position.copy(DRESS_CENTER);
   scene.add(room);
+  noTreeZones.push({ x: DRESS_CENTER.x, z: DRESS_CENTER.z, r: 9 });
 }
 buildDressingRoom();
 
@@ -1763,6 +1948,7 @@ function buildHouse({ x, z, rotationY, name, wall, roof }) {
   g.rotation.y = rotationY;
   scene.add(g);
   houses.push({ x, z, ry: rotationY });
+  noTreeZones.push({ x, z, r: 5.5 });
 
   // register the solid ground-floor walls for collision (doorway stays open)
   addWall(x, z, rotationY, -W / 2, -D / 2, W / 2, -D / 2);  // back
@@ -2270,6 +2456,8 @@ if (throwBtnEl) throwBtnEl.addEventListener('click', throwBall);
 // Trading list toggle
 const tradeBtnEl = document.getElementById('tradeBtn');
 if (tradeBtnEl) tradeBtnEl.addEventListener('click', () => { tradeOpen ? closeTrade() : openTrade(); });
+const questBtnEl = document.getElementById('questBtn');
+if (questBtnEl) questBtnEl.addEventListener('click', () => { questOpen ? closeQuests() : openQuests(); });
 
 // Party music — each click changes the song, then turns it off
 const musicBtnEl = document.getElementById('musicBtn');
@@ -2391,6 +2579,7 @@ function tick() {
   updateShop();
   updateDress();
   updateTrades(t);
+  updateSideQuests(t);
 
   // Characters: wander around, face the camera (upright billboard), and bob/hop.
   for (const b of billboards) {
