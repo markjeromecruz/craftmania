@@ -25,8 +25,9 @@ import { animate, createTimeline, stagger, utils } from 'animejs';
 // ---------------------------------------------------------------------------
 const app = document.getElementById('app');
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); // adaptive quality may lower this
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.info.autoReset = false;           // we reset once per frame so info covers all passes
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -88,7 +89,7 @@ scene.add(hemi);
 
 const sunLight = new THREE.DirectionalLight(0xfff2d6, 2.4);
 sunLight.castShadow = true;
-sunLight.shadow.mapSize.set(2048, 2048);
+sunLight.shadow.mapSize.set(1024, 1024); // 2048 was 4x the shadow fill for little visible gain
 sunLight.shadow.camera.near = 1;
 sunLight.shadow.camera.far = 200;
 sunLight.shadow.camera.left = -40;
@@ -201,22 +202,26 @@ function scatterTrees() {
 }
 
 // Lamp posts around the courtyard that light up at night.
+// Lamp posts. Each one's orb GLOWS for free (emissive), but instead of giving
+// every lamp its own PointLight (20+ point lights = a huge forward-rendering
+// cost, paid per-fragment even when off), we share a small pool of point lights
+// that hop to whichever lamps are nearest the camera. ~6 lights light 20 lamps.
 const lampPosts = [];
+const POLE_GEO = new THREE.CylinderGeometry(0.08, 0.12, 2.8, 8);
+const POLE_MAT = new THREE.MeshStandardMaterial({ color: 0x46484f, roughness: 0.7 });
 function makeLampPost(x, z) {
   const g = new THREE.Group();
-  const pole = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.08, 0.12, 2.8, 8),
-    new THREE.MeshStandardMaterial({ color: 0x46484f, roughness: 0.7 })
-  );
-  pole.position.y = 1.4; pole.castShadow = true; g.add(pole);
+  const pole = new THREE.Mesh(POLE_GEO, POLE_MAT);
+  pole.position.y = 1.4; g.add(pole); // poles don't cast shadows (cheap, barely visible)
   const orbMat = new THREE.MeshStandardMaterial({ color: 0xfff2c0, emissive: 0xffd97a, emissiveIntensity: 0.15, roughness: 0.4 });
   const orb = new THREE.Mesh(new THREE.SphereGeometry(0.24, 14, 12), orbMat);
   orb.position.y = 2.95; g.add(orb);
-  const light = new THREE.PointLight(0xffcf7a, 0, 10, 2); // intensity toggled by day/night
-  light.position.set(0, 2.95, 0); g.add(light);
   g.position.set(x, 0, z); scene.add(g);
-  lampPosts.push({ orbMat, light });
+  lampPosts.push({ x, z, orbMat });
 }
+const LAMP_POOL_SIZE = 6;
+const lampLightPool = [];
+for (let i = 0; i < LAMP_POOL_SIZE; i++) { const l = new THREE.PointLight(0xffcf7a, 0, 13, 2); scene.add(l); lampLightPool.push(l); }
 for (let i = 0; i < 6; i++) {
   const a = (i / 6) * Math.PI * 2 + 0.4;
   makeLampPost(Math.cos(a) * 9.5, Math.sin(a) * 9.5);
@@ -1528,7 +1533,8 @@ function buildPark() {
   const blue = new THREE.MeshStandardMaterial({ color: 0x4a8cd6, roughness: 0.6 });
   const yellow = new THREE.MeshStandardMaterial({ color: 0xf2c14e, roughness: 0.6 });
   const wood = new THREE.MeshStandardMaterial({ color: 0x9c6b3f, roughness: 0.9 });
-  const box = (g, w, h, d, mat, x, y, z, rx = 0) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.rotation.x = rx; m.castShadow = true; g.add(m); return m; };
+  // park props don't cast shadows — dozens of small casters add up in the shadow pass for little gain
+  const box = (g, w, h, d, mat, x, y, z, rx = 0) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.rotation.x = rx; g.add(m); return m; };
   scene.add(sign);
 
   // --- playground (in the MIDDLE of the park, well away from the houses) ---
@@ -2058,7 +2064,7 @@ function makeBalloonBunch() {
     const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.05 });
     const ox = (i - 1) * 0.45, oy = 1.7 + Math.random() * 0.4, oz = (Math.random() - 0.5) * 0.4;
     const balloon = new THREE.Mesh(new THREE.SphereGeometry(0.32, 14, 12), mat);
-    balloon.scale.set(1, 1.25, 1); balloon.position.set(ox, oy, oz); balloon.castShadow = true; g.add(balloon);
+    balloon.scale.set(1, 1.25, 1); balloon.position.set(ox, oy, oz); g.add(balloon);
     const knot = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.1, 6), mat);
     knot.position.set(ox, oy - 0.42, oz); g.add(knot);
     // string from the knot down to the tie point at the origin
@@ -2301,9 +2307,20 @@ function updateDayNight(t) {
   hemi.color.setHex(0xcfe8ff).lerp(_moonTint, moonUp * 0.6); // cool moonlit tint at night
   // lamp posts glow & cast light at night
   const lampOn = Math.max(0, 1 - dayness * 2.4);
-  for (const lp of lampPosts) {
-    lp.light.intensity = lampOn * 3.6;   // brighter at night
-    lp.orbMat.emissiveIntensity = 0.15 + lampOn * 2.1;
+  for (const lp of lampPosts) lp.orbMat.emissiveIntensity = 0.15 + lampOn * 2.1; // every orb glows (free)
+  // and the shared point-light pool follows the lamps nearest the camera
+  if (lampOn > 0.01 && lampPosts.length) {
+    const cx = controls.target.x, cz = controls.target.z;
+    const nearest = lampPosts
+      .map((lp) => ({ lp, d: (lp.x - cx) ** 2 + (lp.z - cz) ** 2 }))
+      .sort((a, b) => a.d - b.d);
+    for (let i = 0; i < lampLightPool.length; i++) {
+      const l = lampLightPool[i];
+      if (i < nearest.length) { l.position.set(nearest[i].lp.x, 2.95, nearest[i].lp.z); l.intensity = lampOn * 3.6; }
+      else l.intensity = 0;
+    }
+  } else {
+    for (const l of lampLightPool) l.intensity = 0;
   }
   const [name, icon] = phaseName(dayT);
   if (phaseEl) phaseEl.textContent = icon + ' ' + name;
@@ -2640,6 +2657,37 @@ const bloom = new UnrealBloomPass(
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 
+// --- Adaptive quality -------------------------------------------------------
+// The perf monitor watches FPS; if the device can't keep up we step quality
+// down (pixel ratio, then bloom), and back up when there's headroom. This is
+// how the game "adjusts from there" to whatever hardware it's running on.
+const QUALITY_LEVELS = [
+  { dpr: 1.0, bloom: false },                                     // 0 — low
+  { dpr: 1.0, bloom: true },                                      // 1 — medium
+  { dpr: Math.min(window.devicePixelRatio, 1.5), bloom: true },   // 2 — high
+];
+let qualityLevel = QUALITY_LEVELS.length - 1;
+let qBadLevel = QUALITY_LEVELS.length; // lowest level that proved too slow (sticky ceiling)
+let _qHold = 4; // let first-load asset hitches pass before adjusting
+function applyQuality() {
+  const q = QUALITY_LEVELS[qualityLevel];
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setPixelRatio(q.dpr);
+  renderer.setSize(w, h);
+  composer.setSize(w * q.dpr, h * q.dpr); // scene/bloom render at the chosen resolution
+  bloom.enabled = q.bloom;
+}
+function adaptiveQuality() {
+  if (_qHold > 0) { _qHold--; return; }
+  if (PERF.fps && PERF.fps < 30 && qualityLevel > 0) {
+    qBadLevel = Math.min(qBadLevel, qualityLevel); // remember this level is too slow
+    qualityLevel--; applyQuality(); _qHold = 3;
+  } else if (PERF.fps > 55 && qualityLevel + 1 < qBadLevel) { // only climb back to a level that wasn't too slow
+    qualityLevel++; applyQuality(); _qHold = 6;
+  }
+}
+applyQuality();
+
 // ---------------------------------------------------------------------------
 // Keyboard movement — arrow keys (and WASD) glide you across the world.
 // Movement is relative to where the camera faces: Up = forward, Down = back,
@@ -2753,11 +2801,9 @@ function updateMovement(dt) {
 // Resize
 // ---------------------------------------------------------------------------
 window.addEventListener('resize', () => {
-  const w = window.innerWidth, h = window.innerHeight;
-  camera.aspect = w / h;
+  camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(w, h);
-  composer.setSize(w, h);
+  applyQuality(); // re-applies renderer + composer sizing at the current quality level
 });
 
 // ---------------------------------------------------------------------------
@@ -2767,7 +2813,39 @@ const timer = new THREE.Timer();
 let frames = 0, fpsLast = 0;
 const fpsEl = document.getElementById('fps');
 
+// --- Performance monitor ----------------------------------------------------
+// Tracks FPS, the CPU split (game update vs render), draw calls/triangles, the
+// number of lights/programs, and pixel ratio. Read window.__PERF anytime, or
+// add ?perf to the URL to get a console log once per second.
+const PERF = { fps: 0, ms: 0, upd: 0, ren: 0, calls: 0, tris: 0, progs: 0, geoms: 0, texs: 0, lights: 0, pts: 0, dpr: renderer.getPixelRatio(), quality: 2 };
+window.__PERF = PERF;
+const PERF_LOG = new URLSearchParams(location.search).has('perf');
+let _pFrames = 0, _pUpd = 0, _pRen = 0, _pStart = performance.now();
+function perfTick(updMs, renMs) {
+  _pFrames++; _pUpd += updMs; _pRen += renMs;
+  const now = performance.now();
+  const span = now - _pStart;
+  if (span < 1000) return;
+  PERF.fps = +(_pFrames * 1000 / span).toFixed(1);
+  PERF.ms = +(span / _pFrames).toFixed(2);
+  PERF.upd = +(_pUpd / _pFrames).toFixed(2);
+  PERF.ren = +(_pRen / _pFrames).toFixed(2);
+  const ri = renderer.info;
+  PERF.calls = ri.render.calls; PERF.tris = ri.render.triangles;
+  PERF.progs = ri.programs ? ri.programs.length : 0;
+  PERF.geoms = ri.memory.geometries; PERF.texs = ri.memory.textures;
+  PERF.dpr = +renderer.getPixelRatio().toFixed(2);
+  let nl = 0, np = 0; scene.traverse((o) => { if (o.isLight) { nl++; if (o.isPointLight) np++; } });
+  PERF.lights = nl; PERF.pts = np;
+  if (typeof qualityLevel !== 'undefined') PERF.quality = qualityLevel;
+  if (PERF_LOG) console.log(`[perf] ${PERF.fps}fps ms${PERF.ms} (upd${PERF.upd}/ren${PERF.ren}) | calls${PERF.calls} tris${(PERF.tris / 1000).toFixed(0)}k | lights${nl}(pt${np}) progs${PERF.progs} geo${PERF.geoms} tex${PERF.texs} q${PERF.quality} dpr${PERF.dpr}`);
+  _pFrames = 0; _pUpd = 0; _pRen = 0; _pStart = now;
+  if (typeof adaptiveQuality === 'function') adaptiveQuality();
+}
+
 function tick() {
+  const _f0 = performance.now();
+  renderer.info.reset(); // count draw calls across all composer passes this frame
   timer.update();
   const t = timer.getElapsed();
   const dt = timer.getDelta();
@@ -2911,12 +2989,14 @@ function tick() {
   }
 
   controls.update();
+  const _u = performance.now();
   composer.render();
+  perfTick(_u - _f0, performance.now() - _u);
 
   // FPS readout
   frames++;
   if (t - fpsLast >= 0.5) {
-    fpsEl.textContent = Math.round(frames / (t - fpsLast)) + ' fps';
+    fpsEl.textContent = Math.round(frames / (t - fpsLast)) + ' fps' + (PERF_LOG ? ' q' + qualityLevel : '');
     frames = 0; fpsLast = t;
   }
   requestAnimationFrame(tick);
