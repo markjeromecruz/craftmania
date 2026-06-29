@@ -255,6 +255,12 @@ const ROAM_INNER = 4, ROAM_OUTER = 9;
 const _charDir = new THREE.Vector3();
 function pickRoamTarget(holder) {
   const w = holder.userData;
+  // wanderers drift between the city, the park, and the neighborhood
+  if (w.wander && Math.random() < 0.3) {
+    const zones = [{ x: 0, z: 0, r: 11 }, { x: PARK.x, z: PARK.z, r: 15 }, { x: 0, z: 24, r: 11 }];
+    const zn = zones[Math.floor(Math.random() * zones.length)];
+    w.roamCenter = zn; w.roamRadius = zn.r; w.roamInner = 1;
+  }
   const cx = w.roamCenter ? w.roamCenter.x : 0;
   const cz = w.roamCenter ? w.roamCenter.z : 0;
   const inner = w.roamInner != null ? w.roamInner : ROAM_INNER;
@@ -456,6 +462,7 @@ function placeCharacter(char, index, total) {
     target: new THREE.Vector3(x, 0, z),
     pauseUntil: 1 + Math.random() * 2, // settle in before the first stroll
     moving: false,
+    wander: true, // stroll between the city, park and neighborhood
   };
   mesh.position.y = baseY;
   mesh.userData.baseY = baseY;
@@ -523,7 +530,7 @@ fetch('./assets/characters/characters.json')
 // Choose-your-character + play as them (walk around, camera follows).
 // ---------------------------------------------------------------------------
 const PLAYER_SPEED = 7;     // how fast you walk as your character
-const PLAY_RADIUS = 42;     // how far you can wander (out to the park & neighborhood)
+const PLAY_RADIUS = 54;     // how far you can wander (out to the bigger park & neighborhood)
 let pickerEl = null;
 let playerCharId = null;
 let pickerReadyAt = 0; // clicks before this time (during fade-in) are ignored
@@ -784,6 +791,7 @@ renderer.domElement.addEventListener('pointerdown', (e) => { downX = e.clientX; 
 function clickTargets() {
   let list = petDog ? billboards.concat(petDog.mesh) : billboards;
   if (gardenSpots.length) list = list.concat(gardenSpots.map((r) => r.mound));
+  if (pondSurface) list = list.concat(pondSurface);
   return list;
 }
 renderer.domElement.addEventListener('pointerup', (e) => {
@@ -794,7 +802,9 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   const hits = raycaster.intersectObjects(clickTargets(), false);
   if (!hits.length) return;
   const obj = hits[0].object;
-  if (obj.userData.isGarden) {                // tapped a garden plot → plant/harvest
+  if (obj.userData.isPond) {                  // tapped the pond → go fishing
+    startFishing();
+  } else if (obj.userData.isGarden) {         // tapped a garden plot → plant/harvest
     handleGardenClick(obj);
   } else if (petDog && obj === petDog.mesh) { // clicked the puppy → bark!
     playWoof();
@@ -1366,8 +1376,9 @@ function updateDoghouse(dt) {
 // Neighborhood + Park: extra families that roam the park with their kids.
 // ---------------------------------------------------------------------------
 const PARK = { x: -30, z: -8 };
-const POND = { x: -39, z: -6 }; // duck pond on the west side of the park
+const POND = { x: -28, z: -20 }; // duck pond on the south side of the bigger park
 let merryGoRound = null; // the spinning park roundabout
+let pondSurface = null;  // the pond water mesh (tap it to fish)
 const SLIDE_TOP = new THREE.Vector3();
 const SLIDE_BOT = new THREE.Vector3();
 const PLAYGROUND = new THREE.Vector3();
@@ -1467,7 +1478,17 @@ const GARDEN = { x: 12, z: 3 };
 const gardenSpots = [];
 const GARDEN_SOIL = new THREE.MeshStandardMaterial({ color: 0x6b4a2f, roughness: 1 });
 const GARDEN_STEM = new THREE.MeshStandardMaterial({ color: 0x4faf54, roughness: 0.8 });
-const GARDEN_FLOWERS = [0xff7eb6, 0xffd54a, 0xff5a5a, 0xb18cff, 0x6aa6ff].map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.5, emissive: c, emissiveIntensity: 0.08 }));
+const cropMat = (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.6 });
+const _CM = { carrot: cropMat(0xe8862e), tomato: cropMat(0xe23b2e), pumpkin: cropMat(0xe8881e), corn: cropMat(0xf2d24a), berry: cropMat(0xd62a55) };
+const M = THREE.Mesh, Co = THREE.ConeGeometry, Cy = THREE.CylinderGeometry, Sp = THREE.SphereGeometry;
+// Different crops you can grow — each renders its own ripe shape at stage 3.
+const CROPS = [
+  { name: 'Carrot', emoji: '🥕', coins: 2, build(p) { const c = new M(new Co(0.22, 0.85, 8), _CM.carrot); c.position.y = 0.45; c.rotation.x = Math.PI; p.add(c); for (const sx of [-1, 0, 1]) { const l = new M(new Co(0.05, 0.5, 5), GARDEN_STEM); l.position.set(sx * 0.12, 0.95, 0); p.add(l); } } },
+  { name: 'Tomato', emoji: '🍅', coins: 3, build(p) { const s = new M(new Cy(0.05, 0.06, 0.9, 6), GARDEN_STEM); s.position.y = 0.45; p.add(s); for (const [dx, dy] of [[-0.18, 0.55], [0.18, 0.68], [0, 0.95]]) { const t = new M(new Sp(0.18, 12, 10), _CM.tomato); t.position.set(dx, dy, 0); p.add(t); } } },
+  { name: 'Pumpkin', emoji: '🎃', coins: 4, build(p) { const pk = new M(new Sp(0.45, 14, 12), _CM.pumpkin); pk.scale.set(1, 0.8, 1); pk.position.y = 0.4; p.add(pk); const st = new M(new Cy(0.06, 0.08, 0.25, 6), GARDEN_STEM); st.position.y = 0.78; p.add(st); } },
+  { name: 'Corn', emoji: '🌽', coins: 3, build(p) { const c = new M(new Cy(0.18, 0.15, 0.95, 8), _CM.corn); c.position.y = 0.6; p.add(c); for (const sx of [-1, 1]) { const l = new M(new Sp(0.12, 8, 6), GARDEN_STEM); l.scale.set(1, 0.3, 2.2); l.position.set(sx * 0.2, 0.5, 0); p.add(l); } } },
+  { name: 'Strawberry', emoji: '🍓', coins: 3, build(p) { const s = new M(new Cy(0.05, 0.06, 0.5, 6), GARDEN_STEM); s.position.y = 0.3; p.add(s); for (const [dx, dz] of [[-0.18, 0.1], [0.18, -0.1], [0, 0.2]]) { const b = new M(new Co(0.14, 0.3, 8), _CM.berry); b.position.set(dx, 0.2, dz); b.rotation.x = Math.PI; p.add(b); } } },
+];
 function renderPlant(rec) {
   rec.plant.clear();
   if (rec.stage === 1) { // seed sprout nub
@@ -1475,10 +1496,8 @@ function renderPlant(rec) {
   } else if (rec.stage === 2) { // little stem with leaves
     const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 0.5, 6), GARDEN_STEM); stem.position.y = 0.3; rec.plant.add(stem);
     for (const sx of [-1, 1]) { const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), GARDEN_STEM); leaf.scale.set(1, 0.4, 0.7); leaf.position.set(sx * 0.16, 0.32, 0); rec.plant.add(leaf); }
-  } else if (rec.stage >= 3) { // full bloom (harvestable)
-    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 0.8, 6), GARDEN_STEM); stem.position.y = 0.45; rec.plant.add(stem);
-    const center = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 10), GARDEN_FLOWERS[1]); center.position.y = 0.92; rec.plant.add(center);
-    for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2; const petal = new THREE.Mesh(new THREE.SphereGeometry(0.15, 10, 8), rec.flowerMat); petal.scale.set(1, 0.5, 0.7); petal.position.set(Math.cos(a) * 0.24, 0.92, Math.sin(a) * 0.24); rec.plant.add(petal); }
+  } else if (rec.stage >= 3) { // ripe crop (harvestable)
+    rec.crop.build(rec.plant);
   }
 }
 function buildGarden() {
@@ -1494,7 +1513,7 @@ function buildGarden() {
     const mound = new THREE.Mesh(new THREE.SphereGeometry(0.4, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), GARDEN_SOIL);
     mound.userData.isGarden = true; spot.add(mound);
     const plant = new THREE.Group(); spot.add(plant);
-    const rec = { mound, plant, stage: 0, plantedAt: 0, flowerMat: GARDEN_FLOWERS[0] };
+    const rec = { mound, plant, stage: 0, plantedAt: 0, crop: CROPS[0] };
     mound.userData.gardenRec = rec; gardenSpots.push(rec);
   }
 }
@@ -1502,11 +1521,12 @@ function handleGardenClick(mesh) {
   const rec = mesh.userData.gardenRec; if (!rec) return;
   if (rec.stage === 0) {
     rec.stage = 1; rec.plantedAt = timer.getElapsed();
-    rec.flowerMat = GARDEN_FLOWERS[Math.floor(Math.random() * GARDEN_FLOWERS.length)];
-    renderPlant(rec); if (typeof questToast === 'function') questToast('Planted a seed! 🌱 Come back soon…');
+    rec.crop = CROPS[Math.floor(Math.random() * CROPS.length)];
+    renderPlant(rec); if (typeof questToast === 'function') questToast(`Planted ${rec.crop.emoji} ${rec.crop.name}! 🌱 Come back soon…`);
   } else if (rec.stage >= 3) {
-    addCoins(2); rec.stage = 0; rec.plantedAt = 0; renderPlant(rec);
-    if (typeof questToast === 'function') questToast('Harvested a flower! +2 🪙');
+    addCoins(rec.crop.coins); if (typeof onCropHarvested === 'function') onCropHarvested();
+    if (typeof questToast === 'function') questToast(`Harvested ${rec.crop.emoji} ${rec.crop.name}! +${rec.crop.coins} 🪙`);
+    rec.stage = 0; rec.plantedAt = 0; renderPlant(rec);
     if (typeof playDing === 'function') playDing();
   } else if (typeof questToast === 'function') {
     questToast('Still growing… 🌱');
@@ -1524,21 +1544,22 @@ function updateGarden(t) {
 
 function buildPark() {
   const grassMat = new THREE.MeshStandardMaterial({ color: 0x77b85a, roughness: 1 });
-  const grass = new THREE.Mesh(new THREE.CircleGeometry(17, 48), grassMat); // big & spacious
+  const grass = new THREE.Mesh(new THREE.CircleGeometry(23, 56), grassMat); // bigger so everything fits with room to spare
   grass.rotation.x = -Math.PI / 2; grass.position.set(PARK.x, 0.04, PARK.z); grass.receiveShadow = true; scene.add(grass);
-  noTreeZones.push({ x: PARK.x, z: PARK.z, r: 18 });
-  const sign = makeSign('PARK'); sign.scale.setScalar(0.8); sign.position.set(PARK.x, 3.8, PARK.z - 16);
+  noTreeZones.push({ x: PARK.x, z: PARK.z, r: 24 });
+  const sign = makeSign('PARK'); sign.scale.setScalar(0.8); sign.position.set(PARK.x, 3.8, PARK.z + 20);
 
   const red = new THREE.MeshStandardMaterial({ color: 0xd64a4a, roughness: 0.6 });
   const blue = new THREE.MeshStandardMaterial({ color: 0x4a8cd6, roughness: 0.6 });
   const yellow = new THREE.MeshStandardMaterial({ color: 0xf2c14e, roughness: 0.6 });
   const wood = new THREE.MeshStandardMaterial({ color: 0x9c6b3f, roughness: 0.9 });
+  const green = new THREE.MeshStandardMaterial({ color: 0x5fb35f, roughness: 0.7 });
   // park props don't cast shadows — dozens of small casters add up in the shadow pass for little gain
   const box = (g, w, h, d, mat, x, y, z, rx = 0) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.rotation.x = rx; g.add(m); return m; };
   scene.add(sign);
 
-  // --- playground (in the MIDDLE of the park, well away from the houses) ---
-  const pgPos = new THREE.Vector3(PARK.x, 0, PARK.z - 1);
+  // ===== PLAYGROUND — west side of the park =====
+  const pgPos = new THREE.Vector3(PARK.x - 10, 0, PARK.z + 2);
   PLAYGROUND.copy(pgPos);
   const pg = new THREE.Group(); pg.position.copy(pgPos); scene.add(pg);
   // slide
@@ -1557,20 +1578,17 @@ function buildPark() {
   const ss = new THREE.Group(); ss.position.set(0, 0, 3.5); pg.add(ss);
   box(ss, 0.4, 0.5, 0.4, wood, 0, 0.35, 0);
   const plank = box(ss, 0.5, 0.12, 3.4, red, 0, 0.62, 0); plank.rotation.x = 0.12;
-
-  // --- extended playground: more to do! ---
-  const sand = new THREE.MeshStandardMaterial({ color: 0xead9a3, roughness: 1 });
-  const green = new THREE.MeshStandardMaterial({ color: 0x5fb35f, roughness: 0.7 });
   // sandbox
+  const sand = new THREE.MeshStandardMaterial({ color: 0xead9a3, roughness: 1 });
   const sb = new THREE.Group(); sb.position.set(-4.5, 0, 3.2); pg.add(sb);
   const sandTop = new THREE.Mesh(new THREE.CircleGeometry(1.5, 24), sand); sandTop.rotation.x = -Math.PI / 2; sandTop.position.y = 0.16; sb.add(sandTop);
   for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2; box(sb, 0.5, 0.32, 0.22, wood, Math.cos(a) * 1.5, 0.16, Math.sin(a) * 1.5).rotation.y = a; }
-  box(sb, 0.5, 0.4, 0.5, yellow, 0.2, 0.36, 0.2); // a little sandcastle bucket
+  box(sb, 0.5, 0.4, 0.5, yellow, 0.2, 0.36, 0.2); // sandcastle bucket
   // merry-go-round (spins in the render loop)
   const mg = new THREE.Group(); mg.position.set(-4.5, 0, -2.5); pg.add(mg);
   box(mg, 0.3, 0.6, 0.3, wood, 0, 0.3, 0);
   const disc = new THREE.Mesh(new THREE.CylinderGeometry(1.7, 1.7, 0.16, 24), blue); disc.position.y = 0.62; mg.add(disc);
-  for (let i = 0; i < 4; i++) { const a = (i / 4) * Math.PI * 2; const bar = box(mg, 0.08, 0.5, 1.7, red, 0, 0.95, 0); bar.position.set(Math.cos(a) * 0.0, 0.95, 0); bar.rotation.y = a; }
+  for (let i = 0; i < 4; i++) { const bar = box(mg, 0.08, 0.5, 1.7, red, 0, 0.95, 0); bar.rotation.y = (i / 4) * Math.PI * 2; }
   merryGoRound = mg;
   // monkey bars
   const mb = new THREE.Group(); mb.position.set(4.5, 0, -3.5); pg.add(mb);
@@ -1579,53 +1597,57 @@ function buildPark() {
   for (let i = -3; i <= 3; i++) box(mb, 0.12, 0.12, 2.9, yellow, i * 0.5, 2.0, 0);
   // spring rocker
   const sr = new THREE.Group(); sr.position.set(2, 0, 4.6); pg.add(sr);
-  box(sr, 0.3, 0.6, 0.3, yellow, 0, 0.3, 0);
-  box(sr, 1.4, 0.5, 0.5, red, 0, 0.8, 0);
-  box(sr, 0.4, 0.5, 0.2, wood, 0.7, 1.1, 0); // head
+  box(sr, 0.3, 0.6, 0.3, yellow, 0, 0.3, 0); box(sr, 1.4, 0.5, 0.5, red, 0, 0.8, 0); box(sr, 0.4, 0.5, 0.2, wood, 0.7, 1.1, 0);
+  // NEW: climbing cube (jungle gym)
+  const cc = new THREE.Group(); cc.position.set(-6.5, 0, -1); pg.add(cc);
+  for (const cx of [-1, 1]) for (const cz of [-1, 1]) box(cc, 0.12, 2, 0.12, blue, cx, 1, cz);
+  for (const cy of [1, 2]) { for (const cz of [-1, 1]) box(cc, 2.12, 0.12, 0.12, yellow, 0, cy, cz); for (const cx of [-1, 1]) box(cc, 0.12, 0.12, 2.12, yellow, cx, cy, 0); }
+  // NEW: balance beam
+  const bb = new THREE.Group(); bb.position.set(0.5, 0, -5); pg.add(bb);
+  box(bb, 0.3, 0.5, 0.3, wood, -1.6, 0.25, 0); box(bb, 0.3, 0.5, 0.3, wood, 1.6, 0.25, 0);
+  box(bb, 3.6, 0.18, 0.3, red, 0, 0.55, 0);
 
-  // lamp posts around the park so it glows at night
-  makeLampPost(PARK.x - 13, PARK.z + 9);
-  makeLampPost(PARK.x + 13, PARK.z - 9);
-  makeLampPost(PARK.x + 13, PARK.z + 10);
-  makeLampPost(PARK.x - 13, PARK.z - 10);
-  makeLampPost(PARK.x + 2, PARK.z + 13);
-
-  // --- duck pond (west side) ---
+  // ===== DUCK POND — south side of the park (tap the water to fish) =====
   const water = new THREE.MeshStandardMaterial({ color: 0x3aa0d6, roughness: 0.25, metalness: 0.2, transparent: true, opacity: 0.86 });
   const pondGrp = new THREE.Group(); pondGrp.position.set(POND.x, 0, POND.z); scene.add(pondGrp);
-  const surf = new THREE.Mesh(new THREE.CircleGeometry(3.6, 36), water); surf.rotation.x = -Math.PI / 2; surf.position.y = 0.12; pondGrp.add(surf);
+  const surf = new THREE.Mesh(new THREE.CircleGeometry(4.2, 40), water); surf.rotation.x = -Math.PI / 2; surf.position.y = 0.12; surf.userData.isPond = true; pondGrp.add(surf); pondSurface = surf;
   const rim = new THREE.MeshStandardMaterial({ color: 0x8d8473, roughness: 1 });
-  for (let i = 0; i < 22; i++) { const a = (i / 22) * Math.PI * 2; box(pondGrp, 0.45, 0.28, 0.3, rim, Math.cos(a) * 3.7, 0.1, Math.sin(a) * 3.7).rotation.y = a; }
+  for (let i = 0; i < 26; i++) { const a = (i / 26) * Math.PI * 2; box(pondGrp, 0.45, 0.28, 0.3, rim, Math.cos(a) * 4.3, 0.1, Math.sin(a) * 4.3).rotation.y = a; }
   const pad = new THREE.MeshStandardMaterial({ color: 0x4fae54, roughness: 0.8 });
-  for (const [px, pz] of [[-1.2, 0.6], [1.4, -0.8], [0.3, 1.5]]) { const lp = new THREE.Mesh(new THREE.CircleGeometry(0.55, 16), pad); lp.rotation.x = -Math.PI / 2; lp.position.set(px, 0.16, pz); pondGrp.add(lp); }
-  const pondSign = makeSign('POND'); pondSign.scale.setScalar(0.45); pondSign.position.set(POND.x, 2.2, POND.z - 4.4); scene.add(pondSign);
+  for (const [px, pz] of [[-1.5, 0.7], [1.7, -1], [0.4, 1.8]]) { const lp = new THREE.Mesh(new THREE.CircleGeometry(0.55, 16), pad); lp.rotation.x = -Math.PI / 2; lp.position.set(px, 0.16, pz); pondGrp.add(lp); }
+  const pondSign = makeSign('POND'); pondSign.scale.setScalar(0.45); pondSign.position.set(POND.x, 2.2, POND.z - 5); scene.add(pondSign);
 
-  // --- pet park (east side) — lots for dogs & cats to do ---
-  const dp = new THREE.Group(); dp.position.set(PARK.x + 8, 0, PARK.z + 2); scene.add(dp);
+  // ===== PET PARK — east side of the park, well away from the playground =====
+  const dp = new THREE.Group(); dp.position.set(PARK.x + 11, 0, PARK.z + 4); scene.add(dp);
   const fenceMat = new THREE.MeshStandardMaterial({ color: 0xcdb892, roughness: 0.9 });
-  const R = 5.2;
-  for (let i = 0; i < 22; i++) { const a = (i / 22) * Math.PI * 2; box(dp, 0.12, 0.9, 0.12, fenceMat, Math.cos(a) * R, 0.45, Math.sin(a) * R); }
-  // jump hoop
-  const hoop = new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.08, 8, 20), red);
-  hoop.position.set(0, 0.9, -1.5); dp.add(hoop);
-  // A-frame ramp
-  box(dp, 1.6, 0.12, 1.2, blue, 1.6, 0.5, 1.5, 0.5);
-  box(dp, 1.6, 0.12, 1.2, blue, 1.6, 0.5, 2.7, -0.5);
-  // tunnel
+  const R = 5.6;
+  for (let i = 0; i < 24; i++) { const a = (i / 24) * Math.PI * 2; box(dp, 0.12, 0.9, 0.12, fenceMat, Math.cos(a) * R, 0.45, Math.sin(a) * R); }
+  const hoop = new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.08, 8, 20), red); hoop.position.set(0, 0.9, -1.5); dp.add(hoop);
+  const hoop2 = new THREE.Mesh(new THREE.TorusGeometry(0.6, 0.08, 8, 20), blue); hoop2.position.set(-1.4, 0.8, -2.6); dp.add(hoop2); // NEW second hoop
+  box(dp, 1.6, 0.12, 1.2, blue, 1.6, 0.5, 1.5, 0.5); box(dp, 1.6, 0.12, 1.2, blue, 1.6, 0.5, 2.7, -0.5); // A-frame
   const tunnel = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 1.8, 16, 1, true), yellow);
   tunnel.rotation.z = Math.PI / 2; tunnel.position.set(-1.8, 0.7, 1.8); tunnel.material.side = THREE.DoubleSide; dp.add(tunnel);
-  // weave poles
-  for (let i = 0; i < 5; i++) box(dp, 0.1, 1.0, 0.1, red, -3 + i * 0.5, 0.5, -2.8);
-  // two hurdle jumps
-  for (const hx of [3, 3.9]) { box(dp, 0.1, 0.8, 0.1, wood, hx, 0.4, -1.6); box(dp, 0.1, 0.8, 0.1, wood, hx, 0.4, -0.6); box(dp, 0.12, 0.1, 1.1, yellow, hx, 0.7, -1.1); }
-  // tire jump (stand a torus up)
-  const tire = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.14, 10, 20), wood); tire.position.set(-3.2, 0.9, 1.2); dp.add(tire);
-  // cat climbing tower + scratching post
-  box(dp, 0.7, 0.7, 0.7, wood, 2.4, 0.35, -2.6);
-  box(dp, 0.55, 0.7, 0.55, red, 2.4, 1.05, -2.6);
-  box(dp, 0.9, 0.2, 0.9, blue, 2.4, 1.5, -2.6);
-  box(dp, 0.18, 1.2, 0.18, wood, -3.4, 0.6, -1.0);
-  const bone = makeSign('PET PARK'); bone.scale.setScalar(0.5); bone.position.set(PARK.x + 8, 2.6, PARK.z + 8); scene.add(bone);
+  for (let i = 0; i < 5; i++) box(dp, 0.1, 1.0, 0.1, red, -3 + i * 0.5, 0.5, -2.8); // weave poles
+  for (const hx of [3, 3.9]) { box(dp, 0.1, 0.8, 0.1, wood, hx, 0.4, -1.6); box(dp, 0.1, 0.8, 0.1, wood, hx, 0.4, -0.6); box(dp, 0.12, 0.1, 1.1, yellow, hx, 0.7, -1.1); } // hurdles
+  const tire = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.14, 10, 20), wood); tire.position.set(-3.6, 0.9, 0.5); dp.add(tire); // tire jump
+  box(dp, 0.7, 0.7, 0.7, wood, 3.2, 0.35, -2.8); box(dp, 0.55, 0.7, 0.55, red, 3.2, 1.05, -2.8); box(dp, 0.9, 0.2, 0.9, blue, 3.2, 1.5, -2.8); // cat tower
+  box(dp, 0.18, 1.2, 0.18, wood, -3.8, 0.6, -1.2); // scratching post
+  // NEW: dog-walk plank (raised bridge)
+  box(dp, 0.3, 0.6, 0.3, wood, -1, 0.3, 3.4); box(dp, 0.3, 0.6, 0.3, wood, 2, 0.3, 3.4); box(dp, 3.4, 0.16, 0.6, green, 0.5, 0.65, 3.4);
+  // NEW: ball pit
+  const bp = new THREE.Group(); bp.position.set(2.6, 0, 1.6); dp.add(bp);
+  for (let i = 0; i < 14; i++) { const a = (i / 14) * Math.PI * 2; box(bp, 0.3, 0.4, 0.2, fenceMat, Math.cos(a) * 1.1, 0.2, Math.sin(a) * 1.1).rotation.y = a; }
+  const ballCols = [red, blue, yellow, green];
+  for (let i = 0; i < 9; i++) { const b = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), ballCols[i % 4]); b.position.set((Math.random() - 0.5) * 1.4, 0.22, (Math.random() - 0.5) * 1.4); bp.add(b); }
+  const bone = makeSign('PET PARK'); bone.scale.setScalar(0.5); bone.position.set(PARK.x + 11, 2.6, PARK.z + 10); scene.add(bone);
+
+  // lamp posts spread around the bigger park so it all glows at night
+  makeLampPost(PARK.x - 10, PARK.z - 5);   // by the playground
+  makeLampPost(PARK.x - 16, PARK.z + 6);
+  makeLampPost(PARK.x + 11, PARK.z - 3);   // by the pet park
+  makeLampPost(PARK.x + 16, PARK.z + 9);
+  makeLampPost(PARK.x - 24, PARK.z - 18);  // by the pond
+  makeLampPost(PARK.x + 2, PARK.z + 16);
 }
 
 const NEIGHBORS = [
@@ -1656,6 +1678,7 @@ function buildNeighborhood() {
       x: PARK.x + (i - 1) * 4, z: PARK.z + (i - 1) * 3,
       roamCenter: PARK, roamInner: 2, roamRadius: 13, lines: n.lines, // roam the spacious park
     });
+    parent.userData.wander = true; parent.userData.angler = i === 2; // Bruno likes to fish
     spawnRoamer({ id: n.id + '_kid', name: n.name + ' Jr.', sprite: n.sprite, x: PARK.x, z: PARK.z, scale: 0.6, child: true, parent, lines: ['Wheee!', 'Tag, you\'re it!', 'Hehe!'] });
   });
   // a few more houses & families right beside Pip, Coco and Bruno
@@ -1673,6 +1696,7 @@ function buildNeighborhood() {
       x: center.x + (Math.random() * 4 - 2), z: center.z + (Math.random() * 4 - 2),
       roamCenter: center, roamInner: 0, roamRadius: atPond ? 2.6 : 13, lines: n.lines,
     });
+    if (!atPond) { parent.userData.wander = true; parent.userData.angler = n.id === 'pochi'; } // Quacky stays in the pond; Pochi fishes
     const kid = spawnRoamer({ id: n.id + '_kid', name: n.name + ' Jr.', sprite: n.sprite, x: center.x, z: center.z, scale: 0.6, child: true, parent, lines: ['Wheee!', 'Look at me!', 'Hehe!'] });
     if (atPond) { parent.userData.swimmer = true; kid.userData.swimmer = true; }
     spawnCritter({ sprite: n.pet, name: n.petName, lines: ['(purrs)', '(happy wag)', '(nuzzles you)'], scale: 0.5, parent });
@@ -1701,7 +1725,11 @@ const quests = [
   { id: 'coins', name: 'Collect 12 coins', target: 12, prog: 0, reward: 5, done: false },
   { id: 'trade', name: 'Trade with 3 friends', target: 3, prog: 0, reward: 5, done: false },
   { id: 'pet', name: 'Pet Daisy 3 times', target: 3, prog: 0, reward: 5, done: false },
-  { id: 'puzzle', name: 'Win the Memory game', target: 1, prog: 0, reward: 10, done: false, puzzle: true },
+  { id: 'fish', name: 'Catch 3 fish 🎣', target: 3, prog: 0, reward: 6, done: false },
+  { id: 'crop', name: 'Harvest 4 crops 🥕', target: 4, prog: 0, reward: 6, done: false },
+  { id: 'puzzle', name: 'Win the Memory game', target: 1, prog: 0, reward: 10, done: false, puzzle: true, game: 'memory' },
+  { id: 'merge', name: 'Win Fruit Merge', target: 1, prog: 0, reward: 10, done: false, puzzle: true, game: 'merge' },
+  { id: 'tetris', name: 'Clear 3 lines (Tetris)', target: 1, prog: 0, reward: 10, done: false, puzzle: true, game: 'tetris' },
 ];
 function questBump(id) {
   const q = quests.find((x) => x.id === id);
@@ -1720,6 +1748,8 @@ function completeQuest(q) {
 function onCoinCollected() { questBump('coins'); }
 function onTrade() { questBump('trade'); }
 function onPetDog() { questBump('pet'); }
+function onFishCaught() { questBump('fish'); }
+function onCropHarvested() { questBump('crop'); }
 function resetQuests() {
   for (const q of quests) { q.prog = 0; q.done = false; }
   if (sideQuest) { scene.remove(sideQuest.item); scene.remove(sideQuest.animal); sideQuest = null; }
@@ -1748,7 +1778,7 @@ function refreshQuests() {
     const lbl = document.createElement('span'); lbl.textContent = `${q.name}`;
     const right = document.createElement('span'); right.className = 'shop-price';
     if (q.done) right.textContent = '✓ done';
-    else if (q.puzzle) { const b = document.createElement('button'); b.className = 'shop-price'; b.style.cursor = 'pointer'; b.textContent = '▶ Play'; b.addEventListener('click', startPuzzle); right.appendChild(b); }
+    else if (q.puzzle) { const b = document.createElement('button'); b.className = 'shop-price'; b.style.cursor = 'pointer'; b.textContent = '▶ Play'; b.addEventListener('click', () => startMiniGame(q.game)); right.appendChild(b); }
     else right.textContent = `${q.prog}/${q.target}  +${q.reward}✨`;
     row.append(lbl, right);
     questListEl.appendChild(row);
@@ -1812,8 +1842,192 @@ function padClick(i) {
   if (puzzleInput[idx] !== puzzleSeq[idx]) { puzzleEl._msg.textContent = 'Oops! Try again 🙂'; puzzleLocked = true; setTimeout(startPuzzle, 900); return; }
   if (puzzleInput.length === puzzleSeq.length) {
     puzzleLocked = true; puzzleEl._msg.textContent = 'You did it! 🎉';
-    const q = quests.find((x) => x.id === 'puzzle'); if (q && !q.done) completeQuest(q);
+    winMiniGame('puzzle');
     setTimeout(() => { puzzleEl.style.display = 'none'; }, 1100);
+  }
+}
+
+// ---- Mini-game dispatch + shared helpers ----
+function startMiniGame(game) {
+  if (game === 'merge') startMerge();
+  else if (game === 'tetris') startTetris();
+  else startPuzzle();
+}
+function winMiniGame(questId) { const q = quests.find((x) => x.id === questId); if (q && !q.done) completeQuest(q); }
+function miniGameActive() {
+  return (puzzleEl && puzzleEl.style.display !== 'none')
+    || (mergeEl && mergeEl.style.display !== 'none')
+    || (tetEl && tetEl.style.display !== 'none');
+}
+
+// ---- Fruit Merge (slide to merge matching fruits, 2048-style) ----
+const MERGE_FRUITS = ['', '🍒', '🍓', '🍇', '🍊', '🍎', '🍉', '👑'];
+const MERGE_WIN = 6; // reach 🍉
+let mergeEl = null, mergeCells = [], mergeBoard = null, mergeMsg = null, mergeOver = true;
+function buildMerge() {
+  mergeEl = document.createElement('div'); mergeEl.id = 'merge'; mergeEl.className = 'gamemodal'; mergeEl.style.display = 'none';
+  const panel = document.createElement('div'); panel.className = 'puzzle-panel';
+  const h = document.createElement('h3'); h.textContent = '🍉 Fruit Merge';
+  mergeMsg = document.createElement('p'); mergeMsg.className = 'puzzle-msg'; mergeMsg.textContent = 'Slide to merge matching fruits — reach 🍉!';
+  const grid = document.createElement('div'); grid.className = 'merge-grid';
+  for (let i = 0; i < 16; i++) { const c = document.createElement('div'); c.className = 'merge-cell'; grid.appendChild(c); mergeCells.push(c); }
+  const pad = document.createElement('div'); pad.className = 'dpad';
+  const mk = (label, dir) => { const b = document.createElement('button'); b.className = 'dpad-btn'; b.textContent = label; b.addEventListener('click', () => mergeMove(dir)); return b; };
+  pad.append(mk('⬅️', 'left'), mk('⬆️', 'up'), mk('⬇️', 'down'), mk('➡️', 'right'));
+  const close = document.createElement('button'); close.className = 'puzzle-close'; close.textContent = 'Close'; close.addEventListener('click', () => { mergeOver = true; mergeEl.style.display = 'none'; });
+  panel.append(h, mergeMsg, grid, pad, close);
+  mergeEl.appendChild(panel); document.body.appendChild(mergeEl);
+}
+function startMerge() {
+  if (!mergeEl) buildMerge();
+  keys.clear();
+  mergeBoard = Array.from({ length: 4 }, () => [0, 0, 0, 0]);
+  mergeOver = false; mergeMsg.textContent = 'Slide to merge — reach 🍉!';
+  mergeAddRandom(); mergeAddRandom(); mergeRender();
+  mergeEl.style.display = 'flex';
+}
+function mergeAddRandom() {
+  const empty = [];
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) if (!mergeBoard[r][c]) empty.push([r, c]);
+  if (!empty.length) return;
+  const [r, c] = empty[Math.floor(Math.random() * empty.length)];
+  mergeBoard[r][c] = Math.random() < 0.85 ? 1 : 2;
+}
+function mergeRender() {
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) {
+    const v = mergeBoard[r][c]; const cell = mergeCells[r * 4 + c];
+    cell.textContent = v ? MERGE_FRUITS[v] : '';
+    cell.style.background = v ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.04)';
+  }
+}
+function mergeMove(dir) {
+  if (mergeOver) return;
+  const before = JSON.stringify(mergeBoard);
+  const get = (r, c) => dir === 'left' ? mergeBoard[r][c] : dir === 'right' ? mergeBoard[r][3 - c] : dir === 'up' ? mergeBoard[c][r] : mergeBoard[3 - c][r];
+  const set = (r, c, v) => { if (dir === 'left') mergeBoard[r][c] = v; else if (dir === 'right') mergeBoard[r][3 - c] = v; else if (dir === 'up') mergeBoard[c][r] = v; else mergeBoard[3 - c][r] = v; };
+  for (let r = 0; r < 4; r++) {
+    let arr = [get(r, 0), get(r, 1), get(r, 2), get(r, 3)].filter((v) => v);
+    for (let i = 0; i < arr.length - 1; i++) if (arr[i] === arr[i + 1]) { arr[i]++; arr.splice(i + 1, 1); }
+    while (arr.length < 4) arr.push(0);
+    for (let c = 0; c < 4; c++) set(r, c, arr[c]);
+  }
+  if (JSON.stringify(mergeBoard) === before) return; // nothing moved
+  let maxv = 0; for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) maxv = Math.max(maxv, mergeBoard[r][c]);
+  if (maxv >= MERGE_WIN) { mergeRender(); mergeMsg.textContent = 'You made a 🍉! 🎉'; mergeOver = true; winMiniGame('merge'); setTimeout(() => { mergeEl.style.display = 'none'; }, 1300); return; }
+  mergeAddRandom(); mergeRender();
+  if (!mergeCanMove()) { mergeMsg.textContent = 'No moves left — Close & retry'; mergeOver = true; }
+}
+function mergeCanMove() {
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) {
+    if (!mergeBoard[r][c]) return true;
+    if (c < 3 && mergeBoard[r][c] === mergeBoard[r][c + 1]) return true;
+    if (r < 3 && mergeBoard[r][c] === mergeBoard[r + 1][c]) return true;
+  }
+  return false;
+}
+
+// ---- Tetris (clear 3 lines to win) ----
+const TET_COLS = 10, TET_ROWS = 16, TET_CELL = 18;
+const TET_SHAPES = [[[1, 1, 1, 1]], [[1, 1], [1, 1]], [[0, 1, 0], [1, 1, 1]], [[1, 0, 0], [1, 1, 1]], [[0, 0, 1], [1, 1, 1]], [[0, 1, 1], [1, 1, 0]], [[1, 1, 0], [0, 1, 1]]];
+const TET_COLORS = ['#5ad1e0', '#f2d24a', '#b18cff', '#6aa6ff', '#e8881e', '#74e08c', '#ff5a5a'];
+let tetEl = null, tetCanvas = null, tetCtx = null, tetMsg = null, tetBoard = null, tetPiece = null, tetTimer = 0, tetLines = 0, tetOver = true;
+function buildTetris() {
+  tetEl = document.createElement('div'); tetEl.id = 'tetris'; tetEl.className = 'gamemodal'; tetEl.style.display = 'none';
+  const panel = document.createElement('div'); panel.className = 'puzzle-panel';
+  const h = document.createElement('h3'); h.textContent = '🟦 Tetris';
+  tetMsg = document.createElement('p'); tetMsg.className = 'puzzle-msg'; tetMsg.textContent = 'Clear 3 lines to win!';
+  tetCanvas = document.createElement('canvas'); tetCanvas.width = TET_COLS * TET_CELL; tetCanvas.height = TET_ROWS * TET_CELL; tetCanvas.className = 'tet-canvas'; tetCtx = tetCanvas.getContext('2d');
+  const pad = document.createElement('div'); pad.className = 'dpad';
+  const mk = (l, fn) => { const b = document.createElement('button'); b.className = 'dpad-btn'; b.textContent = l; b.addEventListener('click', fn); return b; };
+  pad.append(mk('⬅️', () => tetMove(-1, 0)), mk('🔄', tetRotate), mk('⬇️', () => tetMove(0, 1)), mk('➡️', () => tetMove(1, 0)));
+  const close = document.createElement('button'); close.className = 'puzzle-close'; close.textContent = 'Close'; close.addEventListener('click', closeTetris);
+  panel.append(h, tetMsg, tetCanvas, pad, close);
+  tetEl.appendChild(panel); document.body.appendChild(tetEl);
+}
+function startTetris() {
+  if (!tetEl) buildTetris();
+  keys.clear();
+  tetBoard = Array.from({ length: TET_ROWS }, () => new Array(TET_COLS).fill(-1));
+  tetLines = 0; tetOver = false; tetMsg.textContent = 'Clear 3 lines to win!';
+  tetSpawn(); tetDraw(); tetEl.style.display = 'flex';
+  clearInterval(tetTimer); tetTimer = setInterval(() => { if (!tetOver && !tetMove(0, 1)) tetLock(); }, 600);
+}
+function closeTetris() { tetOver = true; clearInterval(tetTimer); tetEl.style.display = 'none'; }
+function tetCollide(shape, px, py) {
+  for (let r = 0; r < shape.length; r++) for (let c = 0; c < shape[r].length; c++) {
+    if (!shape[r][c]) continue;
+    const x = px + c, y = py + r;
+    if (x < 0 || x >= TET_COLS || y >= TET_ROWS) return true;
+    if (y >= 0 && tetBoard[y][x] >= 0) return true;
+  }
+  return false;
+}
+function tetSpawn() {
+  const idx = Math.floor(Math.random() * TET_SHAPES.length);
+  const shape = TET_SHAPES[idx].map((row) => row.slice());
+  tetPiece = { shape, color: idx, x: Math.floor((TET_COLS - shape[0].length) / 2), y: 0 };
+  if (tetCollide(shape, tetPiece.x, tetPiece.y)) { tetOver = true; clearInterval(tetTimer); tetMsg.textContent = 'Topped out — Close & retry'; }
+}
+function tetMove(dx, dy) {
+  if (tetOver || !tetPiece) return false;
+  if (tetCollide(tetPiece.shape, tetPiece.x + dx, tetPiece.y + dy)) return false;
+  tetPiece.x += dx; tetPiece.y += dy; tetDraw(); return true;
+}
+function tetRotate() {
+  if (tetOver || !tetPiece) return;
+  const s = tetPiece.shape, rot = s[0].map((_, c) => s.map((row) => row[c]).reverse());
+  if (!tetCollide(rot, tetPiece.x, tetPiece.y)) { tetPiece.shape = rot; tetDraw(); }
+}
+function tetLock() {
+  const { shape, color, x, y } = tetPiece;
+  for (let r = 0; r < shape.length; r++) for (let c = 0; c < shape[r].length; c++) if (shape[r][c] && y + r >= 0) tetBoard[y + r][x + c] = color;
+  for (let r = TET_ROWS - 1; r >= 0; r--) if (tetBoard[r].every((v) => v >= 0)) { tetBoard.splice(r, 1); tetBoard.unshift(new Array(TET_COLS).fill(-1)); tetLines++; r++; }
+  if (tetLines > 0) tetMsg.textContent = `Lines: ${tetLines}/3`;
+  if (tetLines >= 3) { tetOver = true; clearInterval(tetTimer); tetMsg.textContent = '3 lines! 🎉'; winMiniGame('tetris'); setTimeout(closeTetris, 1300); return; }
+  tetSpawn(); tetDraw();
+}
+function tetDraw() {
+  const ctx = tetCtx; ctx.clearRect(0, 0, tetCanvas.width, tetCanvas.height);
+  ctx.fillStyle = 'rgba(255,255,255,0.05)'; ctx.fillRect(0, 0, tetCanvas.width, tetCanvas.height);
+  const cell = (x, y, col) => { ctx.fillStyle = col; ctx.fillRect(x * TET_CELL + 1, y * TET_CELL + 1, TET_CELL - 2, TET_CELL - 2); };
+  for (let r = 0; r < TET_ROWS; r++) for (let c = 0; c < TET_COLS; c++) if (tetBoard[r][c] >= 0) cell(c, r, TET_COLORS[tetBoard[r][c]]);
+  if (tetPiece) { const { shape, color, x, y } = tetPiece; for (let r = 0; r < shape.length; r++) for (let c = 0; c < shape[r].length; c++) if (shape[r][c] && y + r >= 0) cell(x + c, y + r, TET_COLORS[color]); }
+}
+// keyboard for the open mini-game (registered before the movement handler, so it wins)
+window.addEventListener('keydown', (e) => {
+  if (mergeEl && mergeEl.style.display !== 'none' && !mergeOver) {
+    const m = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
+    if (m[e.key]) { e.preventDefault(); mergeMove(m[e.key]); }
+  } else if (tetEl && tetEl.style.display !== 'none' && !tetOver) {
+    if (e.key === 'ArrowLeft') { e.preventDefault(); tetMove(-1, 0); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); tetMove(1, 0); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); tetMove(0, 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); tetRotate(); }
+  }
+});
+
+// ---- Fishing at the pond (players & roaming anglers) ----
+let fishing = null;
+const FISH = ['🐟', '🐠', '🐡', '🦀', '🦐'];
+function startFishing() {
+  if (fishing || !player) return;
+  if (Math.hypot(player.position.x - POND.x, player.position.z - POND.z) > 7.5) { questToast('Get closer to the pond to fish! 🎣'); return; }
+  const bobber = new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 8), new THREE.MeshStandardMaterial({ color: 0xff5a5a }));
+  const a = Math.random() * Math.PI * 2, r = Math.random() * 3;
+  bobber.position.set(POND.x + Math.cos(a) * r, 0.35, POND.z + Math.sin(a) * r);
+  scene.add(bobber);
+  fishing = { bobber, until: timer.getElapsed() + 2 + Math.random() * 3, base: bobber.position.y };
+  questToast('Casting… 🎣 wait for a bite!');
+}
+function updateFishing(t) {
+  if (!fishing) return;
+  fishing.bobber.position.y = fishing.base + Math.sin(t * 4) * 0.05;
+  if (t >= fishing.until) {
+    const fish = FISH[Math.floor(Math.random() * FISH.length)], coins = 2 + Math.floor(Math.random() * 2);
+    addCoins(coins); if (typeof onFishCaught === 'function') onFishCaught();
+    questToast(`Caught a ${fish}! +${coins} 🪙`);
+    if (typeof playDing === 'function') playDing();
+    scene.remove(fishing.bobber); fishing = null;
   }
 }
 
@@ -2704,6 +2918,7 @@ const MOVE_KEYS = {
 };
 
 window.addEventListener('keydown', (e) => {
+  if (typeof miniGameActive === 'function' && miniGameActive()) return; // let the open mini-game take the keys
   if (MOVE_KEYS[e.code]) { keys.add(MOVE_KEYS[e.code]); e.preventDefault(); }
   if (e.code === 'Space') { e.preventDefault(); throwBall(); } // throw the ball for the dog
 });
@@ -2875,6 +3090,7 @@ function tick() {
   updateTrades(t);
   updateSideQuests(t);
   updateGarden(t);
+  updateFishing(t);
   if (merryGoRound) merryGoRound.rotation.y += dt * 0.7; // roundabout slowly spins
 
   // Characters: wander around, face the camera (upright billboard), and bob/hop.
@@ -2890,6 +3106,16 @@ function tick() {
       const cid = b.userData.char && b.userData.char.id;
       const prevX = holder.position.x, prevZ = holder.position.z;
       const trading = w.tradeUntil && t < w.tradeUntil;
+      // anglers stop to fish when they wander up to the pond
+      if (w.angler && !w.child && (!w.fishUntil || t >= w.fishUntil)) {
+        const nearPond = Math.hypot(holder.position.x - POND.x, holder.position.z - POND.z) < 5.5;
+        if (nearPond && Math.random() < 0.012) {
+          w.fishUntil = t + 4 + Math.random() * 3;
+          if (!w.fishSprite) { w.fishSprite = makeEmojiSprite('🎣'); w.fishSprite.position.set(0, CHAR_HEIGHT * 0.95, 0); holder.add(w.fishSprite); }
+        }
+      }
+      const fishingNpc = w.angler && w.fishUntil && t < w.fishUntil;
+      if (w.fishSprite) w.fishSprite.visible = !!fishingNpc;
       if (w.child && w.parent) {
         if (w.sliding) {
           // whee! slide down the slide
@@ -2917,6 +3143,8 @@ function tick() {
         }
       } else if (trading) {
         w.moving = false; // pause to trade goods
+      } else if (fishingNpc) {
+        w.moving = false; // pause to fish at the pond
       } else if (isNight && SLEEPERS.has(cid) && homeById[cid]) {
         // at night, half the characters head home to sleep
         const home = homeById[cid];
