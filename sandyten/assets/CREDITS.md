@@ -14,6 +14,9 @@
 - **Doctor** (`characters/doctor.png`) — a friendly doctor critter inside the HOSPITAL, same style + workflow.
 - **Pet dog** (`characters/dog.png`) — a puppy that follows the player, same style + workflow.
 - **Neighbors** (`characters/pip.png`, `coco.png`, `bruno.png`) — a bunny, kitten and bear who live by the park, same style + workflow.
+- **New families** (`characters/frog.png`, `duck.png`, `panda.png`) — Fern, Quacky & Pochi, who live right next to the first neighbors, same style + workflow.
+- **Forest animals** (`characters/fox.png`, `deer.png`, `squirrel.png`, `hedgehog.png`) — critters who roam the forest and ask for help finding lost things, same style + workflow.
+- **Park cats** (`characters/cat.png`) — friendly cats and neighbor pets that roam the park, same style + workflow.
 - **Accessories** (`accessories/*.png`: crown, hat, glasses, bow) — wearable
   dressing-room items, generated in the same style and background-removed to
   256×256 transparent PNGs.
