@@ -219,9 +219,9 @@ function makeLampPost(x, z) {
   g.position.set(x, 0, z); scene.add(g);
   lampPosts.push({ x, z, orbMat });
 }
-const LAMP_POOL_SIZE = 6;
+const LAMP_POOL_SIZE = 8;
 const lampLightPool = [];
-for (let i = 0; i < LAMP_POOL_SIZE; i++) { const l = new THREE.PointLight(0xffcf7a, 0, 13, 2); scene.add(l); lampLightPool.push(l); }
+for (let i = 0; i < LAMP_POOL_SIZE; i++) { const l = new THREE.PointLight(0xffe0a0, 0, 20, 1.7); scene.add(l); lampLightPool.push(l); }
 for (let i = 0; i < 6; i++) {
   const a = (i / 6) * Math.PI * 2 + 0.4;
   makeLampPost(Math.cos(a) * 9.5, Math.sin(a) * 9.5);
@@ -278,6 +278,35 @@ function pickRoamTarget(holder) {
   const a = Math.random() * Math.PI * 2;
   const r = inner + Math.random() * (outer - inner);
   w.target.set(cx + Math.cos(a) * r, 0, cz + Math.sin(a) * r);
+}
+
+// When a kid/pet/cat is near its play area, it runs between the activities and
+// plays on each one (the slide triggers an actual slide-down). Returns true
+// while the entity is busy playing, so the normal roam/trail logic is skipped.
+function playAtStations(holder, w, t, dt) {
+  if (!w.playArea) return false;
+  const center = w.playArea === 'playground' ? PLAYGROUND : PETPARK;
+  const stations = w.playArea === 'playground' ? PLAY_STATIONS : PET_STATIONS;
+  if (!stations || !stations.length) return false;
+  if (Math.hypot(holder.position.x - center.x, holder.position.z - center.z) > 11) { w.station = null; w.stationArrive = 0; return false; }
+  if (!w.station || (!w.stationArrive && t > w.stationGiveUp)) { // (re)pick, giving up on any spot we can't reach
+    w.station = stations[Math.floor(Math.random() * stations.length)]; w.stationArrive = 0; w.stationGiveUp = t + 5;
+  }
+  const st = w.station;
+  const dx = st.x - holder.position.x, dz = st.z - holder.position.z, d = Math.hypot(dx, dz);
+  if (w.stationArrive) { // playing at the station
+    w.moving = false; w.playing = true;
+    if (t > w.stationArrive) { w.station = null; w.stationArrive = 0; } // move on to the next activity
+    return true;
+  }
+  if (st.slide && d < 1.2 && (!w.slideCooldown || t > w.slideCooldown)) { // wheee, slide down!
+    holder.position.set(SLIDE_TOP.x, SLIDE_TOP.y, SLIDE_TOP.z);
+    w.sliding = { t0: t, dur: 1.1, from: SLIDE_TOP.clone() };
+    w.station = null; w.stationArrive = 0; return true;
+  }
+  if (d > 0.6) { w.moving = true; const step = Math.min(w.speed * 1.5 * dt, d); holder.position.x += dx / d * step; holder.position.z += dz / d * step; }
+  else { w.stationArrive = t + 1.8 + Math.random() * 2.2; w.moving = false; w.playing = true; } // arrived → play
+  return true;
 }
 
 // Characters carry a "good" they're trading, and swap when two of them meet.
@@ -530,7 +559,7 @@ fetch('./assets/characters/characters.json')
 // Choose-your-character + play as them (walk around, camera follows).
 // ---------------------------------------------------------------------------
 const PLAYER_SPEED = 7;     // how fast you walk as your character
-const PLAY_RADIUS = 54;     // how far you can wander (out to the bigger park & neighborhood)
+const PLAY_RADIUS = 58;     // how far you can wander (out to the bigger park & neighborhood)
 let pickerEl = null;
 let playerCharId = null;
 let pickerReadyAt = 0; // clicks before this time (during fade-in) are ignored
@@ -596,7 +625,7 @@ function saveGame() {
         outfits[id] = { worn, colors: { ...mesh.userData.itemColors } };
       }
     }
-    localStorage.setItem(SAVE_KEY, JSON.stringify({ coins, level, levelStars, itemOwned, owned, playerId: playerCharId, outfits, questState: (typeof getQuestSave === 'function' ? getQuestSave() : null) }));
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ coins, level, levelStars, bagCount, bagValue, itemOwned, owned, playerId: playerCharId, outfits, questState: (typeof getQuestSave === 'function' ? getQuestSave() : null) }));
   } catch (e) { /* storage unavailable */ }
 }
 function hasSave() { try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; } }
@@ -607,6 +636,7 @@ function loadGame() {
   if (!s) return null;
   suppressSave = true;
   coins = s.coins ?? coins; level = s.level ?? 1; levelStars = s.levelStars ?? 0;
+  bagCount = s.bagCount ?? 0; bagValue = s.bagValue ?? 0; if (typeof refreshSell === 'function') refreshSell();
   if (typeof setQuestSave === 'function' && s.questState) setQuestSave(s.questState);
   Object.assign(itemOwned, s.itemOwned || {});
   Object.assign(owned, s.owned || {});
@@ -639,7 +669,8 @@ function buildStartMenu() {
   newBtn.addEventListener('click', () => {
     if (performance.now() < startReadyAt) return;
     clearSave();
-    coins = 20; level = 1; levelStars = 0; renderCoins(); renderLevel();
+    coins = 20; level = 1; levelStars = 0; bagCount = 0; bagValue = 0; renderCoins(); renderLevel();
+    if (typeof refreshSell === 'function') refreshSell();
     if (typeof resetQuests === 'function') resetQuests();
     hideStartMenu(); showPicker();
   });
@@ -857,6 +888,17 @@ for (let i = 0; i < STAR_COUNT; i++) spawnStar();
 // Coins = money (collected in the world, spent at the shop / dressing room).
 // Stars = experience from quests; each level needs more (5, 10, 15, 20, …).
 let coins = 20, level = 1, levelStars = 0;
+let bagCount = 0, bagValue = 0; // crops & fish you've gathered, waiting to be sold at THE STORE
+function addProduce(value) { bagCount += 1; bagValue += value; if (typeof refreshSell === 'function') refreshSell(); }
+function sellProduce() {
+  if (bagCount <= 0) return 0;
+  const c = bagValue, s = Math.max(1, Math.floor(bagCount / 2)); // coins + stars (helps you level up!)
+  addCoins(c); addStars(s);
+  bagCount = 0; bagValue = 0;
+  if (typeof refreshSell === 'function') refreshSell();
+  if (typeof saveGame === 'function') saveGame();
+  return c;
+}
 const coinsEl = document.getElementById('coins');
 const levelEl = document.getElementById('level');
 const starsToNext = () => level * 5; // +5 every level
@@ -1376,9 +1418,12 @@ function updateDoghouse(dt) {
 // Neighborhood + Park: extra families that roam the park with their kids.
 // ---------------------------------------------------------------------------
 const PARK = { x: -30, z: -8 };
-const POND = { x: -28, z: -20 }; // duck pond on the south side of the bigger park
+const POND = { x: -45, z: -12 };    // duck pond on the far WEST side of the park
+const PETPARK = { x: -36, z: -21 }; // pet park on the SOUTH-WEST — clear of the town route & houses
 let merryGoRound = null; // the spinning park roundabout
 let pondSurface = null;  // the pond water mesh (tap it to fish)
+const PLAY_STATIONS = []; // playground activity spots (kids run between them to play)
+const PET_STATIONS = [];  // pet-park activity spots (cats & dogs play here)
 const SLIDE_TOP = new THREE.Vector3();
 const SLIDE_BOT = new THREE.Vector3();
 const PLAYGROUND = new THREE.Vector3();
@@ -1524,8 +1569,8 @@ function handleGardenClick(mesh) {
     rec.crop = CROPS[Math.floor(Math.random() * CROPS.length)];
     renderPlant(rec); if (typeof questToast === 'function') questToast(`Planted ${rec.crop.emoji} ${rec.crop.name}! 🌱 Come back soon…`);
   } else if (rec.stage >= 3) {
-    addCoins(rec.crop.coins); if (typeof onCropHarvested === 'function') onCropHarvested();
-    if (typeof questToast === 'function') questToast(`Harvested ${rec.crop.emoji} ${rec.crop.name}! +${rec.crop.coins} 🪙`);
+    addProduce(rec.crop.coins); if (typeof onCropHarvested === 'function') onCropHarvested();
+    if (typeof questToast === 'function') questToast(`Picked ${rec.crop.emoji} ${rec.crop.name}! Sell it at 🏪 THE STORE`);
     rec.stage = 0; rec.plantedAt = 0; renderPlant(rec);
     if (typeof playDing === 'function') playDing();
   } else if (typeof questToast === 'function') {
@@ -1544,10 +1589,10 @@ function updateGarden(t) {
 
 function buildPark() {
   const grassMat = new THREE.MeshStandardMaterial({ color: 0x77b85a, roughness: 1 });
-  const grass = new THREE.Mesh(new THREE.CircleGeometry(23, 56), grassMat); // bigger so everything fits with room to spare
+  const grass = new THREE.Mesh(new THREE.CircleGeometry(26, 56), grassMat); // bigger so everything fits with room to spare
   grass.rotation.x = -Math.PI / 2; grass.position.set(PARK.x, 0.04, PARK.z); grass.receiveShadow = true; scene.add(grass);
-  noTreeZones.push({ x: PARK.x, z: PARK.z, r: 24 });
-  const sign = makeSign('PARK'); sign.scale.setScalar(0.8); sign.position.set(PARK.x, 3.8, PARK.z + 20);
+  noTreeZones.push({ x: PARK.x, z: PARK.z, r: 27 });
+  const sign = makeSign('PARK'); sign.scale.setScalar(0.8); sign.position.set(PARK.x + 18, 3.8, PARK.z); // east edge, by the entrance
 
   const red = new THREE.MeshStandardMaterial({ color: 0xd64a4a, roughness: 0.6 });
   const blue = new THREE.MeshStandardMaterial({ color: 0x4a8cd6, roughness: 0.6 });
@@ -1558,10 +1603,11 @@ function buildPark() {
   const box = (g, w, h, d, mat, x, y, z, rx = 0) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.rotation.x = rx; g.add(m); return m; };
   scene.add(sign);
 
-  // ===== PLAYGROUND — west side of the park =====
-  const pgPos = new THREE.Vector3(PARK.x - 10, 0, PARK.z + 2);
+  // ===== PLAYGROUND — west-centre of the park (clear of the houses & town path) =====
+  const pgPos = new THREE.Vector3(PARK.x - 4, 0, PARK.z + 2);
   PLAYGROUND.copy(pgPos);
   const pg = new THREE.Group(); pg.position.copy(pgPos); scene.add(pg);
+  const station = (arr, lx, lz, extra) => arr.push(Object.assign({ x: pgPos.x + lx, z: pgPos.z + lz }, extra)); // record a play spot
   // slide
   box(pg, 1.2, 0.12, 1.2, yellow, -1, 2.2, 0);                 // top platform
   box(pg, 0.18, 2.2, 0.18, red, -1.5, 1.1, 0.45);
@@ -1606,6 +1652,16 @@ function buildPark() {
   const bb = new THREE.Group(); bb.position.set(0.5, 0, -5); pg.add(bb);
   box(bb, 0.3, 0.5, 0.3, wood, -1.6, 0.25, 0); box(bb, 0.3, 0.5, 0.3, wood, 1.6, 0.25, 0);
   box(bb, 3.6, 0.18, 0.3, red, 0, 0.55, 0);
+  // record every activity so the kids can run between them and play on each
+  station(PLAY_STATIONS, -1.5, 1.6, { slide: true }); // foot of the slide
+  station(PLAY_STATIONS, 3.4, 0.8);   // swings
+  station(PLAY_STATIONS, 0, 4.8);     // see-saw
+  station(PLAY_STATIONS, -4.5, 4.5);  // sandbox
+  station(PLAY_STATIONS, -4.5, -2.5); // merry-go-round
+  station(PLAY_STATIONS, 4.5, -3.5);  // monkey bars
+  station(PLAY_STATIONS, 2, 5.6);     // spring rocker
+  station(PLAY_STATIONS, -6.5, -1);   // climbing cube
+  station(PLAY_STATIONS, 0.5, -5.8);  // balance beam
 
   // ===== DUCK POND — south side of the park (tap the water to fish) =====
   const water = new THREE.MeshStandardMaterial({ color: 0x3aa0d6, roughness: 0.25, metalness: 0.2, transparent: true, opacity: 0.86 });
@@ -1617,8 +1673,9 @@ function buildPark() {
   for (const [px, pz] of [[-1.5, 0.7], [1.7, -1], [0.4, 1.8]]) { const lp = new THREE.Mesh(new THREE.CircleGeometry(0.55, 16), pad); lp.rotation.x = -Math.PI / 2; lp.position.set(px, 0.16, pz); pondGrp.add(lp); }
   const pondSign = makeSign('POND'); pondSign.scale.setScalar(0.45); pondSign.position.set(POND.x, 2.2, POND.z - 5); scene.add(pondSign);
 
-  // ===== PET PARK — east side of the park, well away from the playground =====
-  const dp = new THREE.Group(); dp.position.set(PARK.x + 11, 0, PARK.z + 4); scene.add(dp);
+  // ===== PET PARK — south side of the park, off the path to town =====
+  const dp = new THREE.Group(); dp.position.set(PETPARK.x, 0, PETPARK.z); scene.add(dp);
+  const petStation = (lx, lz) => PET_STATIONS.push({ x: PETPARK.x + lx, z: PETPARK.z + lz });
   const fenceMat = new THREE.MeshStandardMaterial({ color: 0xcdb892, roughness: 0.9 });
   const R = 5.6;
   for (let i = 0; i < 24; i++) { const a = (i / 24) * Math.PI * 2; box(dp, 0.12, 0.9, 0.12, fenceMat, Math.cos(a) * R, 0.45, Math.sin(a) * R); }
@@ -1639,15 +1696,18 @@ function buildPark() {
   for (let i = 0; i < 14; i++) { const a = (i / 14) * Math.PI * 2; box(bp, 0.3, 0.4, 0.2, fenceMat, Math.cos(a) * 1.1, 0.2, Math.sin(a) * 1.1).rotation.y = a; }
   const ballCols = [red, blue, yellow, green];
   for (let i = 0; i < 9; i++) { const b = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), ballCols[i % 4]); b.position.set((Math.random() - 0.5) * 1.4, 0.22, (Math.random() - 0.5) * 1.4); bp.add(b); }
-  const bone = makeSign('PET PARK'); bone.scale.setScalar(0.5); bone.position.set(PARK.x + 11, 2.6, PARK.z + 10); scene.add(bone);
+  const bone = makeSign('PET PARK'); bone.scale.setScalar(0.5); bone.position.set(PETPARK.x, 2.6, PETPARK.z - 7); scene.add(bone);
+  // record pet-park activities so cats & dogs run between them and play on each
+  petStation(0, -1.5); petStation(-1.4, -2.6); petStation(1.6, 2);  // hoops, A-frame
+  petStation(-1.8, 1.8); petStation(-1, -2.8); petStation(3.4, -1.1); // tunnel, weave, hurdles
+  petStation(-3.6, 0.5); petStation(3.2, -2.8); petStation(0.5, 3.4); petStation(2.6, 1.6); // tire, tower, dog-walk, ball pit
 
   // lamp posts spread around the bigger park so it all glows at night
-  makeLampPost(PARK.x - 10, PARK.z - 5);   // by the playground
-  makeLampPost(PARK.x - 16, PARK.z + 6);
-  makeLampPost(PARK.x + 11, PARK.z - 3);   // by the pet park
-  makeLampPost(PARK.x + 16, PARK.z + 9);
-  makeLampPost(PARK.x - 24, PARK.z - 18);  // by the pond
-  makeLampPost(PARK.x + 2, PARK.z + 16);
+  makeLampPost(PLAYGROUND.x + 6, PLAYGROUND.z - 6); makeLampPost(PLAYGROUND.x - 6, PLAYGROUND.z + 4); // by the playground
+  makeLampPost(PETPARK.x + 7, PETPARK.z + 3); makeLampPost(PETPARK.x - 7, PETPARK.z - 3);             // by the pet park
+  makeLampPost(POND.x + 6, POND.z + 4); makeLampPost(POND.x - 5, POND.z - 4);                          // by the pond
+  makeLampPost(PARK.x + 14, PARK.z);       // by the east entrance
+  makeLampPost(PARK.x, PARK.z);            // park centre
 }
 
 const NEIGHBORS = [
@@ -1679,7 +1739,7 @@ function buildNeighborhood() {
       roamCenter: PARK, roamInner: 2, roamRadius: 13, lines: n.lines, // roam the spacious park
     });
     parent.userData.wander = true; parent.userData.angler = i === 2; // Bruno likes to fish
-    spawnRoamer({ id: n.id + '_kid', name: n.name + ' Jr.', sprite: n.sprite, x: PARK.x, z: PARK.z, scale: 0.6, child: true, parent, lines: ['Wheee!', 'Tag, you\'re it!', 'Hehe!'] });
+    spawnRoamer({ id: n.id + '_kid', name: n.name + ' Jr.', sprite: n.sprite, x: PARK.x, z: PARK.z, scale: 0.6, child: true, parent, lines: ['Wheee!', 'Tag, you\'re it!', 'Hehe!'] }).userData.playArea = 'playground';
   });
   // a few more houses & families right beside Pip, Coco and Bruno
   const R3 = 31;
@@ -1698,12 +1758,13 @@ function buildNeighborhood() {
     });
     if (!atPond) { parent.userData.wander = true; parent.userData.angler = n.id === 'pochi'; } // Quacky stays in the pond; Pochi fishes
     const kid = spawnRoamer({ id: n.id + '_kid', name: n.name + ' Jr.', sprite: n.sprite, x: center.x, z: center.z, scale: 0.6, child: true, parent, lines: ['Wheee!', 'Look at me!', 'Hehe!'] });
-    if (atPond) { parent.userData.swimmer = true; kid.userData.swimmer = true; }
-    spawnCritter({ sprite: n.pet, name: n.petName, lines: ['(purrs)', '(happy wag)', '(nuzzles you)'], scale: 0.5, parent });
+    kid.userData.playArea = 'playground';
+    if (atPond) { parent.userData.swimmer = true; kid.userData.swimmer = true; kid.userData.playArea = null; } // pond kids paddle, not playground
+    spawnCritter({ sprite: n.pet, name: n.petName, lines: ['(purrs)', '(happy wag)', '(nuzzles you)'], scale: 0.5, parent }).userData.playArea = 'petpark';
   });
   // a couple of friendly cats roaming the park
-  spawnCritter({ sprite: 'cat.png', name: 'Tabby', lines: ['Meow!', 'Purr~', '*chases a leaf*'], scale: 0.5, center: PARK, radius: 12 });
-  spawnCritter({ sprite: 'cat.png', name: 'Patches', lines: ['Mrow?', '*pounces*', 'Purrrr'], scale: 0.5, center: PARK, radius: 12 });
+  spawnCritter({ sprite: 'cat.png', name: 'Tabby', lines: ['Meow!', 'Purr~', '*chases a leaf*'], scale: 0.5, center: PARK, radius: 14 }).userData.playArea = 'petpark';
+  spawnCritter({ sprite: 'cat.png', name: 'Patches', lines: ['Mrow?', '*pounces*', 'Purrrr'], scale: 0.5, center: PARK, radius: 14 }).userData.playArea = 'petpark';
 }
 
 // ---------------------------------------------------------------------------
@@ -1730,6 +1791,8 @@ const quests = [
   { id: 'puzzle', name: 'Win the Memory game', target: 1, prog: 0, reward: 10, done: false, puzzle: true, game: 'memory' },
   { id: 'merge', name: 'Win Fruit Merge', target: 1, prog: 0, reward: 10, done: false, puzzle: true, game: 'merge' },
   { id: 'tetris', name: 'Clear 3 lines (Tetris)', target: 1, prog: 0, reward: 10, done: false, puzzle: true, game: 'tetris' },
+  { id: 'match', name: 'Win Match Pairs', target: 1, prog: 0, reward: 8, done: false, puzzle: true, game: 'match' },
+  { id: 'snake', name: 'Score 5 in Snake', target: 1, prog: 0, reward: 10, done: false, puzzle: true, game: 'snake' },
 ];
 function questBump(id) {
   const q = quests.find((x) => x.id === id);
@@ -1851,13 +1914,17 @@ function padClick(i) {
 function startMiniGame(game) {
   if (game === 'merge') startMerge();
   else if (game === 'tetris') startTetris();
+  else if (game === 'match') startMatch();
+  else if (game === 'snake') startSnake();
   else startPuzzle();
 }
 function winMiniGame(questId) { const q = quests.find((x) => x.id === questId); if (q && !q.done) completeQuest(q); }
 function miniGameActive() {
   return (puzzleEl && puzzleEl.style.display !== 'none')
     || (mergeEl && mergeEl.style.display !== 'none')
-    || (tetEl && tetEl.style.display !== 'none');
+    || (tetEl && tetEl.style.display !== 'none')
+    || (matchEl && matchEl.style.display !== 'none')
+    || (snakeEl && snakeEl.style.display !== 'none');
 }
 
 // ---- Fruit Merge (slide to merge matching fruits, 2048-style) ----
@@ -2003,8 +2070,110 @@ window.addEventListener('keydown', (e) => {
     else if (e.key === 'ArrowRight') { e.preventDefault(); tetMove(1, 0); }
     else if (e.key === 'ArrowDown') { e.preventDefault(); tetMove(0, 1); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); tetRotate(); }
+  } else if (snakeEl && snakeEl.style.display !== 'none' && !snakeOver) {
+    const d = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
+    if (d[e.key]) { e.preventDefault(); snakeTurn(d[e.key]); }
   }
 });
+
+// ---- Match Pairs (flip cards to find matching pairs) ----
+const MATCH_EMOJI = ['🍎', '🐶', '⭐', '🌸', '🎈', '🐱'];
+let matchEl = null, matchGrid = null, matchMsg = null, matchCards = [], matchUp = [], matchLock = false, matchDone = 0;
+function buildMatch() {
+  matchEl = document.createElement('div'); matchEl.id = 'match'; matchEl.className = 'gamemodal'; matchEl.style.display = 'none';
+  const panel = document.createElement('div'); panel.className = 'puzzle-panel';
+  const h = document.createElement('h3'); h.textContent = '🃏 Match Pairs';
+  matchMsg = document.createElement('p'); matchMsg.className = 'puzzle-msg'; matchMsg.textContent = 'Find all the matching pairs!';
+  matchGrid = document.createElement('div'); matchGrid.className = 'match-grid';
+  const close = document.createElement('button'); close.className = 'puzzle-close'; close.textContent = 'Close'; close.addEventListener('click', () => { matchEl.style.display = 'none'; });
+  panel.append(h, matchMsg, matchGrid, close);
+  matchEl.appendChild(panel); document.body.appendChild(matchEl);
+}
+function startMatch() {
+  if (!matchEl) buildMatch();
+  const deck = [...MATCH_EMOJI, ...MATCH_EMOJI].sort(() => Math.random() - 0.5);
+  matchGrid.replaceChildren(); matchCards = []; matchUp = []; matchLock = false; matchDone = 0;
+  matchMsg.textContent = 'Find all the matching pairs!';
+  deck.forEach((emoji, i) => {
+    const card = document.createElement('button'); card.className = 'match-card'; card.textContent = '?';
+    card.addEventListener('click', () => matchFlip(i));
+    matchGrid.appendChild(card); matchCards.push({ card, emoji, up: false, done: false });
+  });
+  matchEl.style.display = 'flex';
+}
+function matchFlip(i) {
+  const c = matchCards[i];
+  if (matchLock || c.up || c.done) return;
+  c.up = true; c.card.textContent = c.emoji; c.card.classList.add('up'); matchUp.push(i);
+  if (matchUp.length === 2) {
+    matchLock = true;
+    const [a, b] = matchUp;
+    if (matchCards[a].emoji === matchCards[b].emoji) {
+      matchCards[a].done = matchCards[b].done = true; matchDone++;
+      matchUp = []; matchLock = false;
+      if (matchDone === MATCH_EMOJI.length) { matchMsg.textContent = 'All matched! 🎉'; winMiniGame('match'); setTimeout(() => { matchEl.style.display = 'none'; }, 1200); }
+    } else {
+      setTimeout(() => {
+        for (const k of matchUp) { matchCards[k].up = false; matchCards[k].card.textContent = '?'; matchCards[k].card.classList.remove('up'); }
+        matchUp = []; matchLock = false;
+      }, 750);
+    }
+  }
+}
+
+// ---- Snake (eat 5 apples to win) ----
+const SNK_N = 13, SNK_CELL = 18;
+let snakeEl = null, snakeCanvas = null, snakeCtx = null, snakeMsg = null, snakeBody = null, snakeDir = null, snakeNext = null, snakeFood = null, snakeScore = 0, snakeTimer = 0, snakeOver = true;
+function buildSnake() {
+  snakeEl = document.createElement('div'); snakeEl.id = 'snake'; snakeEl.className = 'gamemodal'; snakeEl.style.display = 'none';
+  const panel = document.createElement('div'); panel.className = 'puzzle-panel';
+  const h = document.createElement('h3'); h.textContent = '🐍 Snake';
+  snakeMsg = document.createElement('p'); snakeMsg.className = 'puzzle-msg'; snakeMsg.textContent = 'Eat 5 apples 🍎 to win!';
+  snakeCanvas = document.createElement('canvas'); snakeCanvas.width = SNK_N * SNK_CELL; snakeCanvas.height = SNK_N * SNK_CELL; snakeCanvas.className = 'tet-canvas'; snakeCtx = snakeCanvas.getContext('2d');
+  const pad = document.createElement('div'); pad.className = 'dpad';
+  const mk = (l, dx, dy) => { const b = document.createElement('button'); b.className = 'dpad-btn'; b.textContent = l; b.addEventListener('click', () => snakeTurn([dx, dy])); return b; };
+  pad.append(mk('⬅️', -1, 0), mk('⬆️', 0, -1), mk('⬇️', 0, 1), mk('➡️', 1, 0));
+  const close = document.createElement('button'); close.className = 'puzzle-close'; close.textContent = 'Close'; close.addEventListener('click', closeSnake);
+  panel.append(h, snakeMsg, snakeCanvas, pad, close);
+  snakeEl.appendChild(panel); document.body.appendChild(snakeEl);
+}
+function startSnake() {
+  if (!snakeEl) buildSnake();
+  keys.clear();
+  snakeBody = [[6, 6], [5, 6], [4, 6]]; snakeDir = [1, 0]; snakeNext = [1, 0]; snakeScore = 0; snakeOver = false;
+  snakeMsg.textContent = 'Eat 5 apples 🍎 to win!';
+  snakePlaceFood(); snakeDraw();
+  snakeEl.style.display = 'flex';
+  clearInterval(snakeTimer); snakeTimer = setInterval(snakeStep, 220);
+}
+function closeSnake() { snakeOver = true; clearInterval(snakeTimer); snakeEl.style.display = 'none'; }
+function snakeTurn(d) { if (d[0] === -snakeDir[0] && d[1] === -snakeDir[1]) return; snakeNext = d; } // no reversing
+function snakePlaceFood() {
+  do { snakeFood = [Math.floor(Math.random() * SNK_N), Math.floor(Math.random() * SNK_N)]; }
+  while (snakeBody.some(([x, y]) => x === snakeFood[0] && y === snakeFood[1]));
+}
+function snakeStep() {
+  if (snakeOver) return;
+  snakeDir = snakeNext;
+  const head = [snakeBody[0][0] + snakeDir[0], snakeBody[0][1] + snakeDir[1]];
+  if (head[0] < 0 || head[1] < 0 || head[0] >= SNK_N || head[1] >= SNK_N || snakeBody.some(([x, y]) => x === head[0] && y === head[1])) {
+    snakeOver = true; clearInterval(snakeTimer); snakeMsg.textContent = 'Oops! Close & retry'; return;
+  }
+  snakeBody.unshift(head);
+  if (head[0] === snakeFood[0] && head[1] === snakeFood[1]) {
+    snakeScore++; snakeMsg.textContent = `Apples: ${snakeScore}/5`;
+    if (snakeScore >= 5) { snakeOver = true; clearInterval(snakeTimer); snakeMsg.textContent = '5 apples! 🎉'; winMiniGame('snake'); setTimeout(closeSnake, 1300); return; }
+    snakePlaceFood();
+  } else { snakeBody.pop(); }
+  snakeDraw();
+}
+function snakeDraw() {
+  const ctx = snakeCtx; ctx.clearRect(0, 0, snakeCanvas.width, snakeCanvas.height);
+  ctx.fillStyle = 'rgba(255,255,255,0.05)'; ctx.fillRect(0, 0, snakeCanvas.width, snakeCanvas.height);
+  ctx.font = `${SNK_CELL - 2}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('🍎', snakeFood[0] * SNK_CELL + SNK_CELL / 2, snakeFood[1] * SNK_CELL + SNK_CELL / 2);
+  snakeBody.forEach(([x, y], i) => { ctx.fillStyle = i === 0 ? '#74e08c' : '#4faf54'; ctx.fillRect(x * SNK_CELL + 1, y * SNK_CELL + 1, SNK_CELL - 2, SNK_CELL - 2); });
+}
 
 // ---- Fishing at the pond (players & roaming anglers) ----
 let fishing = null;
@@ -2023,9 +2192,9 @@ function updateFishing(t) {
   if (!fishing) return;
   fishing.bobber.position.y = fishing.base + Math.sin(t * 4) * 0.05;
   if (t >= fishing.until) {
-    const fish = FISH[Math.floor(Math.random() * FISH.length)], coins = 2 + Math.floor(Math.random() * 2);
-    addCoins(coins); if (typeof onFishCaught === 'function') onFishCaught();
-    questToast(`Caught a ${fish}! +${coins} 🪙`);
+    const fish = FISH[Math.floor(Math.random() * FISH.length)], value = 2 + Math.floor(Math.random() * 2);
+    addProduce(value); if (typeof onFishCaught === 'function') onFishCaught();
+    questToast(`Caught a ${fish}! Sell it at 🏪 THE STORE`);
     if (typeof playDing === 'function') playDing();
     scene.remove(fishing.bobber); fishing = null;
   }
@@ -2083,7 +2252,7 @@ const SHOP_ITEMS = [
   { emoji: '🪄', name: 'Star Wand', price: 20 },
 ];
 const owned = {};
-let shopEl = null, shopOpen = false, shopMsgEl = null, ownedEl = null;
+let shopEl = null, shopOpen = false, shopMsgEl = null, ownedEl = null, sellRow = null;
 const shopRows = [];
 
 function buildShop() {
@@ -2110,12 +2279,30 @@ function buildShop() {
     list.appendChild(row);
     shopRows.push({ item, row });
   });
+  // Sell-your-harvest button (crops & fish → coins + ✨ stars to level up)
+  sellRow = document.createElement('button');
+  sellRow.className = 'shop-item';
+  sellRow.style.background = 'rgba(127,255,209,.12)';
+  sellRow.addEventListener('click', () => {
+    if (bagCount <= 0) { shopMsgEl.textContent = 'Catch fish 🎣 or grow crops 🥕 first!'; return; }
+    const n = bagCount, c = sellProduce();
+    shopMsgEl.textContent = `Sold ${n} 🥕🐟 for ${c} 🪙 + ✨!`;
+    animate(shopMsgEl, { scale: [1.2, 1], opacity: [0.4, 1], duration: 300, ease: 'out(3)' });
+  });
   shopMsgEl = document.createElement('p');
   shopMsgEl.className = 'shop-msg';
   ownedEl = document.createElement('p');
   ownedEl.className = 'shop-owned';
-  shopEl.append(h, sub, list, shopMsgEl, ownedEl);
+  shopEl.append(h, sub, list, sellRow, shopMsgEl, ownedEl);
+  refreshSell();
   document.body.appendChild(shopEl);
+}
+function refreshSell() {
+  if (!sellRow) return;
+  sellRow.replaceChildren();
+  const lbl = document.createElement('span'); lbl.textContent = `💰 Sell crops & fish (${bagCount})`;
+  const v = document.createElement('span'); v.className = 'shop-price'; v.textContent = bagCount ? `+${bagValue} 🪙 +✨` : '—';
+  sellRow.append(lbl, v);
 }
 
 function refreshShop() {
@@ -2148,7 +2335,7 @@ function buyItem(item) {
 
 function openShop() {
   shopOpen = true;
-  refreshShop();
+  refreshShop(); refreshSell();
   shopEl.style.display = 'block';
   // opacity only — the panel's vertical centering uses CSS transform, so we
   // must not animate transform here or it would jump.
@@ -2521,7 +2708,7 @@ function updateDayNight(t) {
   hemi.color.setHex(0xcfe8ff).lerp(_moonTint, moonUp * 0.6); // cool moonlit tint at night
   // lamp posts glow & cast light at night
   const lampOn = Math.max(0, 1 - dayness * 2.4);
-  for (const lp of lampPosts) lp.orbMat.emissiveIntensity = 0.15 + lampOn * 2.1; // every orb glows (free)
+  for (const lp of lampPosts) lp.orbMat.emissiveIntensity = 0.2 + lampOn * 3.2; // every orb glows brightly (free)
   // and the shared point-light pool follows the lamps nearest the camera
   if (lampOn > 0.01 && lampPosts.length) {
     const cx = controls.target.x, cz = controls.target.z;
@@ -2530,12 +2717,13 @@ function updateDayNight(t) {
       .sort((a, b) => a.d - b.d);
     for (let i = 0; i < lampLightPool.length; i++) {
       const l = lampLightPool[i];
-      if (i < nearest.length) { l.position.set(nearest[i].lp.x, 2.95, nearest[i].lp.z); l.intensity = lampOn * 3.6; }
+      if (i < nearest.length) { l.position.set(nearest[i].lp.x, 2.95, nearest[i].lp.z); l.intensity = lampOn * 6.5; }
       else l.intensity = 0;
     }
   } else {
     for (const l of lampLightPool) l.intensity = 0;
   }
+  hemi.intensity += lampOn * 0.18; // gentle ambient lift so the whole place reads as lit at night
   const [name, icon] = phaseName(dayT);
   if (phaseEl) phaseEl.textContent = icon + ' ' + name;
 }
@@ -3102,7 +3290,7 @@ function tick() {
     // The player-controlled character (and the shopkeeper) skip roaming.
     // updatePlayer() sets the player's position/moving flag instead.
     if (!w.isPlayer && !w.isShopkeeper) {
-      w.sleeping = false;
+      w.sleeping = false; w.playing = false;
       const cid = b.userData.char && b.userData.char.id;
       const prevX = holder.position.x, prevZ = holder.position.z;
       const trading = w.tradeUntil && t < w.tradeUntil;
@@ -3116,31 +3304,25 @@ function tick() {
       }
       const fishingNpc = w.angler && w.fishUntil && t < w.fishUntil;
       if (w.fishSprite) w.fishSprite.visible = !!fishingNpc;
-      if (w.child && w.parent) {
-        if (w.sliding) {
-          // whee! slide down the slide
-          const k = (t - w.sliding.t0) / w.sliding.dur;
-          if (k >= 1) { w.sliding = null; holder.position.y = 0; w.slideCooldown = t + 7; }
-          else {
-            const f = w.sliding.from;
-            holder.position.x = f.x + (SLIDE_BOT.x - f.x) * k;
-            holder.position.z = f.z + (SLIDE_BOT.z - f.z) * k;
-            holder.position.y = f.y + (SLIDE_BOT.y - f.y) * k;
-            w.moving = false;
-          }
-        } else {
-          const nearPg = Math.hypot(holder.position.x - PLAYGROUND.x, holder.position.z - PLAYGROUND.z) < 5.5;
-          if (nearPg && (!w.slideCooldown || t > w.slideCooldown) && Math.random() < 0.02) {
-            holder.position.set(SLIDE_TOP.x, SLIDE_TOP.y, SLIDE_TOP.z); // climb to the top
-            w.sliding = { t0: t, dur: 1.1, from: SLIDE_TOP.clone() };
-          } else {
-            // trail the parent around (and into the park)
-            _charDir.set(w.parent.position.x - holder.position.x, 0, w.parent.position.z - holder.position.z);
-            const d = _charDir.length();
-            if (d > 1.7) { w.moving = true; const step = Math.min(w.speed * 1.4 * dt, d - 1.4); holder.position.x += (_charDir.x / d) * step; holder.position.z += (_charDir.z / d) * step; }
-            else { w.moving = false; }
-          }
+      if (w.sliding) {
+        // whee! slide down the slide
+        const k = (t - w.sliding.t0) / w.sliding.dur;
+        if (k >= 1) { w.sliding = null; holder.position.y = 0; w.slideCooldown = t + 7; }
+        else {
+          const f = w.sliding.from;
+          holder.position.x = f.x + (SLIDE_BOT.x - f.x) * k;
+          holder.position.z = f.z + (SLIDE_BOT.z - f.z) * k;
+          holder.position.y = f.y + (SLIDE_BOT.y - f.y) * k;
+          w.moving = false; w.playing = true;
         }
+      } else if (playAtStations(holder, w, t, dt)) {
+        // running between the playground / pet-park activities and playing on each
+      } else if (w.child && w.parent) {
+        // trail the parent around (and into the park)
+        _charDir.set(w.parent.position.x - holder.position.x, 0, w.parent.position.z - holder.position.z);
+        const d = _charDir.length();
+        if (d > 1.7) { w.moving = true; const step = Math.min(w.speed * 1.4 * dt, d - 1.4); holder.position.x += (_charDir.x / d) * step; holder.position.z += (_charDir.z / d) * step; }
+        else { w.moving = false; }
       } else if (trading) {
         w.moving = false; // pause to trade goods
       } else if (fishingNpc) {
@@ -3190,6 +3372,8 @@ function tick() {
     if (w.swimmer && Math.hypot(holder.position.x - POND.x, holder.position.z - POND.z) < 3.4) {
       b.position.y = b.userData.baseY - 0.55 + Math.sin(t * 2 + b.userData.bobPhase) * 0.07;
     }
+    // playing on an activity → excited hop, all in sync so they look like they're playing together
+    if (w.playing && !w.moving) b.position.y = b.userData.baseY + Math.abs(Math.sin(t * 7)) * 0.36;
 
     // show a floating 💤 while sleeping
     if (holder.userData.zzz) {

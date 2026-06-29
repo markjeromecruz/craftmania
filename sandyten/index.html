@@ -249,6 +249,17 @@
       aspect-ratio: 1; user-select: none;
     }
     .tet-canvas { display: block; margin: 0 auto; border-radius: 10px; background: rgba(255,255,255,.05); }
+    .match-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+      width: 264px; margin: 0 auto;
+    }
+    .match-card {
+      aspect-ratio: 1; font-size: 28px; border-radius: 12px; cursor: pointer; color: #fff;
+      background: rgba(186,160,255,.25); border: 1px solid rgba(255,255,255,.25);
+      display: flex; align-items: center; justify-content: center; transition: transform .1s;
+    }
+    .match-card.up { background: rgba(255,255,255,.16); }
+    .match-card:active { transform: scale(.95); }
     .dpad {
       display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 14px;
     }
