@@ -272,7 +272,7 @@ function updateTrades(t) {
   const avail = [];
   for (const b of billboards) {
     const w = b.parent.userData;
-    if (w.isPlayer || w.isShopkeeper || w.sleeping || w.child) continue;
+    if (w.isPlayer || w.isShopkeeper || w.sleeping || w.child || w.isCritter) continue;
     if (w.tradeUntil && t < w.tradeUntil) continue;
     avail.push(b.parent);
   }
@@ -315,7 +315,7 @@ function refreshTradePanel() {
   const seen = new Set();
   for (const b of billboards) {
     const ch = b.userData.char;
-    if (!ch || seen.has(ch.id) || b.parent.userData.child) continue;
+    if (!ch || seen.has(ch.id) || b.parent.userData.child || b.parent.userData.isCritter) continue;
     seen.add(ch.id);
     const holder = b.parent;
     const row = document.createElement('div'); row.className = 'shop-item';
@@ -495,6 +495,7 @@ fetch('./assets/characters/characters.json')
     placeHouses(roster); // a little house for each character
     buildNeighborhood(); // extra families + a park behind the houses
     buildForest();       // a little forest where the quest animals live
+    buildForestAnimals();// foxes, deer, squirrels & hedgehogs roaming the forest
     scatterTrees();      // trees everywhere except on the buildings & park
     // expose the roster + their stats for the game the girls build next
     window.SANDYTEN.roster = roster;
@@ -542,7 +543,8 @@ function buildPicker(roster) {
     grid.appendChild(card);
   };
   roster.forEach((c) => addCard(c.id, c.name, c.sprite));
-  if (typeof NEIGHBORS !== 'undefined') NEIGHBORS.forEach((n) => addCard(n.id, n.name, n.sprite)); // new neighbors
+  if (typeof NEIGHBORS !== 'undefined') NEIGHBORS.forEach((n) => addCard(n.id, n.name, n.sprite)); // neighbors
+  if (typeof NEIGHBORS2 !== 'undefined') NEIGHBORS2.forEach((n) => addCard(n.id, n.name, n.sprite)); // new families
   panel.append(h, grid);
   pickerEl.appendChild(panel);
   document.body.appendChild(pickerEl);
@@ -1347,6 +1349,7 @@ function updateDoghouse(dt) {
 // Neighborhood + Park: extra families that roam the park with their kids.
 // ---------------------------------------------------------------------------
 const PARK = { x: -30, z: -8 };
+let merryGoRound = null; // the spinning park roundabout
 const SLIDE_TOP = new THREE.Vector3();
 const SLIDE_BOT = new THREE.Vector3();
 const PLAYGROUND = new THREE.Vector3();
@@ -1389,6 +1392,55 @@ function spawnRoamer({ id, name, sprite, x, z, scale = 1, roamCenter, roamRadius
   return holder;
 }
 
+// A small animal billboard — either roams an area (center+radius) or, given a
+// parent holder, trots along after it as a pet. Not playable, doesn't trade.
+function spawnCritter({ sprite, name, lines, scale = 0.6, center, radius = 9, inner = 0, x, z, parent = null }) {
+  const tex = textureLoader.load(`./assets/characters/${sprite}`);
+  tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  const size = CHAR_HEIGHT * scale;
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(size, size),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.5, side: THREE.DoubleSide })
+  );
+  mesh.userData.char = { id: 'critter_' + name, name, lines };
+  const baseY = size / 2;
+  mesh.position.y = baseY; mesh.userData.baseY = baseY; mesh.userData.bobPhase = Math.random() * 6;
+  const sx = x != null ? x : (parent ? parent.position.x : (center ? center.x : 0));
+  const sz = z != null ? z : (parent ? parent.position.z : (center ? center.z : 0));
+  const holder = new THREE.Group();
+  holder.position.set(sx, 0, sz);
+  holder.userData = {
+    speed: 1.3 + Math.random() * 0.9,
+    target: new THREE.Vector3(sx, 0, sz),
+    pauseUntil: Math.random() * 2, moving: false, mesh,
+    roamCenter: center, roamRadius: radius, roamInner: inner,
+    child: !!parent, parent, // pets trot after their owner like a child does
+    isCritter: true,         // animals don't trade
+  };
+  holder.add(mesh);
+  holder.add(makeGroundShadow(size * 0.32));
+  const label = makeNameLabel(name); label.position.set(0, size + 0.45, 0); label.scale.set(1.5, 0.4, 1);
+  holder.add(label);
+  characterGroup.add(holder);
+  billboards.push(mesh);
+  return holder;
+}
+
+const FOREST_ANIMALS = [
+  { sprite: 'fox.png', name: 'Fox', lines: ['Yip yip!', '*swishes fluffy tail*', 'Hello, friend!'] },
+  { sprite: 'deer.png', name: 'Fawn', lines: ['*blinks gently*', 'Hi there!', '*nibbles a leaf*'] },
+  { sprite: 'squirrel.png', name: 'Nutkin', lines: ['Got any acorns?', 'Scamper scamper!', 'Ooh, shiny!'] },
+  { sprite: 'hedgehog.png', name: 'Prickles', lines: ['*tiny sniff*', 'Careful, I\'m pokey!', 'Hehe!'] },
+];
+function buildForestAnimals() {
+  // a lively bunch in the forest — this is where you can always find them
+  const spots = [[-6, -2], [4, 3], [-2, 6], [7, -4], [-7, 4], [2, -6]];
+  spots.forEach(([dx, dz], i) => {
+    const a = FOREST_ANIMALS[i % FOREST_ANIMALS.length];
+    spawnCritter({ sprite: a.sprite, name: a.name, lines: a.lines, scale: 0.62, center: FOREST, radius: 9, x: FOREST.x + dx, z: FOREST.z + dz });
+  });
+}
+
 function buildPark() {
   const grassMat = new THREE.MeshStandardMaterial({ color: 0x77b85a, roughness: 1 });
   const grass = new THREE.Mesh(new THREE.CircleGeometry(17, 48), grassMat); // big & spacious
@@ -1424,6 +1476,36 @@ function buildPark() {
   box(ss, 0.4, 0.5, 0.4, wood, 0, 0.35, 0);
   const plank = box(ss, 0.5, 0.12, 3.4, red, 0, 0.62, 0); plank.rotation.x = 0.12;
 
+  // --- extended playground: more to do! ---
+  const sand = new THREE.MeshStandardMaterial({ color: 0xead9a3, roughness: 1 });
+  const green = new THREE.MeshStandardMaterial({ color: 0x5fb35f, roughness: 0.7 });
+  // sandbox
+  const sb = new THREE.Group(); sb.position.set(-4.5, 0, 3.2); pg.add(sb);
+  const sandTop = new THREE.Mesh(new THREE.CircleGeometry(1.5, 24), sand); sandTop.rotation.x = -Math.PI / 2; sandTop.position.y = 0.16; sb.add(sandTop);
+  for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2; box(sb, 0.5, 0.32, 0.22, wood, Math.cos(a) * 1.5, 0.16, Math.sin(a) * 1.5).rotation.y = a; }
+  box(sb, 0.5, 0.4, 0.5, yellow, 0.2, 0.36, 0.2); // a little sandcastle bucket
+  // merry-go-round (spins in the render loop)
+  const mg = new THREE.Group(); mg.position.set(-4.5, 0, -2.5); pg.add(mg);
+  box(mg, 0.3, 0.6, 0.3, wood, 0, 0.3, 0);
+  const disc = new THREE.Mesh(new THREE.CylinderGeometry(1.7, 1.7, 0.16, 24), blue); disc.position.y = 0.62; mg.add(disc);
+  for (let i = 0; i < 4; i++) { const a = (i / 4) * Math.PI * 2; const bar = box(mg, 0.08, 0.5, 1.7, red, 0, 0.95, 0); bar.position.set(Math.cos(a) * 0.0, 0.95, 0); bar.rotation.y = a; }
+  merryGoRound = mg;
+  // monkey bars
+  const mb = new THREE.Group(); mb.position.set(4.5, 0, -3.5); pg.add(mb);
+  for (const mz of [-1.4, 1.4]) { box(mb, 0.16, 2.0, 0.16, green, -1.6, 1.0, mz); box(mb, 0.16, 2.0, 0.16, green, 1.6, 1.0, mz); }
+  for (const mz of [-1.4, 1.4]) box(mb, 3.4, 0.16, 0.16, green, 0, 2.0, mz);
+  for (let i = -3; i <= 3; i++) box(mb, 0.12, 0.12, 2.9, yellow, i * 0.5, 2.0, 0);
+  // spring rocker
+  const sr = new THREE.Group(); sr.position.set(2, 0, 4.6); pg.add(sr);
+  box(sr, 0.3, 0.6, 0.3, yellow, 0, 0.3, 0);
+  box(sr, 1.4, 0.5, 0.5, red, 0, 0.8, 0);
+  box(sr, 0.4, 0.5, 0.2, wood, 0.7, 1.1, 0); // head
+
+  // 3 lamp posts around the park so it glows at night
+  makeLampPost(PARK.x - 11, PARK.z + 10);
+  makeLampPost(PARK.x + 11, PARK.z - 9);
+  makeLampPost(PARK.x + 12, PARK.z + 11);
+
   // --- dog park (on the far side, with open space between) ---
   const dp = new THREE.Group(); dp.position.set(PARK.x - 7, 0, PARK.z - 6); scene.add(dp);
   const fenceMat = new THREE.MeshStandardMaterial({ color: 0xcdb892, roughness: 0.9 });
@@ -1431,14 +1513,29 @@ function buildPark() {
   for (let i = 0; i < 18; i++) { const a = (i / 18) * Math.PI * 2; box(dp, 0.12, 0.9, 0.12, fenceMat, Math.cos(a) * R, 0.45, Math.sin(a) * R); }
   const hoop = new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.08, 8, 20), red);
   hoop.position.set(0, 0.9, -1); dp.add(hoop);
-  box(dp, 1.6, 0.12, 1.0, blue, 1.2, 0.5, 1.2, 0.5);
-  const bone = makeSign('DOG PARK'); bone.scale.setScalar(0.5); bone.position.set(PARK.x - 7, 2.6, PARK.z - 11); scene.add(bone);
+  box(dp, 1.6, 0.12, 1.0, blue, 1.2, 0.5, 1.2, 0.5);            // dog ramp
+  // a tunnel for the dogs and cats to run through
+  const tunnel = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 1.8, 16, 1, true), yellow);
+  tunnel.rotation.z = Math.PI / 2; tunnel.position.set(-1.5, 0.7, 1.5); tunnel.material.side = THREE.DoubleSide; dp.add(tunnel);
+  // a cat climbing tower
+  box(dp, 0.7, 0.7, 0.7, wood, 2, 0.35, -1.6);
+  box(dp, 0.55, 0.7, 0.55, red, 2, 1.05, -1.6);
+  box(dp, 0.9, 0.2, 0.9, blue, 2, 1.5, -1.6);
+  const post = box(dp, 0.18, 1.2, 0.18, wood, -2, 0.6, -1.6);   // scratching post
+  const bone = makeSign('PET PARK'); bone.scale.setScalar(0.5); bone.position.set(PARK.x - 7, 2.6, PARK.z - 11); scene.add(bone);
 }
 
 const NEIGHBORS = [
   { id: 'pip', name: 'Pip', sprite: 'pip.png', wall: 0xe8e0ea, roof: 0x9aa6c9, lines: ['Hi neighbor!', 'Lovely day!', 'Hop hop!'] },
   { id: 'coco', name: 'Coco', sprite: 'coco.png', wall: 0xf4dcb6, roof: 0xe08a4a, lines: ['Meow!', 'Off to the park!', 'Purr~'] },
   { id: 'bruno', name: 'Bruno', sprite: 'bruno.png', wall: 0xe6cba0, roof: 0x8a5a36, lines: ['Hello there!', 'Nice to meet you!', 'Grr-iendly!'] },
+];
+// New families, each living right next to one of the three neighbors above.
+// They roam the park, have a child, and bring a pet that trots along.
+const NEIGHBORS2 = [
+  { id: 'fern', name: 'Fern', sprite: 'frog.png', wall: 0xcfe8c0, roof: 0x6fae54, lines: ['Ribbit!', 'Hop along with me!', 'Splish splash!'], ang: 60, pet: 'cat.png', petName: 'Mochi' },
+  { id: 'quacky', name: 'Quacky', sprite: 'duck.png', wall: 0xf6ecc0, roof: 0xe0b84a, lines: ['Quack quack!', 'Off to the pond!', 'Waddle waddle!'], ang: 108, pet: 'dog.png', petName: 'Biscuit' },
+  { id: 'pochi', name: 'Pochi', sprite: 'panda.png', wall: 0xe9e9ee, roof: 0x4a4a52, lines: ['Munch munch!', 'Bamboo, yum!', 'Hehe, hello!'], ang: 156, pet: 'cat.png', petName: 'Yuki' },
 ];
 function buildNeighborhood() {
   // path from the courtyard out to the park
@@ -1458,6 +1555,24 @@ function buildNeighborhood() {
     });
     spawnRoamer({ id: n.id + '_kid', name: n.name + ' Jr.', sprite: n.sprite, x: PARK.x, z: PARK.z, scale: 0.6, child: true, parent, lines: ['Wheee!', 'Tag, you\'re it!', 'Hehe!'] });
   });
+  // a few more houses & families right beside Pip, Coco and Bruno
+  const R3 = 31;
+  NEIGHBORS2.forEach((n) => {
+    const a = n.ang * Math.PI / 180, cs = Math.cos(a), sn = Math.sin(a);
+    const hx = cs * R3, hz = sn * R3;
+    buildHouse({ x: hx, z: hz, rotationY: Math.atan2(-hx, -hz), name: n.name, wall: n.wall, roof: n.roof });
+    buildPath(cs * 20, sn * 20, cs * (R3 - 2.5), sn * (R3 - 2.5));
+    const parent = spawnRoamer({
+      id: n.id, name: n.name, sprite: n.sprite,
+      x: PARK.x + (Math.random() * 5 - 2.5), z: PARK.z + (Math.random() * 5 - 2.5),
+      roamCenter: PARK, roamInner: 2, roamRadius: 13, lines: n.lines,
+    });
+    spawnRoamer({ id: n.id + '_kid', name: n.name + ' Jr.', sprite: n.sprite, x: PARK.x, z: PARK.z, scale: 0.6, child: true, parent, lines: ['Wheee!', 'Look at me!', 'Hehe!'] });
+    spawnCritter({ sprite: n.pet, name: n.petName, lines: ['(purrs)', '(happy wag)', '(nuzzles you)'], scale: 0.5, parent });
+  });
+  // a couple of friendly cats roaming the park
+  spawnCritter({ sprite: 'cat.png', name: 'Tabby', lines: ['Meow!', 'Purr~', '*chases a leaf*'], scale: 0.5, center: PARK, radius: 12 });
+  spawnCritter({ sprite: 'cat.png', name: 'Patches', lines: ['Mrow?', '*pounces*', 'Purrrr'], scale: 0.5, center: PARK, radius: 12 });
 }
 
 // ---------------------------------------------------------------------------
@@ -1601,8 +1716,8 @@ const LOST_ITEMS = ['🧦', '👒', '🧤', '🎀', '🧣', '👟', '🧢'];
 const _spDir = new THREE.Vector3();
 function startSideQuest(t) {
   const emoji = LOST_ITEMS[Math.floor(Math.random() * LOST_ITEMS.length)];
-  // a cute animal at the forest edge
-  const sprite = NEIGHBORS[Math.floor(Math.random() * NEIGHBORS.length)].sprite;
+  // a cute forest animal comes out asking for help
+  const sprite = FOREST_ANIMALS[Math.floor(Math.random() * FOREST_ANIMALS.length)].sprite;
   const tex = textureLoader.load(`./assets/characters/${sprite}`); tex.colorSpace = THREE.SRGBColorSpace;
   const animal = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 2.6), new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.5, side: THREE.DoubleSide }));
   animal.position.set(FOREST.x - 9, 1.3, FOREST.z - 2);
@@ -2580,6 +2695,7 @@ function tick() {
   updateDress();
   updateTrades(t);
   updateSideQuests(t);
+  if (merryGoRound) merryGoRound.rotation.y += dt * 0.7; // roundabout slowly spins
 
   // Characters: wander around, face the camera (upright billboard), and bob/hop.
   for (const b of billboards) {
