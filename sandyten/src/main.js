@@ -221,6 +221,13 @@ for (let i = 0; i < 6; i++) {
   const a = (i / 6) * Math.PI * 2 + 0.4;
   makeLampPost(Math.cos(a) * 9.5, Math.sin(a) * 9.5);
 }
+// a wider ring of lamps to light up more of the city
+for (let i = 0; i < 8; i++) {
+  const a = (i / 8) * Math.PI * 2 + 0.2;
+  makeLampPost(Math.cos(a) * 19, Math.sin(a) * 19);
+}
+// lamps along the path out to the park
+makeLampPost(-12, -2); makeLampPost(-21, -6);
 
 // ---------------------------------------------------------------------------
 // The girls' characters — 2D sprites standing in the 3D world.
@@ -496,6 +503,7 @@ fetch('./assets/characters/characters.json')
     buildNeighborhood(); // extra families + a park behind the houses
     buildForest();       // a little forest where the quest animals live
     buildForestAnimals();// foxes, deer, squirrels & hedgehogs roaming the forest
+    buildGarden();       // a plot you can plant & grow
     scatterTrees();      // trees everywhere except on the buildings & park
     // expose the roster + their stats for the game the girls build next
     window.SANDYTEN.roster = roster;
@@ -769,7 +777,9 @@ function positionBubble(mesh) {
 let downX = 0, downY = 0;
 renderer.domElement.addEventListener('pointerdown', (e) => { downX = e.clientX; downY = e.clientY; });
 function clickTargets() {
-  return petDog ? billboards.concat(petDog.mesh) : billboards;
+  let list = petDog ? billboards.concat(petDog.mesh) : billboards;
+  if (gardenSpots.length) list = list.concat(gardenSpots.map((r) => r.mound));
+  return list;
 }
 renderer.domElement.addEventListener('pointerup', (e) => {
   if (Math.hypot(e.clientX - downX, e.clientY - downY) > 6) return;
@@ -779,7 +789,9 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   const hits = raycaster.intersectObjects(clickTargets(), false);
   if (!hits.length) return;
   const obj = hits[0].object;
-  if (petDog && obj === petDog.mesh) {        // clicked the puppy → bark!
+  if (obj.userData.isGarden) {                // tapped a garden plot → plant/harvest
+    handleGardenClick(obj);
+  } else if (petDog && obj === petDog.mesh) { // clicked the puppy → bark!
     playWoof();
     showBubble(petDog.mesh, DOG_NAME, 'Woof! 🐶', 1.3);
     petDog.barkUntil = timer.getElapsed() + 0.4; // little excited hop
@@ -1349,6 +1361,7 @@ function updateDoghouse(dt) {
 // Neighborhood + Park: extra families that roam the park with their kids.
 // ---------------------------------------------------------------------------
 const PARK = { x: -30, z: -8 };
+const POND = { x: -39, z: -6 }; // duck pond on the west side of the park
 let merryGoRound = null; // the spinning park roundabout
 const SLIDE_TOP = new THREE.Vector3();
 const SLIDE_BOT = new THREE.Vector3();
@@ -1441,6 +1454,69 @@ function buildForestAnimals() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Garden — walk up and tap a plot to plant a seed, watch it grow, then tap the
+// grown flower to harvest it for coins. (Plant → sprout → bloom over ~12s.)
+// ---------------------------------------------------------------------------
+const GARDEN = { x: 12, z: 3 };
+const gardenSpots = [];
+const GARDEN_SOIL = new THREE.MeshStandardMaterial({ color: 0x6b4a2f, roughness: 1 });
+const GARDEN_STEM = new THREE.MeshStandardMaterial({ color: 0x4faf54, roughness: 0.8 });
+const GARDEN_FLOWERS = [0xff7eb6, 0xffd54a, 0xff5a5a, 0xb18cff, 0x6aa6ff].map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.5, emissive: c, emissiveIntensity: 0.08 }));
+function renderPlant(rec) {
+  rec.plant.clear();
+  if (rec.stage === 1) { // seed sprout nub
+    const s = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 6), GARDEN_STEM); s.position.y = 0.12; rec.plant.add(s);
+  } else if (rec.stage === 2) { // little stem with leaves
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 0.5, 6), GARDEN_STEM); stem.position.y = 0.3; rec.plant.add(stem);
+    for (const sx of [-1, 1]) { const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), GARDEN_STEM); leaf.scale.set(1, 0.4, 0.7); leaf.position.set(sx * 0.16, 0.32, 0); rec.plant.add(leaf); }
+  } else if (rec.stage >= 3) { // full bloom (harvestable)
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 0.8, 6), GARDEN_STEM); stem.position.y = 0.45; rec.plant.add(stem);
+    const center = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 10), GARDEN_FLOWERS[1]); center.position.y = 0.92; rec.plant.add(center);
+    for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2; const petal = new THREE.Mesh(new THREE.SphereGeometry(0.15, 10, 8), rec.flowerMat); petal.scale.set(1, 0.5, 0.7); petal.position.set(Math.cos(a) * 0.24, 0.92, Math.sin(a) * 0.24); rec.plant.add(petal); }
+  }
+}
+function buildGarden() {
+  const wood = new THREE.MeshStandardMaterial({ color: 0x9c6b3f, roughness: 0.9 });
+  const g = new THREE.Group(); g.position.set(GARDEN.x, 0, GARDEN.z); scene.add(g);
+  const bed = new THREE.Mesh(new THREE.BoxGeometry(6.4, 0.3, 2.2), GARDEN_SOIL); bed.position.y = 0.15; bed.receiveShadow = true; g.add(bed);
+  for (const dz of [-1.1, 1.1]) { const r = new THREE.Mesh(new THREE.BoxGeometry(6.7, 0.42, 0.2), wood); r.position.set(0, 0.21, dz); g.add(r); }
+  for (const dx of [-3.25, 3.25]) { const r = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.42, 2.3), wood); r.position.set(dx, 0.21, 0); g.add(r); }
+  const sign = makeSign('GARDEN'); sign.scale.setScalar(0.5); sign.position.set(GARDEN.x, 2.3, GARDEN.z - 1.7); scene.add(sign);
+  noTreeZones.push({ x: GARDEN.x, z: GARDEN.z, r: 5 });
+  for (let i = 0; i < 5; i++) {
+    const spot = new THREE.Group(); spot.position.set(-2.4 + i * 1.2, 0.3, 0); g.add(spot);
+    const mound = new THREE.Mesh(new THREE.SphereGeometry(0.4, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), GARDEN_SOIL);
+    mound.userData.isGarden = true; spot.add(mound);
+    const plant = new THREE.Group(); spot.add(plant);
+    const rec = { mound, plant, stage: 0, plantedAt: 0, flowerMat: GARDEN_FLOWERS[0] };
+    mound.userData.gardenRec = rec; gardenSpots.push(rec);
+  }
+}
+function handleGardenClick(mesh) {
+  const rec = mesh.userData.gardenRec; if (!rec) return;
+  if (rec.stage === 0) {
+    rec.stage = 1; rec.plantedAt = timer.getElapsed();
+    rec.flowerMat = GARDEN_FLOWERS[Math.floor(Math.random() * GARDEN_FLOWERS.length)];
+    renderPlant(rec); if (typeof questToast === 'function') questToast('Planted a seed! 🌱 Come back soon…');
+  } else if (rec.stage >= 3) {
+    addCoins(2); rec.stage = 0; rec.plantedAt = 0; renderPlant(rec);
+    if (typeof questToast === 'function') questToast('Harvested a flower! +2 🪙');
+    if (typeof playDing === 'function') playDing();
+  } else if (typeof questToast === 'function') {
+    questToast('Still growing… 🌱');
+  }
+}
+function updateGarden(t) {
+  for (const rec of gardenSpots) {
+    if (rec.stage >= 1 && rec.stage < 3) {
+      const e = t - rec.plantedAt;
+      const ns = e > 12 ? 3 : e > 6 ? 2 : 1;
+      if (ns !== rec.stage) { rec.stage = ns; renderPlant(rec); }
+    }
+  }
+}
+
 function buildPark() {
   const grassMat = new THREE.MeshStandardMaterial({ color: 0x77b85a, roughness: 1 });
   const grass = new THREE.Mesh(new THREE.CircleGeometry(17, 48), grassMat); // big & spacious
@@ -1455,8 +1531,8 @@ function buildPark() {
   const box = (g, w, h, d, mat, x, y, z, rx = 0) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.rotation.x = rx; m.castShadow = true; g.add(m); return m; };
   scene.add(sign);
 
-  // --- playground (kept toward one side, with open grass to walk around) ---
-  const pgPos = new THREE.Vector3(PARK.x + 7, 0, PARK.z + 5);
+  // --- playground (in the MIDDLE of the park, well away from the houses) ---
+  const pgPos = new THREE.Vector3(PARK.x, 0, PARK.z - 1);
   PLAYGROUND.copy(pgPos);
   const pg = new THREE.Group(); pg.position.copy(pgPos); scene.add(pg);
   // slide
@@ -1501,28 +1577,49 @@ function buildPark() {
   box(sr, 1.4, 0.5, 0.5, red, 0, 0.8, 0);
   box(sr, 0.4, 0.5, 0.2, wood, 0.7, 1.1, 0); // head
 
-  // 3 lamp posts around the park so it glows at night
-  makeLampPost(PARK.x - 11, PARK.z + 10);
-  makeLampPost(PARK.x + 11, PARK.z - 9);
-  makeLampPost(PARK.x + 12, PARK.z + 11);
+  // lamp posts around the park so it glows at night
+  makeLampPost(PARK.x - 13, PARK.z + 9);
+  makeLampPost(PARK.x + 13, PARK.z - 9);
+  makeLampPost(PARK.x + 13, PARK.z + 10);
+  makeLampPost(PARK.x - 13, PARK.z - 10);
+  makeLampPost(PARK.x + 2, PARK.z + 13);
 
-  // --- dog park (on the far side, with open space between) ---
-  const dp = new THREE.Group(); dp.position.set(PARK.x - 7, 0, PARK.z - 6); scene.add(dp);
+  // --- duck pond (west side) ---
+  const water = new THREE.MeshStandardMaterial({ color: 0x3aa0d6, roughness: 0.25, metalness: 0.2, transparent: true, opacity: 0.86 });
+  const pondGrp = new THREE.Group(); pondGrp.position.set(POND.x, 0, POND.z); scene.add(pondGrp);
+  const surf = new THREE.Mesh(new THREE.CircleGeometry(3.6, 36), water); surf.rotation.x = -Math.PI / 2; surf.position.y = 0.12; pondGrp.add(surf);
+  const rim = new THREE.MeshStandardMaterial({ color: 0x8d8473, roughness: 1 });
+  for (let i = 0; i < 22; i++) { const a = (i / 22) * Math.PI * 2; box(pondGrp, 0.45, 0.28, 0.3, rim, Math.cos(a) * 3.7, 0.1, Math.sin(a) * 3.7).rotation.y = a; }
+  const pad = new THREE.MeshStandardMaterial({ color: 0x4fae54, roughness: 0.8 });
+  for (const [px, pz] of [[-1.2, 0.6], [1.4, -0.8], [0.3, 1.5]]) { const lp = new THREE.Mesh(new THREE.CircleGeometry(0.55, 16), pad); lp.rotation.x = -Math.PI / 2; lp.position.set(px, 0.16, pz); pondGrp.add(lp); }
+  const pondSign = makeSign('POND'); pondSign.scale.setScalar(0.45); pondSign.position.set(POND.x, 2.2, POND.z - 4.4); scene.add(pondSign);
+
+  // --- pet park (east side) — lots for dogs & cats to do ---
+  const dp = new THREE.Group(); dp.position.set(PARK.x + 8, 0, PARK.z + 2); scene.add(dp);
   const fenceMat = new THREE.MeshStandardMaterial({ color: 0xcdb892, roughness: 0.9 });
-  const R = 4.5;
-  for (let i = 0; i < 18; i++) { const a = (i / 18) * Math.PI * 2; box(dp, 0.12, 0.9, 0.12, fenceMat, Math.cos(a) * R, 0.45, Math.sin(a) * R); }
+  const R = 5.2;
+  for (let i = 0; i < 22; i++) { const a = (i / 22) * Math.PI * 2; box(dp, 0.12, 0.9, 0.12, fenceMat, Math.cos(a) * R, 0.45, Math.sin(a) * R); }
+  // jump hoop
   const hoop = new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.08, 8, 20), red);
-  hoop.position.set(0, 0.9, -1); dp.add(hoop);
-  box(dp, 1.6, 0.12, 1.0, blue, 1.2, 0.5, 1.2, 0.5);            // dog ramp
-  // a tunnel for the dogs and cats to run through
+  hoop.position.set(0, 0.9, -1.5); dp.add(hoop);
+  // A-frame ramp
+  box(dp, 1.6, 0.12, 1.2, blue, 1.6, 0.5, 1.5, 0.5);
+  box(dp, 1.6, 0.12, 1.2, blue, 1.6, 0.5, 2.7, -0.5);
+  // tunnel
   const tunnel = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 1.8, 16, 1, true), yellow);
-  tunnel.rotation.z = Math.PI / 2; tunnel.position.set(-1.5, 0.7, 1.5); tunnel.material.side = THREE.DoubleSide; dp.add(tunnel);
-  // a cat climbing tower
-  box(dp, 0.7, 0.7, 0.7, wood, 2, 0.35, -1.6);
-  box(dp, 0.55, 0.7, 0.55, red, 2, 1.05, -1.6);
-  box(dp, 0.9, 0.2, 0.9, blue, 2, 1.5, -1.6);
-  const post = box(dp, 0.18, 1.2, 0.18, wood, -2, 0.6, -1.6);   // scratching post
-  const bone = makeSign('PET PARK'); bone.scale.setScalar(0.5); bone.position.set(PARK.x - 7, 2.6, PARK.z - 11); scene.add(bone);
+  tunnel.rotation.z = Math.PI / 2; tunnel.position.set(-1.8, 0.7, 1.8); tunnel.material.side = THREE.DoubleSide; dp.add(tunnel);
+  // weave poles
+  for (let i = 0; i < 5; i++) box(dp, 0.1, 1.0, 0.1, red, -3 + i * 0.5, 0.5, -2.8);
+  // two hurdle jumps
+  for (const hx of [3, 3.9]) { box(dp, 0.1, 0.8, 0.1, wood, hx, 0.4, -1.6); box(dp, 0.1, 0.8, 0.1, wood, hx, 0.4, -0.6); box(dp, 0.12, 0.1, 1.1, yellow, hx, 0.7, -1.1); }
+  // tire jump (stand a torus up)
+  const tire = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.14, 10, 20), wood); tire.position.set(-3.2, 0.9, 1.2); dp.add(tire);
+  // cat climbing tower + scratching post
+  box(dp, 0.7, 0.7, 0.7, wood, 2.4, 0.35, -2.6);
+  box(dp, 0.55, 0.7, 0.55, red, 2.4, 1.05, -2.6);
+  box(dp, 0.9, 0.2, 0.9, blue, 2.4, 1.5, -2.6);
+  box(dp, 0.18, 1.2, 0.18, wood, -3.4, 0.6, -1.0);
+  const bone = makeSign('PET PARK'); bone.scale.setScalar(0.5); bone.position.set(PARK.x + 8, 2.6, PARK.z + 8); scene.add(bone);
 }
 
 const NEIGHBORS = [
@@ -1562,12 +1659,16 @@ function buildNeighborhood() {
     const hx = cs * R3, hz = sn * R3;
     buildHouse({ x: hx, z: hz, rotationY: Math.atan2(-hx, -hz), name: n.name, wall: n.wall, roof: n.roof });
     buildPath(cs * 20, sn * 20, cs * (R3 - 2.5), sn * (R3 - 2.5));
+    // Quacky the duck and her kid live at the pond and paddle around in it
+    const atPond = n.id === 'quacky';
+    const center = atPond ? POND : PARK;
     const parent = spawnRoamer({
       id: n.id, name: n.name, sprite: n.sprite,
-      x: PARK.x + (Math.random() * 5 - 2.5), z: PARK.z + (Math.random() * 5 - 2.5),
-      roamCenter: PARK, roamInner: 2, roamRadius: 13, lines: n.lines,
+      x: center.x + (Math.random() * 4 - 2), z: center.z + (Math.random() * 4 - 2),
+      roamCenter: center, roamInner: 0, roamRadius: atPond ? 2.6 : 13, lines: n.lines,
     });
-    spawnRoamer({ id: n.id + '_kid', name: n.name + ' Jr.', sprite: n.sprite, x: PARK.x, z: PARK.z, scale: 0.6, child: true, parent, lines: ['Wheee!', 'Look at me!', 'Hehe!'] });
+    const kid = spawnRoamer({ id: n.id + '_kid', name: n.name + ' Jr.', sprite: n.sprite, x: center.x, z: center.z, scale: 0.6, child: true, parent, lines: ['Wheee!', 'Look at me!', 'Hehe!'] });
+    if (atPond) { parent.userData.swimmer = true; kid.userData.swimmer = true; }
     spawnCritter({ sprite: n.pet, name: n.petName, lines: ['(purrs)', '(happy wag)', '(nuzzles you)'], scale: 0.5, parent });
   });
   // a couple of friendly cats roaming the park
@@ -2695,6 +2796,7 @@ function tick() {
   updateDress();
   updateTrades(t);
   updateSideQuests(t);
+  updateGarden(t);
   if (merryGoRound) merryGoRound.rotation.y += dt * 0.7; // roundabout slowly spins
 
   // Characters: wander around, face the camera (upright billboard), and bob/hop.
@@ -2708,6 +2810,7 @@ function tick() {
     if (!w.isPlayer && !w.isShopkeeper) {
       w.sleeping = false;
       const cid = b.userData.char && b.userData.char.id;
+      const prevX = holder.position.x, prevZ = holder.position.z;
       const trading = w.tradeUntil && t < w.tradeUntil;
       if (w.child && w.parent) {
         if (w.sliding) {
@@ -2759,6 +2862,12 @@ function tick() {
       } else {
         w.moving = false;
       }
+      // Boo is the ONLY character who phases through walls — keep everyone
+      // else (roaming neighbors, kids, pets, critters) out of the houses.
+      if (cid !== 'boo' && !w.sliding) {
+        const [rx, rz] = resolveWalls(holder.position.x, holder.position.z, prevX, prevZ);
+        holder.position.x = rx; holder.position.z = rz;
+      }
     }
 
     // always turn to face the camera, staying upright
@@ -2771,6 +2880,10 @@ function tick() {
     b.position.y = w.moving
       ? b.userData.baseY + Math.abs(Math.sin(t * 9 + b.userData.bobPhase)) * 0.22
       : b.userData.baseY + Math.sin(t * 1.6 + b.userData.bobPhase) * 0.1;
+    // ducks sit low in the water (and gently bob) when they're in the pond
+    if (w.swimmer && Math.hypot(holder.position.x - POND.x, holder.position.z - POND.z) < 3.4) {
+      b.position.y = b.userData.baseY - 0.55 + Math.sin(t * 2 + b.userData.bobPhase) * 0.07;
+    }
 
     // show a floating 💤 while sleeping
     if (holder.userData.zzz) {
