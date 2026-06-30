@@ -1490,7 +1490,7 @@ function updateDoghouse(dt) {
 // ---------------------------------------------------------------------------
 const PARK = { x: -30, z: -8 };
 const POND = { x: -30, z: -22 };    // duck pond on the SOUTH side of the park
-const PETPARK = { x: -26, z: -11 }; // pet park in the open centre, nudged forward
+const PETPARK = { x: -27, z: -5 };  // pet park backed up into the central-north open area
 let merryGoRound = null; // the spinning park roundabout
 let pondSurface = null;  // the pond water mesh (tap it to fish)
 const PLAY_STATIONS = []; // playground activity spots (kids run between them to play)
@@ -2915,11 +2915,11 @@ function updateDayNight(t) {
   setSun(75 * sinE, 70 + dayT * 220);          // elevation rises & sets; azimuth sweeps
   // biased so daytime is a long bright plateau and night is shorter (gets dark slower)
   const dayness = Math.max(0, Math.min(1, sinE * 1.7 + 0.5)); // 0 deep night … 1 high noon
-  sunLight.intensity = 0.1 + dayness * 0.75; // sun softened to ~60% (less bright)
-  hemi.intensity = 0.2 + dayness * 0.5;
+  sunLight.intensity = 0.1 + dayness * 0.56; // softer daytime sun (morning isn't so bright)
+  hemi.intensity = 0.2 + dayness * 0.42;
   // keep daytime exposure modest so the sky shows its blue and white sprites
   // (like Boo) don't blow out; night stays a touch brighter for playability.
-  renderer.toneMappingExposure = 0.5 + dayness * 0.24;
+  renderer.toneMappingExposure = 0.46 + dayness * 0.17;
   scene.fog.color.copy(_nightFog).lerp(_dayFog, dayness);
   starMat.opacity = Math.max(0, 1 - dayness * 3);
   isNight = dayness < 0.12;
