@@ -18,6 +18,7 @@
 - **Forest animals** (`characters/fox.png`, `deer.png`, `squirrel.png`, `hedgehog.png`) — critters who roam the forest and ask for help finding lost things, same style + workflow.
 - **Park cats** (`characters/cat.png`) — friendly cats and neighbor pets that roam the park, same style + workflow.
 - **Battle monsters** (`characters/slime.png`, `goblin.png`, `bat.png`) — cute-but-spooky enemies you can choose to battle, same style + workflow.
+- **Big Boss Dragon** (`characters/boss.png`) — the big tough boss monster, same style + workflow.
 - **Accessories** (`accessories/*.png`: crown, hat, glasses, bow) — wearable
   dressing-room items, generated in the same style and background-removed to
   256×256 transparent PNGs.

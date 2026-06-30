@@ -255,9 +255,9 @@ const ROAM_INNER = 4, ROAM_OUTER = 9;
 const _charDir = new THREE.Vector3();
 function pickRoamTarget(holder) {
   const w = holder.userData;
-  // wanderers drift between the city, the park, and the neighborhood
+  // wanderers drift between the city, the park, the neighborhood, the campsite & the pond
   if (w.wander && Math.random() < 0.3) {
-    const zones = [{ x: 0, z: 0, r: 11 }, { x: PARK.x, z: PARK.z, r: 15 }, { x: 0, z: 24, r: 11 }];
+    const zones = [{ x: 0, z: 0, r: 11 }, { x: PARK.x, z: PARK.z, r: 15 }, { x: 0, z: 24, r: 11 }, { x: CAMP.x, z: CAMP.z, r: 11 }, { x: POND.x, z: POND.z, r: 5 }];
     const zn = zones[Math.floor(Math.random() * zones.length)];
     w.roamCenter = zn; w.roamRadius = zn.r; w.roamInner = 1;
   }
@@ -1289,9 +1289,9 @@ function buildCampfire(x, z) {
 
 // Campsite behind THE STORE & the hospital: the campfire, log seats, and a
 // teepee tent for each of the six characters.
-const CAMP = { x: 7, z: -27 };
-function buildTent(x, z, color) {
-  const g = new THREE.Group(); g.position.set(x, 0, z);
+const CAMP = { x: 6, z: -31 };
+function buildTent(x, z, color, scale = 1) {
+  const g = new THREE.Group(); g.position.set(x, 0, z); g.scale.setScalar(scale);
   const tent = new THREE.Mesh(new THREE.ConeGeometry(1.4, 2.6, 12), new THREE.MeshStandardMaterial({ color, roughness: 0.85 }));
   tent.position.y = 1.3; tent.castShadow = true; g.add(tent);
   const door = new THREE.Mesh(new THREE.CircleGeometry(0.5, 12, 0, Math.PI), new THREE.MeshStandardMaterial({ color: 0x2a2a30, roughness: 1 }));
@@ -1299,16 +1299,27 @@ function buildTent(x, z, color) {
   for (const s of [-1, 1]) { const p = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.8, 5), new THREE.MeshStandardMaterial({ color: 0x6b4a2f })); p.position.set(s * 0.12, 2.5, 0); p.rotation.z = s * 0.2; g.add(p); }
   scene.add(g);
 }
+// one tent for each of the 12 characters; the six who have kids get a small tent beside theirs
+const CAMP_TENTS = [
+  { color: 0xff9bd2, kid: false }, { color: 0x74e08c, kid: false }, { color: 0xf2c14e, kid: false },
+  { color: 0xd9d2c5, kid: false }, { color: 0xece8f6, kid: false }, { color: 0xb18cff, kid: false },
+  { color: 0x9aa6c9, kid: true }, { color: 0xe08a4a, kid: true }, { color: 0x8a5a36, kid: true },
+  { color: 0x6fae54, kid: true }, { color: 0xe0b84a, kid: true }, { color: 0x4a4a52, kid: true },
+];
 function buildCampsite() {
-  const dirt = new THREE.Mesh(new THREE.CircleGeometry(9, 40), new THREE.MeshStandardMaterial({ color: 0x6e5a3e, roughness: 1 }));
+  const dirt = new THREE.Mesh(new THREE.CircleGeometry(13, 48), new THREE.MeshStandardMaterial({ color: 0x6e5a3e, roughness: 1 }));
   dirt.rotation.x = -Math.PI / 2; dirt.position.set(CAMP.x, 0.05, CAMP.z); dirt.receiveShadow = true; scene.add(dirt);
-  noTreeZones.push({ x: CAMP.x, z: CAMP.z, r: 10 });
+  noTreeZones.push({ x: CAMP.x, z: CAMP.z, r: 14 });
   buildCampfire(CAMP.x, CAMP.z); // the campfire + marshmallows live at the campsite now
   const logMat = new THREE.MeshStandardMaterial({ color: 0x6b4a2f, roughness: 0.9 });
-  for (let i = 0; i < 5; i++) { const a = (i / 5) * Math.PI * 2 + 0.3; const log = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 1.4, 8), logMat); log.rotation.z = Math.PI / 2; log.rotation.y = a; log.position.set(CAMP.x + Math.cos(a) * 2.6, 0.22, CAMP.z + Math.sin(a) * 2.6); scene.add(log); }
-  const tentCols = [0xe06a6a, 0x6aa6ff, 0x74e08c, 0xf2c14e, 0xb18cff, 0xff8ac0];
-  for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2 + 0.4; buildTent(CAMP.x + Math.cos(a) * 6.5, CAMP.z + Math.sin(a) * 6.5, tentCols[i]); }
-  const sign = makeSign('CAMP'); sign.scale.setScalar(0.55); sign.position.set(CAMP.x, 2.6, CAMP.z - 9); scene.add(sign);
+  for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2 + 0.3; const log = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 1.4, 8), logMat); log.rotation.z = Math.PI / 2; log.rotation.y = a; log.position.set(CAMP.x + Math.cos(a) * 3.2, 0.22, CAMP.z + Math.sin(a) * 3.2); scene.add(log); }
+  CAMP_TENTS.forEach((c, i) => {
+    const a = (i / CAMP_TENTS.length) * Math.PI * 2 + 0.26;
+    const tx = CAMP.x + Math.cos(a) * 10, tz = CAMP.z + Math.sin(a) * 10;
+    buildTent(tx, tz, c.color, 1);
+    if (c.kid) buildTent(tx - Math.sin(a) * 2.1, tz + Math.cos(a) * 2.1, c.color, 0.55); // small kid tent beside the parent's
+  });
+  const sign = makeSign('CAMP'); sign.scale.setScalar(0.55); sign.position.set(CAMP.x, 2.8, CAMP.z - 13); scene.add(sign);
 }
 buildCampsite();
 function updateCampfire(t) {
@@ -1479,7 +1490,7 @@ function updateDoghouse(dt) {
 // ---------------------------------------------------------------------------
 const PARK = { x: -30, z: -8 };
 const POND = { x: -30, z: -22 };    // duck pond on the SOUTH side of the park
-const PETPARK = { x: -43, z: -6 };  // pet park on the WEST side (opposite the playground)
+const PETPARK = { x: -46, z: -8 };  // pet park on the far WEST side (moved back a bit)
 let merryGoRound = null; // the spinning park roundabout
 let pondSurface = null;  // the pond water mesh (tap it to fish)
 const PLAY_STATIONS = []; // playground activity spots (kids run between them to play)
@@ -1663,8 +1674,8 @@ function buildPark() {
   const box = (g, w, h, d, mat, x, y, z, rx = 0) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.rotation.x = rx; g.add(m); return m; };
   scene.add(sign);
 
-  // ===== PLAYGROUND — EAST side of the park, by the PARK sign =====
-  const pgPos = new THREE.Vector3(PARK.x + 13, 0, PARK.z + 2);
+  // ===== PLAYGROUND — between Pochi's house and the pet park =====
+  const pgPos = new THREE.Vector3(-38, 0, 2);
   PLAYGROUND.copy(pgPos);
   const pg = new THREE.Group(); pg.position.copy(pgPos); scene.add(pg);
   const station = (arr, lx, lz, extra) => arr.push(Object.assign({ x: pgPos.x + lx, z: pgPos.z + lz }, extra)); // record a play spot
@@ -1726,12 +1737,12 @@ function buildPark() {
   // ===== DUCK POND — south side of the park (tap the water to fish) =====
   const water = new THREE.MeshStandardMaterial({ color: 0x3aa0d6, roughness: 0.25, metalness: 0.2, transparent: true, opacity: 0.86 });
   const pondGrp = new THREE.Group(); pondGrp.position.set(POND.x, 0, POND.z); scene.add(pondGrp);
-  const surf = new THREE.Mesh(new THREE.CircleGeometry(4.2, 40), water); surf.rotation.x = -Math.PI / 2; surf.position.y = 0.12; surf.userData.isPond = true; pondGrp.add(surf); pondSurface = surf;
+  const surf = new THREE.Mesh(new THREE.CircleGeometry(5.8, 44), water); surf.rotation.x = -Math.PI / 2; surf.position.y = 0.12; surf.userData.isPond = true; pondGrp.add(surf); pondSurface = surf;
   const rim = new THREE.MeshStandardMaterial({ color: 0x8d8473, roughness: 1 });
-  for (let i = 0; i < 26; i++) { const a = (i / 26) * Math.PI * 2; box(pondGrp, 0.45, 0.28, 0.3, rim, Math.cos(a) * 4.3, 0.1, Math.sin(a) * 4.3).rotation.y = a; }
+  for (let i = 0; i < 32; i++) { const a = (i / 32) * Math.PI * 2; box(pondGrp, 0.45, 0.28, 0.3, rim, Math.cos(a) * 5.9, 0.1, Math.sin(a) * 5.9).rotation.y = a; }
   const pad = new THREE.MeshStandardMaterial({ color: 0x4fae54, roughness: 0.8 });
-  for (const [px, pz] of [[-1.5, 0.7], [1.7, -1], [0.4, 1.8]]) { const lp = new THREE.Mesh(new THREE.CircleGeometry(0.55, 16), pad); lp.rotation.x = -Math.PI / 2; lp.position.set(px, 0.16, pz); pondGrp.add(lp); }
-  const pondSign = makeSign('POND'); pondSign.scale.setScalar(0.45); pondSign.position.set(POND.x, 2.2, POND.z - 5); scene.add(pondSign);
+  for (const [px, pz] of [[-2, 1], [2.3, -1.4], [0.6, 2.6]]) { const lp = new THREE.Mesh(new THREE.CircleGeometry(0.6, 16), pad); lp.rotation.x = -Math.PI / 2; lp.position.set(px, 0.16, pz); pondGrp.add(lp); }
+  const pondSign = makeSign('POND'); pondSign.scale.setScalar(0.45); pondSign.position.set(POND.x, 2.2, POND.z - 6.5); scene.add(pondSign);
 
   // ===== PET PARK — south side of the park, off the path to town =====
   const dp = new THREE.Group(); dp.position.set(PETPARK.x, 0, PETPARK.z); scene.add(dp);
@@ -1816,7 +1827,7 @@ function buildNeighborhood() {
       x: center.x + (Math.random() * 4 - 2), z: center.z + (Math.random() * 4 - 2),
       roamCenter: center, roamInner: 0, roamRadius: atPond ? 2.6 : 13, lines: n.lines,
     });
-    if (!atPond) { parent.userData.wander = true; parent.userData.angler = n.id === 'pochi'; } // Quacky stays in the pond; Pochi fishes
+    parent.userData.wander = true; parent.userData.angler = n.id === 'pochi'; // everyone wanders (the pond is one of the wander zones)
     const kid = spawnRoamer({ id: n.id + '_kid', name: n.name + ' Jr.', sprite: n.sprite, x: center.x, z: center.z, scale: 0.6, child: true, parent, lines: ['Wheee!', 'Look at me!', 'Hehe!'] });
     kid.userData.playArea = 'playground';
     if (atPond) { parent.userData.swimmer = true; kid.userData.swimmer = true; kid.userData.playArea = null; } // pond kids paddle, not playground
@@ -2461,6 +2472,7 @@ const ENEMIES = [
   { id: 'goblin', sprite: 'goblin.png', name: 'Goblin', hp: 36, atk: 6, reward: 9 },
   { id: 'bat', sprite: 'bat.png', name: 'Bat', hp: 28, atk: 5, reward: 8 },
 ];
+const BOSS = { id: 'boss', sprite: 'boss.png', name: 'Big Boss Dragon', hp: 90, atk: 9, reward: 25, boss: true };
 const enemies = [];
 const ENEMY_AREA = { x: 34, z: -18 };
 function spawnEnemies() {
@@ -2469,8 +2481,12 @@ function spawnEnemies() {
     const h = spawnCritter({ sprite: e.sprite, name: e.name, lines: ['Grr!', 'Wanna battle?', 'Rawr!'], scale: 0.85, center: ENEMY_AREA, radius: 7, x: ENEMY_AREA.x + Math.cos(a) * 4, z: ENEMY_AREA.z + Math.sin(a) * 4 });
     h.userData.isEnemy = true; h.userData.enemy = e; enemies.push(h);
   });
-  const sign = makeSign('BATTLE!'); sign.scale.setScalar(0.55); sign.position.set(ENEMY_AREA.x, 2.8, ENEMY_AREA.z - 8); scene.add(sign);
-  noTreeZones.push({ x: ENEMY_AREA.x, z: ENEMY_AREA.z, r: 10 });
+  // the BIG BOSS — bigger and much tougher, stands alone at the back of the battle area
+  const b = spawnCritter({ sprite: BOSS.sprite, name: BOSS.name, lines: ['ROAAR!', 'Face me if you dare!', 'GRRRAH!'], scale: 1.9, center: { x: ENEMY_AREA.x, z: ENEMY_AREA.z - 13 }, radius: 1.5, x: ENEMY_AREA.x, z: ENEMY_AREA.z - 13 });
+  b.userData.isEnemy = true; b.userData.enemy = BOSS; enemies.push(b);
+  const sign = makeSign('BATTLE!'); sign.scale.setScalar(0.55); sign.position.set(ENEMY_AREA.x, 2.8, ENEMY_AREA.z + 8); scene.add(sign);
+  const bossSign = makeSign('BOSS'); bossSign.scale.setScalar(0.5); bossSign.position.set(ENEMY_AREA.x, 3.4, ENEMY_AREA.z - 18); scene.add(bossSign);
+  noTreeZones.push({ x: ENEMY_AREA.x, z: ENEMY_AREA.z - 4, r: 16 });
 }
 
 let battlePromptEl = null, battlePromptFor = null, battlePromptCool = 0;
