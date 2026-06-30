@@ -545,6 +545,7 @@ fetch('./assets/characters/characters.json')
     buildForest();       // a little forest where the quest animals live
     buildForestAnimals();// foxes, deer, squirrels & hedgehogs roaming the forest
     buildGarden();       // a plot you can plant & grow
+    spawnEnemies();      // monsters you can choose to battle
     scatterTrees();      // trees everywhere except on the buildings & park
     // expose the roster + their stats for the game the girls build next
     window.SANDYTEN.roster = roster;
@@ -625,7 +626,7 @@ function saveGame() {
         outfits[id] = { worn, colors: { ...mesh.userData.itemColors } };
       }
     }
-    localStorage.setItem(SAVE_KEY, JSON.stringify({ coins, level, levelStars, bagCount, bagValue, itemOwned, owned, playerId: playerCharId, outfits, questState: (typeof getQuestSave === 'function' ? getQuestSave() : null) }));
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ coins, level, levelStars, starBalance, battleWins, prizes, bagCount, bagValue, itemOwned, owned, playerId: playerCharId, outfits, questState: (typeof getQuestSave === 'function' ? getQuestSave() : null) }));
   } catch (e) { /* storage unavailable */ }
 }
 function hasSave() { try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; } }
@@ -636,6 +637,10 @@ function loadGame() {
   if (!s) return null;
   suppressSave = true;
   coins = s.coins ?? coins; level = s.level ?? 1; levelStars = s.levelStars ?? 0;
+  starBalance = s.starBalance ?? 0; battleWins = s.battleWins ?? 0;
+  Object.keys(prizes).forEach((k) => delete prizes[k]); Object.assign(prizes, s.prizes || {});
+  if (typeof applyPrizeEffects === 'function') applyPrizeEffects();
+  if (typeof refreshPrizes === 'function') refreshPrizes();
   bagCount = s.bagCount ?? 0; bagValue = s.bagValue ?? 0; if (typeof refreshSell === 'function') refreshSell();
   if (typeof setQuestSave === 'function' && s.questState) setQuestSave(s.questState);
   Object.assign(itemOwned, s.itemOwned || {});
@@ -669,8 +674,11 @@ function buildStartMenu() {
   newBtn.addEventListener('click', () => {
     if (performance.now() < startReadyAt) return;
     clearSave();
-    coins = 20; level = 1; levelStars = 0; bagCount = 0; bagValue = 0; renderCoins(); renderLevel();
+    coins = 20; level = 1; levelStars = 0; bagCount = 0; bagValue = 0;
+    starBalance = 0; battleWins = 0; Object.keys(prizes).forEach((k) => delete prizes[k]); applyPrizeEffects();
+    renderCoins(); renderLevel();
     if (typeof refreshSell === 'function') refreshSell();
+    if (typeof refreshPrizes === 'function') refreshPrizes();
     if (typeof resetQuests === 'function') resetQuests();
     hideStartMenu(); showPicker();
   });
@@ -747,7 +755,7 @@ function updatePlayer(dt) {
   if (joyVec.active) { _move.addScaledVector(_forward, -joyVec.y); _move.addScaledVector(_right, joyVec.x); }
   if (_move.lengthSq() === 0) { w.moving = false; return; }
 
-  _move.normalize().multiplyScalar(PLAYER_SPEED * dt);
+  _move.normalize().multiplyScalar(PLAYER_SPEED * prizeSpeed * dt); // Speed Boots prize makes you faster
   let nx = player.position.x + _move.x;
   let nz = player.position.z + _move.z;
   const r = Math.hypot(nx, nz);
@@ -888,11 +896,25 @@ for (let i = 0; i < STAR_COUNT; i++) spawnStar();
 // Coins = money (collected in the world, spent at the shop / dressing room).
 // Stars = experience from quests; each level needs more (5, 10, 15, 20, …).
 let coins = 20, level = 1, levelStars = 0;
+let starBalance = 0;   // stars you've earned and can spend on prizes (separate from your level)
+let battlePower = 0;   // bonus strength from prizes & won battles
+const prizes = {};     // owned special prizes -> true
+// the player gets stronger as they level up (and from the Power prize / winning battles)
+let battleWins = 0;
+function playerAtk() { return 8 + level * 2 + battlePower; }
+function playerMaxHp() { return 30 + level * 6 + battlePower * 3; }
+// special-prize effects the player can buy with stars
+let prizeSpeed = 1, prizeMagnet = false, prizeLucky = false, prizeLantern = false;
+function applyPrizeEffects() {
+  prizeSpeed = prizes.speed ? 1.4 : 1;
+  prizeMagnet = !!prizes.magnet; prizeLucky = !!prizes.lucky; prizeLantern = !!prizes.lantern;
+  battlePower = battleWins + (prizes.power ? 6 : 0);
+}
 let bagCount = 0, bagValue = 0; // crops & fish you've gathered, waiting to be sold at THE STORE
 function addProduce(value) { bagCount += 1; bagValue += value; if (typeof refreshSell === 'function') refreshSell(); }
 function sellProduce() {
   if (bagCount <= 0) return 0;
-  const c = bagValue, s = Math.max(1, Math.floor(bagCount / 2)); // coins + stars (helps you level up!)
+  const c = prizeLucky ? bagValue * 2 : bagValue, s = Math.max(1, Math.floor(bagCount / 2)); // coins + stars (helps you level up!)
   addCoins(c); addStars(s);
   bagCount = 0; bagValue = 0;
   if (typeof refreshSell === 'function') refreshSell();
@@ -905,11 +927,13 @@ const starsToNext = () => level * 5; // +5 every level
 function renderCoins() { if (coinsEl) coinsEl.textContent = '🪙 ' + coins; }
 function renderLevel() { if (levelEl) levelEl.textContent = '✨ Lv ' + level + ' (' + levelStars + '/' + starsToNext() + ')'; }
 function addStars(n) { // earn quest stars; level up when you fill the bar
+  starBalance += n; // also bank them to spend on prizes
   for (let k = 0; k < n; k++) {
     levelStars += 1;
     if (levelStars >= starsToNext()) { levelStars -= starsToNext(); level += 1; playDing(); }
   }
   renderLevel();
+  if (typeof refreshPrizes === 'function') refreshPrizes();
   if (levelEl) animate(levelEl, { scale: [1.4, 1], duration: 320, ease: 'out(3)' });
   if (typeof saveGame === 'function') saveGame();
 }
@@ -961,6 +985,16 @@ function playWoof() {
       o.stop(now + start + 0.16);
     }
   } catch (e) { /* no audio — no problem */ }
+}
+function playSplash() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const now = audioCtx.currentTime;
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = 'sine'; o.frequency.setValueAtTime(880, now); o.frequency.exponentialRampToValueAtTime(280, now + 0.13);
+    g.gain.setValueAtTime(0.0001, now); g.gain.exponentialRampToValueAtTime(0.09, now + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+    o.connect(g).connect(audioCtx.destination); o.start(now); o.stop(now + 0.17);
+  } catch (e) { /* no audio */ }
 }
 
 // ---- Happy party music: several different tunes you can cycle through ----
@@ -1047,7 +1081,9 @@ function updateCollectibles(t, dt) {
     for (const s of collectibles.children) {
       if (s.userData.collected) continue;
       const dx = s.position.x - px, dz = s.position.z - pz;
-      if (dx * dx + dz * dz < COLLECT_DIST2) collectStar(s, true);
+      const d2 = dx * dx + dz * dz;
+      if (prizeMagnet && d2 < 49 && d2 > COLLECT_DIST2) { const k = Math.min(1, dt * 4); s.position.x -= dx * k; s.position.z -= dz * k; } // Coin Magnet pulls coins in
+      if (d2 < COLLECT_DIST2) collectStar(s, true);
     }
   }
   // the other characters collect stars too (just for fun — no money)
@@ -1250,7 +1286,31 @@ function buildCampfire(x, z) {
 
   g.position.set(x, 0, z); scene.add(g);
 }
-buildCampfire(0, 5.5);
+
+// Campsite behind THE STORE & the hospital: the campfire, log seats, and a
+// teepee tent for each of the six characters.
+const CAMP = { x: 7, z: -27 };
+function buildTent(x, z, color) {
+  const g = new THREE.Group(); g.position.set(x, 0, z);
+  const tent = new THREE.Mesh(new THREE.ConeGeometry(1.4, 2.6, 12), new THREE.MeshStandardMaterial({ color, roughness: 0.85 }));
+  tent.position.y = 1.3; tent.castShadow = true; g.add(tent);
+  const door = new THREE.Mesh(new THREE.CircleGeometry(0.5, 12, 0, Math.PI), new THREE.MeshStandardMaterial({ color: 0x2a2a30, roughness: 1 }));
+  door.position.set(0, 0.5, 1.42); g.add(door);
+  for (const s of [-1, 1]) { const p = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.8, 5), new THREE.MeshStandardMaterial({ color: 0x6b4a2f })); p.position.set(s * 0.12, 2.5, 0); p.rotation.z = s * 0.2; g.add(p); }
+  scene.add(g);
+}
+function buildCampsite() {
+  const dirt = new THREE.Mesh(new THREE.CircleGeometry(9, 40), new THREE.MeshStandardMaterial({ color: 0x6e5a3e, roughness: 1 }));
+  dirt.rotation.x = -Math.PI / 2; dirt.position.set(CAMP.x, 0.05, CAMP.z); dirt.receiveShadow = true; scene.add(dirt);
+  noTreeZones.push({ x: CAMP.x, z: CAMP.z, r: 10 });
+  buildCampfire(CAMP.x, CAMP.z); // the campfire + marshmallows live at the campsite now
+  const logMat = new THREE.MeshStandardMaterial({ color: 0x6b4a2f, roughness: 0.9 });
+  for (let i = 0; i < 5; i++) { const a = (i / 5) * Math.PI * 2 + 0.3; const log = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 1.4, 8), logMat); log.rotation.z = Math.PI / 2; log.rotation.y = a; log.position.set(CAMP.x + Math.cos(a) * 2.6, 0.22, CAMP.z + Math.sin(a) * 2.6); scene.add(log); }
+  const tentCols = [0xe06a6a, 0x6aa6ff, 0x74e08c, 0xf2c14e, 0xb18cff, 0xff8ac0];
+  for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2 + 0.4; buildTent(CAMP.x + Math.cos(a) * 6.5, CAMP.z + Math.sin(a) * 6.5, tentCols[i]); }
+  const sign = makeSign('CAMP'); sign.scale.setScalar(0.55); sign.position.set(CAMP.x, 2.6, CAMP.z - 9); scene.add(sign);
+}
+buildCampsite();
 function updateCampfire(t) {
   const flick = 0.82 + Math.sin(t * 12) * 0.1 + Math.sin(t * 23.3) * 0.08;
   for (const f of campfire.flames) {
@@ -1418,8 +1478,8 @@ function updateDoghouse(dt) {
 // Neighborhood + Park: extra families that roam the park with their kids.
 // ---------------------------------------------------------------------------
 const PARK = { x: -30, z: -8 };
-const POND = { x: -45, z: -12 };    // duck pond on the far WEST side of the park
-const PETPARK = { x: -36, z: -21 }; // pet park on the SOUTH-WEST — clear of the town route & houses
+const POND = { x: -30, z: -22 };    // duck pond on the SOUTH side of the park
+const PETPARK = { x: -43, z: -6 };  // pet park on the WEST side (opposite the playground)
 let merryGoRound = null; // the spinning park roundabout
 let pondSurface = null;  // the pond water mesh (tap it to fish)
 const PLAY_STATIONS = []; // playground activity spots (kids run between them to play)
@@ -1519,7 +1579,7 @@ function buildForestAnimals() {
 // Garden — walk up and tap a plot to plant a seed, watch it grow, then tap the
 // grown flower to harvest it for coins. (Plant → sprout → bloom over ~12s.)
 // ---------------------------------------------------------------------------
-const GARDEN = { x: 12, z: 3 };
+const GARDEN = { x: 24, z: 8 }; // beside the first house (clear of its walls)
 const gardenSpots = [];
 const GARDEN_SOIL = new THREE.MeshStandardMaterial({ color: 0x6b4a2f, roughness: 1 });
 const GARDEN_STEM = new THREE.MeshStandardMaterial({ color: 0x4faf54, roughness: 0.8 });
@@ -1603,8 +1663,8 @@ function buildPark() {
   const box = (g, w, h, d, mat, x, y, z, rx = 0) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.rotation.x = rx; g.add(m); return m; };
   scene.add(sign);
 
-  // ===== PLAYGROUND — west-centre of the park (clear of the houses & town path) =====
-  const pgPos = new THREE.Vector3(PARK.x - 4, 0, PARK.z + 2);
+  // ===== PLAYGROUND — EAST side of the park, by the PARK sign =====
+  const pgPos = new THREE.Vector3(PARK.x + 13, 0, PARK.z + 2);
   PLAYGROUND.copy(pgPos);
   const pg = new THREE.Group(); pg.position.copy(pgPos); scene.add(pg);
   const station = (arr, lx, lz, extra) => arr.push(Object.assign({ x: pgPos.x + lx, z: pgPos.z + lz }, extra)); // record a play spot
@@ -1924,7 +1984,8 @@ function miniGameActive() {
     || (mergeEl && mergeEl.style.display !== 'none')
     || (tetEl && tetEl.style.display !== 'none')
     || (matchEl && matchEl.style.display !== 'none')
-    || (snakeEl && snakeEl.style.display !== 'none');
+    || (snakeEl && snakeEl.style.display !== 'none')
+    || (battleEl && battleEl.style.display !== 'none');
 }
 
 // ---- Fruit Merge (slide to merge matching fruits, 2048-style) ----
@@ -2347,6 +2408,157 @@ function closeShop() {
 }
 buildShop();
 
+// ---------------------------------------------------------------------------
+// 🎁 Prize shop — spend ✨ stars on special items you can actually use.
+// ---------------------------------------------------------------------------
+const PRIZES = [
+  { id: 'speed', emoji: '🏃', name: 'Speed Boots', cost: 12, desc: 'Move faster' },
+  { id: 'magnet', emoji: '🧲', name: 'Coin Magnet', cost: 16, desc: 'Pull in nearby coins' },
+  { id: 'lucky', emoji: '🍀', name: 'Lucky Clover', cost: 18, desc: 'Sell produce for 2×' },
+  { id: 'lantern', emoji: '🔦', name: 'Lantern', cost: 14, desc: 'A light that follows you' },
+  { id: 'power', emoji: '💪', name: 'Power Crystal', cost: 22, desc: '+6 battle strength' },
+];
+let prizeEl = null, prizeOpen = false, prizeListEl = null, prizeBalEl = null;
+function buildPrizes() {
+  prizeEl = document.createElement('div'); prizeEl.id = 'prizepanel'; prizeEl.style.display = 'none';
+  const h = document.createElement('h3'); h.append('🎁 Prizes');
+  prizeBalEl = document.createElement('p'); prizeBalEl.className = 'shop-sub';
+  prizeListEl = document.createElement('div'); prizeListEl.className = 'shop-list';
+  const msg = document.createElement('p'); msg.className = 'shop-msg'; prizeEl._msg = msg;
+  prizeEl.append(h, prizeBalEl, prizeListEl, msg);
+  document.body.appendChild(prizeEl); refreshPrizes();
+}
+function refreshPrizes() {
+  if (!prizeListEl) return;
+  if (prizeBalEl) prizeBalEl.textContent = `You have ${starBalance} ⭐ to spend`;
+  prizeListEl.replaceChildren();
+  PRIZES.forEach((p) => {
+    const row = document.createElement('button'); row.className = 'shop-item'; if (prizes[p.id]) row.classList.add('worn');
+    const lbl = document.createElement('span'); lbl.textContent = `${p.emoji} ${p.name} — ${p.desc}`;
+    const price = document.createElement('span'); price.className = 'shop-price'; price.textContent = prizes[p.id] ? '✓ owned' : `${p.cost} ⭐`;
+    row.append(lbl, price);
+    if (!prizes[p.id]) row.addEventListener('click', () => buyPrize(p));
+    prizeListEl.appendChild(row);
+  });
+}
+function buyPrize(p) {
+  if (prizes[p.id]) return;
+  if (starBalance < p.cost) { prizeEl._msg.textContent = `Need ${p.cost} ⭐ — earn more from quests!`; return; }
+  starBalance -= p.cost; prizes[p.id] = true; applyPrizeEffects();
+  prizeEl._msg.textContent = `Got ${p.emoji} ${p.name}!`; if (typeof playDing === 'function') playDing();
+  refreshPrizes(); if (typeof saveGame === 'function') saveGame();
+}
+function openPrizes() { if (typeof questOpen !== 'undefined' && questOpen) closeQuests(); if (typeof tradeOpen !== 'undefined' && tradeOpen) closeTrade(); prizeOpen = true; refreshPrizes(); prizeEl.style.display = 'block'; animate(prizeEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' }); }
+function closePrizes() { prizeOpen = false; animate(prizeEl, { opacity: [1, 0], duration: 200, onComplete: () => { prizeEl.style.display = 'none'; } }); }
+buildPrizes();
+const lanternLight = new THREE.PointLight(0xfff0c0, 0, 16, 1.6); scene.add(lanternLight);
+
+// ---------------------------------------------------------------------------
+// ⚔️ Enemies & battles — optional fights that make your character stronger.
+// ---------------------------------------------------------------------------
+const ENEMIES = [
+  { id: 'slime', sprite: 'slime.png', name: 'Slime', hp: 22, atk: 4, reward: 6 },
+  { id: 'goblin', sprite: 'goblin.png', name: 'Goblin', hp: 36, atk: 6, reward: 9 },
+  { id: 'bat', sprite: 'bat.png', name: 'Bat', hp: 28, atk: 5, reward: 8 },
+];
+const enemies = [];
+const ENEMY_AREA = { x: 34, z: -18 };
+function spawnEnemies() {
+  ENEMIES.forEach((e, i) => {
+    const a = (i / ENEMIES.length) * Math.PI * 2;
+    const h = spawnCritter({ sprite: e.sprite, name: e.name, lines: ['Grr!', 'Wanna battle?', 'Rawr!'], scale: 0.85, center: ENEMY_AREA, radius: 7, x: ENEMY_AREA.x + Math.cos(a) * 4, z: ENEMY_AREA.z + Math.sin(a) * 4 });
+    h.userData.isEnemy = true; h.userData.enemy = e; enemies.push(h);
+  });
+  const sign = makeSign('BATTLE!'); sign.scale.setScalar(0.55); sign.position.set(ENEMY_AREA.x, 2.8, ENEMY_AREA.z - 8); scene.add(sign);
+  noTreeZones.push({ x: ENEMY_AREA.x, z: ENEMY_AREA.z, r: 10 });
+}
+
+let battlePromptEl = null, battlePromptFor = null, battlePromptCool = 0;
+function buildBattlePrompt() {
+  battlePromptEl = document.createElement('div'); battlePromptEl.id = 'battleprompt'; battlePromptEl.style.display = 'none';
+  const txt = document.createElement('span'); battlePromptEl._txt = txt;
+  const fight = document.createElement('button'); fight.className = 'bp-btn fight'; fight.textContent = '⚔️ Fight';
+  fight.addEventListener('click', () => { const e = battlePromptFor; hideBattlePrompt(); if (e) openBattle(e); });
+  const run = document.createElement('button'); run.className = 'bp-btn'; run.textContent = '🏃 No thanks';
+  run.addEventListener('click', () => { battlePromptCool = timer.getElapsed() + 6; hideBattlePrompt(); });
+  battlePromptEl.append(txt, fight, run); document.body.appendChild(battlePromptEl);
+}
+function showBattlePrompt(holder) { battlePromptFor = holder; battlePromptEl._txt.textContent = `A wild ${holder.userData.enemy.name} appears! `; battlePromptEl.style.display = 'flex'; }
+function hideBattlePrompt() { battlePromptFor = null; if (battlePromptEl) battlePromptEl.style.display = 'none'; }
+function updateEnemies(t) {
+  if (!player || battleActive) { hideBattlePrompt(); return; }
+  if (t < battlePromptCool) return;
+  let near = null, nd = 4;
+  for (const h of enemies) {
+    if (h.userData.defeatedUntil && t < h.userData.defeatedUntil) continue;
+    const d = Math.hypot(player.position.x - h.position.x, player.position.z - h.position.z);
+    if (d < nd) { nd = d; near = h; }
+  }
+  if (near && battlePromptFor !== near) showBattlePrompt(near);
+  else if (!near && battlePromptFor) hideBattlePrompt();
+}
+
+let battleEl = null, battleActive = false, battleState = null;
+function buildBattle() {
+  battleEl = document.createElement('div'); battleEl.id = 'battle'; battleEl.className = 'gamemodal'; battleEl.style.display = 'none';
+  const panel = document.createElement('div'); panel.className = 'puzzle-panel';
+  const h = document.createElement('h3'); h.textContent = '⚔️ Battle'; battleEl._title = h;
+  const eName = document.createElement('p'); eName.className = 'battle-name'; battleEl._eName = eName;
+  const eBar = document.createElement('div'); eBar.className = 'hpbar'; const eFill = document.createElement('div'); eFill.className = 'hpfill enemy'; eBar.appendChild(eFill); battleEl._eFill = eFill;
+  const img = document.createElement('img'); img.className = 'battle-sprite'; battleEl._img = img;
+  const pName = document.createElement('p'); pName.className = 'battle-name'; pName.textContent = '🦸 You'; battleEl._pName = pName;
+  const pBar = document.createElement('div'); pBar.className = 'hpbar'; const pFill = document.createElement('div'); pFill.className = 'hpfill'; pBar.appendChild(pFill); battleEl._pFill = pFill;
+  const msg = document.createElement('p'); msg.className = 'puzzle-msg'; battleEl._msg = msg;
+  const atk = document.createElement('button'); atk.className = 'puzzle-close'; atk.style.background = '#e0556a'; atk.textContent = '⚔️ Attack!'; atk.addEventListener('click', battleAttack); battleEl._atk = atk;
+  const run = document.createElement('button'); run.className = 'puzzle-close'; run.textContent = '🏃 Run away'; run.addEventListener('click', () => { battleActive = false; battleEl.style.display = 'none'; });
+  panel.append(h, eName, eBar, img, pName, pBar, msg, atk, run);
+  battleEl.appendChild(panel); document.body.appendChild(battleEl);
+}
+function openBattle(holder) {
+  if (!battleEl) buildBattle();
+  const e = holder.userData.enemy, mhp = playerMaxHp();
+  battleState = { holder, e, eHp: e.hp, eMax: e.hp, pHp: mhp, pMax: mhp, busy: false };
+  battleActive = true;
+  battleEl._title.textContent = `⚔️ Battle: ${e.name}`;
+  battleEl._eName.textContent = `👾 ${e.name}`;
+  battleEl._img.src = `./assets/characters/${e.sprite}`;
+  battleEl._msg.textContent = 'Tap Attack! 💥';
+  battleEl._atk.disabled = false;
+  renderBattle(); battleEl.style.display = 'flex';
+}
+function renderBattle() {
+  const s = battleState; if (!s) return;
+  battleEl._eFill.style.width = Math.max(0, s.eHp / s.eMax * 100) + '%';
+  battleEl._pFill.style.width = Math.max(0, s.pHp / s.pMax * 100) + '%';
+}
+function battleAttack() {
+  const s = battleState; if (!s || s.busy) return;
+  s.busy = true; battleEl._atk.disabled = true;
+  const dmg = Math.max(1, playerAtk() + Math.floor(Math.random() * 5) - 2);
+  s.eHp -= dmg; renderBattle(); battleEl._msg.textContent = `You hit ${s.e.name} for ${dmg}! 💥`;
+  if (s.eHp <= 0) { setTimeout(battleWin, 700); return; }
+  setTimeout(() => {
+    const edmg = s.e.atk + Math.floor(Math.random() * 3);
+    s.pHp -= edmg; renderBattle(); battleEl._msg.textContent = `${s.e.name} hits back for ${edmg}!`;
+    if (s.pHp <= 0) { setTimeout(battleLose, 700); return; }
+    s.busy = false; battleEl._atk.disabled = false;
+  }, 700);
+}
+function battleWin() {
+  const s = battleState;
+  battleEl._msg.textContent = `You won! +${s.e.reward} ✨ — you got stronger! 💪`;
+  addStars(s.e.reward); addCoins(3); battleWins += 1; applyPrizeEffects();
+  s.holder.userData.defeatedUntil = timer.getElapsed() + 30; s.holder.visible = false;
+  setTimeout(() => { if (s.holder) s.holder.visible = true; }, 30000);
+  battleActive = false; setTimeout(() => { battleEl.style.display = 'none'; }, 1700);
+  if (typeof saveGame === 'function') saveGame();
+}
+function battleLose() {
+  battleEl._msg.textContent = `You fainted! Level up & try again. 💫`;
+  battleActive = false; setTimeout(() => { battleEl.style.display = 'none'; }, 1700);
+}
+buildBattlePrompt(); buildBattle();
+
 // Open the shop when the player walks up to the shopkeeper.
 function updateShop() {
   let near = false;
@@ -2642,7 +2854,7 @@ function placeHouses(roster) {
 // Day / night cycle: dawn → morning → day → sunset → night → midnight.
 // Drives the sun, sky, lights, fog and stars, and flags `isNight` for sleepers.
 // ---------------------------------------------------------------------------
-const DAY_LENGTH = 320;   // seconds for one full day (longer so night comes slower)
+const DAY_LENGTH = 560;   // seconds for one full day (long, so it doesn't get dark too fast)
 const DAY_START = 0.18;   // start mid-morning so it's bright on load
 let isNight = false;
 const phaseEl = document.getElementById('timephase');
@@ -2685,7 +2897,8 @@ function updateDayNight(t) {
   const dayT = ((t / DAY_LENGTH) + DAY_START) % 1;
   const sinE = Math.sin(2 * Math.PI * dayT);
   setSun(75 * sinE, 70 + dayT * 220);          // elevation rises & sets; azimuth sweeps
-  const dayness = Math.max(0, sinE);           // 0 deep night … 1 high noon
+  // biased so daytime is a long bright plateau and night is shorter (gets dark slower)
+  const dayness = Math.max(0, Math.min(1, sinE * 1.7 + 0.5)); // 0 deep night … 1 high noon
   sunLight.intensity = 0.1 + dayness * 0.75; // sun softened to ~60% (less bright)
   hemi.intensity = 0.2 + dayness * 0.5;
   // keep daytime exposure modest so the sky shows its blue and white sprites
@@ -2693,13 +2906,13 @@ function updateDayNight(t) {
   renderer.toneMappingExposure = 0.5 + dayness * 0.24;
   scene.fog.color.copy(_nightFog).lerp(_dayFog, dayness);
   starMat.opacity = Math.max(0, 1 - dayness * 3);
-  isNight = (75 * sinE) < 3;
+  isNight = dayness < 0.12;
   // moon: opposite the sun, rises at night and casts soft moonlight
   const moonPhi = (90 - (-75 * sinE)) * Math.PI / 180;
   const moonAz = (70 + dayT * 220 + 180) * Math.PI / 180;
   _moonDir.setFromSphericalCoords(1, moonPhi, moonAz);
   moon.position.copy(_moonDir).multiplyScalar(1300);
-  const moonUp = Math.max(0, -sinE);     // 0 by day … 1 deep night
+  const moonUp = Math.max(0, Math.min(1, (0.18 - dayness) * 6)); // only at deep night (matches the lamps)
   moon.visible = moonUp > 0.02;
   moonLight.position.copy(_moonDir).multiplyScalar(100);
   moonLight.intensity = moonUp * 0.5;    // gentle directional moonlight
@@ -2812,6 +3025,38 @@ function updateWeather(t, dt) {
   // characters put up umbrellas
   for (const b of billboards) { const um = b.parent.userData.umbrella; if (um) um.visible = rainAmt > 0.4; }
 }
+
+// Puddles that appear when it rains — walk through one to splash!
+const puddles = [];
+function buildPuddles() {
+  let seed = 5; const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  for (let i = 0; i < 18; i++) {
+    const a = rnd() * Math.PI * 2, r = 5 + rnd() * 32;
+    const x = Math.cos(a) * r, z = Math.sin(a) * r;
+    const m = new THREE.Mesh(new THREE.CircleGeometry(0.8 + rnd() * 0.7, 20), new THREE.MeshStandardMaterial({ color: 0x6aa6d8, roughness: 0.12, metalness: 0.35, transparent: true, opacity: 0 }));
+    m.rotation.x = -Math.PI / 2; m.position.set(x, 0.06, z); m.visible = false; scene.add(m);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.45, 22), new THREE.MeshBasicMaterial({ color: 0xdaf0ff, transparent: true, opacity: 0, side: THREE.DoubleSide }));
+    ring.rotation.x = -Math.PI / 2; ring.position.set(x, 0.09, z); ring.visible = false; scene.add(ring);
+    puddles.push({ mesh: m, ring, x, z, splashAt: 0, ringT: 0 });
+  }
+}
+function updatePuddles(t) {
+  for (const p of puddles) {
+    const op = Math.min(0.62, rainAmt * 0.62);
+    p.mesh.material.opacity = op; p.mesh.visible = rainAmt > 0.05;
+    if (player && rainAmt > 0.4 && t > p.splashAt && player.userData.moving) {
+      if (Math.hypot(player.position.x - p.x, player.position.z - p.z) < 1.1) {
+        p.splashAt = t + 0.5; p.ring.visible = true; p.ringT = t; playSplash();
+      }
+    }
+    if (p.ring.visible) {
+      const k = (t - p.ringT) / 0.5;
+      if (k >= 1) p.ring.visible = false;
+      else { p.ring.scale.setScalar(1 + k * 3.2); p.ring.material.opacity = (1 - k) * 0.7; }
+    }
+  }
+}
+buildPuddles();
 
 const birds = [];
 function createBirds() {
@@ -3125,6 +3370,8 @@ const tradeBtnEl = document.getElementById('tradeBtn');
 if (tradeBtnEl) tradeBtnEl.addEventListener('click', () => { tradeOpen ? closeTrade() : openTrade(); });
 const questBtnEl = document.getElementById('questBtn');
 if (questBtnEl) questBtnEl.addEventListener('click', () => { questOpen ? closeQuests() : openQuests(); });
+const prizeBtnEl = document.getElementById('prizeBtn');
+if (prizeBtnEl) prizeBtnEl.addEventListener('click', () => { prizeOpen ? closePrizes() : openPrizes(); });
 
 // Party music — each click changes the song, then turns it off
 const musicBtnEl = document.getElementById('musicBtn');
@@ -3260,6 +3507,7 @@ function tick() {
 
   updateDayNight(t);
   updateWeather(t, dt);
+  updatePuddles(t);
   updateBirds(t);
   updateOwl(t);
   updateCampfire(t);
@@ -3279,6 +3527,9 @@ function tick() {
   updateSideQuests(t);
   updateGarden(t);
   updateFishing(t);
+  updateEnemies(t);
+  // lantern prize: a warm light that follows you (brightest at night)
+  if (player) { lanternLight.position.set(player.position.x, 2.4, player.position.z); lanternLight.intensity = prizeLantern ? (isNight ? 5 : 1.5) : 0; }
   if (merryGoRound) merryGoRound.rotation.y += dt * 0.7; // roundabout slowly spins
 
   // Characters: wander around, face the camera (upright billboard), and bob/hop.
