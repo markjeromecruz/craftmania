@@ -1490,7 +1490,7 @@ function updateDoghouse(dt) {
 // ---------------------------------------------------------------------------
 const PARK = { x: -30, z: -8 };
 const POND = { x: -30, z: -22 };    // duck pond on the SOUTH side of the park
-const PETPARK = { x: -46, z: -8 };  // pet park on the far WEST side (moved back a bit)
+const PETPARK = { x: -19, z: -8 };  // pet park on the EAST side of the park (where Pip roams)
 let merryGoRound = null; // the spinning park roundabout
 let pondSurface = null;  // the pond water mesh (tap it to fish)
 const PLAY_STATIONS = []; // playground activity spots (kids run between them to play)
