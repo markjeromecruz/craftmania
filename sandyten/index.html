@@ -287,6 +287,18 @@
     }
     .match-card.up { background: rgba(255,255,255,.16); }
     .match-card:active { transform: scale(.95); }
+    /* Block Blast! */
+    .bb-grid {
+      display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px;
+      width: 288px; max-width: 80vw; margin: 0 auto; aspect-ratio: 1;
+      background: rgba(255,255,255,.04); padding: 4px; border-radius: 10px;
+    }
+    .bb-cell { aspect-ratio: 1; border-radius: 5px; background: rgba(255,255,255,.06); cursor: pointer; }
+    .bb-tray { display: flex; justify-content: center; gap: 14px; margin-top: 14px; min-height: 48px; align-items: center; }
+    .bb-piece { padding: 6px; border-radius: 10px; cursor: pointer; border: 2px solid transparent; }
+    .bb-piece.sel { border-color: #fff; background: rgba(255,255,255,.14); }
+    .bb-mini { display: grid; gap: 2px; }
+    .bb-mcell { width: 13px; height: 13px; border-radius: 3px; }
     .dpad {
       display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 14px;
     }

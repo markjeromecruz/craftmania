@@ -642,7 +642,7 @@ function loadGame() {
   if (typeof applyPrizeEffects === 'function') applyPrizeEffects();
   if (typeof refreshPrizes === 'function') refreshPrizes();
   bagCount = s.bagCount ?? 0; bagValue = s.bagValue ?? 0; if (typeof refreshSell === 'function') refreshSell();
-  if (typeof setQuestSave === 'function' && s.questState) setQuestSave(s.questState);
+  if (typeof resetQuests === 'function') resetQuests(); // your LEVEL is kept, but the quests start fresh each time you play
   Object.assign(itemOwned, s.itemOwned || {});
   Object.assign(owned, s.owned || {});
   renderCoins(); renderLevel();
@@ -916,6 +916,7 @@ function sellProduce() {
   if (bagCount <= 0) return 0;
   const c = prizeLucky ? bagValue * 2 : bagValue, s = Math.max(1, Math.floor(bagCount / 2)); // coins + stars (helps you level up!)
   addCoins(c); addStars(s);
+  if (typeof onSell === 'function') onSell();
   bagCount = 0; bagValue = 0;
   if (typeof refreshSell === 'function') refreshSell();
   if (typeof saveGame === 'function') saveGame();
@@ -1320,6 +1321,8 @@ function buildCampsite() {
     if (c.kid) buildTent(tx - Math.sin(a) * 2.1, tz + Math.cos(a) * 2.1, c.color, 0.55); // small kid tent beside the parent's
   });
   const sign = makeSign('CAMP'); sign.scale.setScalar(0.55); sign.position.set(CAMP.x, 2.8, CAMP.z - 13); scene.add(sign);
+  // a few lamp posts around the campsite so it glows at night
+  for (let i = 0; i < 4; i++) { const a = (i / 4) * Math.PI * 2 + 0.78; makeLampPost(CAMP.x + Math.cos(a) * 12.5, CAMP.z + Math.sin(a) * 12.5); }
 }
 buildCampsite();
 function updateCampfire(t) {
@@ -1335,6 +1338,8 @@ function updateCampfire(t) {
 // Ambulance parked by the hospital, with a blinking red/blue light bar.
 // ---------------------------------------------------------------------------
 const ambulanceLights = [];
+let ambulance = null;
+const AMB_R = 14, AMB_SPEED = 0.16; // it slowly loops around the city
 function buildAmbulance(x, z, ry) {
   const g = new THREE.Group();
   const white = new THREE.MeshStandardMaterial({ color: 0xf4f6f8, roughness: 0.55, metalness: 0.1 });
@@ -1355,14 +1360,20 @@ function buildAmbulance(x, z, ry) {
   bl.position.set(-0.25, 1.9, 0); g.add(bl);
   g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   g.position.set(x, 0, z); g.rotation.y = ry; scene.add(g);
-  ambulanceLights.push(rl.material, bl.material);
+  ambulanceLights.push(rl.material, bl.material); ambulance = g;
 }
-buildAmbulance(9.5, -9.5, -0.6);
+buildAmbulance(AMB_R, -0, 0);
 function updateAmbulance(t) {
   if (ambulanceLights.length < 2) return;
   const on = Math.sin(t * 6) > 0;
   ambulanceLights[0].emissiveIntensity = on ? 1.5 : 0.2; // red
   ambulanceLights[1].emissiveIntensity = on ? 0.2 : 1.5; // blue (alternates)
+  // drive a slow loop around the city, facing the direction of travel
+  if (ambulance) {
+    const a = t * AMB_SPEED;
+    ambulance.position.set(Math.cos(a) * AMB_R, 0, Math.sin(a) * AMB_R);
+    ambulance.rotation.y = Math.atan2(-Math.cos(a), -Math.sin(a)); // body forward (+x) points along the path
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1490,7 +1501,7 @@ function updateDoghouse(dt) {
 // ---------------------------------------------------------------------------
 const PARK = { x: -30, z: -8 };
 const POND = { x: -30, z: -22 };    // duck pond on the SOUTH side of the park
-const PETPARK = { x: -18, z: -24 }; // pet park near the open south-east end of the park
+const PETPARK = { x: -47, z: -16 }; // pet park near the SW end, between the playground and the pond
 let merryGoRound = null; // the spinning park roundabout
 let pondSurface = null;  // the pond water mesh (tap it to fish)
 const PLAY_STATIONS = []; // playground activity spots (kids run between them to play)
@@ -1861,9 +1872,13 @@ const quests = [
   { id: 'crop', name: 'Harvest 4 crops 🥕', target: 4, prog: 0, reward: 6, done: false },
   { id: 'puzzle', name: 'Win the Memory game', target: 1, prog: 0, reward: 10, done: false, puzzle: true, game: 'memory' },
   { id: 'merge', name: 'Win Fruit Merge', target: 1, prog: 0, reward: 10, done: false, puzzle: true, game: 'merge' },
-  { id: 'tetris', name: 'Clear 3 lines (Tetris)', target: 1, prog: 0, reward: 10, done: false, puzzle: true, game: 'tetris' },
+  { id: 'tetris', name: 'Clear 3 lines (Block Blast!)', target: 1, prog: 0, reward: 10, done: false, puzzle: true, game: 'tetris' },
   { id: 'match', name: 'Win Match Pairs', target: 1, prog: 0, reward: 8, done: false, puzzle: true, game: 'match' },
   { id: 'snake', name: 'Score 5 in Snake', target: 1, prog: 0, reward: 10, done: false, puzzle: true, game: 'snake' },
+  { id: 'battle', name: 'Win a battle ⚔️', target: 1, prog: 0, reward: 8, done: false },
+  { id: 'splash', name: 'Splash in 3 puddles 💦', target: 3, prog: 0, reward: 5, done: false },
+  { id: 'sell', name: 'Sell at THE STORE 💰', target: 1, prog: 0, reward: 5, done: false },
+  { id: 'camp', name: 'Visit the campsite 🏕️', target: 1, prog: 0, reward: 5, done: false },
 ];
 function questBump(id) {
   const q = quests.find((x) => x.id === id);
@@ -1884,6 +1899,10 @@ function onTrade() { questBump('trade'); }
 function onPetDog() { questBump('pet'); }
 function onFishCaught() { questBump('fish'); }
 function onCropHarvested() { questBump('crop'); }
+function onBattleWon() { questBump('battle'); }
+function onSplash() { questBump('splash'); }
+function onSell() { questBump('sell'); }
+function onVisitCamp() { questBump('camp'); }
 function resetQuests() {
   for (const q of quests) { q.prog = 0; q.done = false; }
   if (sideQuest) { scene.remove(sideQuest.item); scene.remove(sideQuest.animal); sideQuest = null; }
@@ -2065,83 +2084,76 @@ function mergeCanMove() {
   return false;
 }
 
-// ---- Tetris (clear 3 lines to win) ----
-const TET_COLS = 10, TET_ROWS = 16, TET_CELL = 18;
-const TET_SHAPES = [[[1, 1, 1, 1]], [[1, 1], [1, 1]], [[0, 1, 0], [1, 1, 1]], [[1, 0, 0], [1, 1, 1]], [[0, 0, 1], [1, 1, 1]], [[0, 1, 1], [1, 1, 0]], [[1, 1, 0], [0, 1, 1]]];
-const TET_COLORS = ['#5ad1e0', '#f2d24a', '#b18cff', '#6aa6ff', '#e8881e', '#74e08c', '#ff5a5a'];
-let tetEl = null, tetCanvas = null, tetCtx = null, tetMsg = null, tetBoard = null, tetPiece = null, tetTimer = 0, tetLines = 0, tetOver = true;
+// ---- Block Blast! (tap a block, tap the board; clear full rows & columns) ----
+const BB_N = 8;
+const BB_PIECES = [
+  [[0, 0]], [[0, 0], [0, 1]], [[0, 0], [0, 1], [0, 2]], [[0, 0], [1, 0]], [[0, 0], [1, 0], [2, 0]],
+  [[0, 0], [0, 1], [1, 0], [1, 1]], [[0, 0], [0, 1], [1, 0]], [[0, 0], [0, 1], [1, 1]], [[0, 0], [1, 0], [1, 1]], [[0, 1], [1, 0], [1, 1]],
+];
+const BB_COLORS = ['#ff5a7a', '#6aa6ff', '#74e08c', '#f2c14e', '#b18cff', '#5ad1e0', '#e8881e'];
+let tetEl = null, tetOver = true; // public names kept so miniGameActive & the dispatch keep working
+let bbGrid = null, bbCells = [], bbTray = [], bbSel = -1, bbLines = 0, bbGridEl = null, bbTrayWrap = null, bbMsg = null;
 function buildTetris() {
   tetEl = document.createElement('div'); tetEl.id = 'tetris'; tetEl.className = 'gamemodal'; tetEl.style.display = 'none';
   const panel = document.createElement('div'); panel.className = 'puzzle-panel';
-  const h = document.createElement('h3'); h.textContent = '🟦 Tetris';
-  tetMsg = document.createElement('p'); tetMsg.className = 'puzzle-msg'; tetMsg.textContent = 'Clear 3 lines to win!';
-  tetCanvas = document.createElement('canvas'); tetCanvas.width = TET_COLS * TET_CELL; tetCanvas.height = TET_ROWS * TET_CELL; tetCanvas.className = 'tet-canvas'; tetCtx = tetCanvas.getContext('2d');
-  const pad = document.createElement('div'); pad.className = 'dpad';
-  const mk = (l, fn) => { const b = document.createElement('button'); b.className = 'dpad-btn'; b.textContent = l; b.addEventListener('click', fn); return b; };
-  pad.append(mk('⬅️', () => tetMove(-1, 0)), mk('🔄', tetRotate), mk('⬇️', () => tetMove(0, 1)), mk('➡️', () => tetMove(1, 0)));
+  const h = document.createElement('h3'); h.textContent = '🟦 Block Blast!';
+  bbMsg = document.createElement('p'); bbMsg.className = 'puzzle-msg'; bbMsg.textContent = 'Tap a block, then tap the board. Clear 3 lines!';
+  bbGridEl = document.createElement('div'); bbGridEl.className = 'bb-grid';
+  for (let i = 0; i < BB_N * BB_N; i++) { const cell = document.createElement('div'); cell.className = 'bb-cell'; const r = Math.floor(i / BB_N), col = i % BB_N; cell.addEventListener('click', () => bbPlace(r, col)); bbGridEl.appendChild(cell); bbCells.push(cell); }
+  bbTrayWrap = document.createElement('div'); bbTrayWrap.className = 'bb-tray';
   const close = document.createElement('button'); close.className = 'puzzle-close'; close.textContent = 'Close'; close.addEventListener('click', closeTetris);
-  panel.append(h, tetMsg, tetCanvas, pad, close);
+  panel.append(h, bbMsg, bbGridEl, bbTrayWrap, close);
   tetEl.appendChild(panel); document.body.appendChild(tetEl);
 }
 function startTetris() {
   if (!tetEl) buildTetris();
   keys.clear();
-  tetBoard = Array.from({ length: TET_ROWS }, () => new Array(TET_COLS).fill(-1));
-  tetLines = 0; tetOver = false; tetMsg.textContent = 'Clear 3 lines to win!';
-  tetSpawn(); tetDraw(); tetEl.style.display = 'flex';
-  clearInterval(tetTimer); tetTimer = setInterval(() => { if (!tetOver && !tetMove(0, 1)) tetLock(); }, 600);
+  bbGrid = Array.from({ length: BB_N }, () => new Array(BB_N).fill(-1));
+  bbLines = 0; bbSel = -1; tetOver = false;
+  bbMsg.textContent = 'Tap a block, then tap the board. Clear 3 lines!';
+  bbRefillTray(); bbRenderGrid(); tetEl.style.display = 'flex';
 }
-function closeTetris() { tetOver = true; clearInterval(tetTimer); tetEl.style.display = 'none'; }
-function tetCollide(shape, px, py) {
-  for (let r = 0; r < shape.length; r++) for (let c = 0; c < shape[r].length; c++) {
-    if (!shape[r][c]) continue;
-    const x = px + c, y = py + r;
-    if (x < 0 || x >= TET_COLS || y >= TET_ROWS) return true;
-    if (y >= 0 && tetBoard[y][x] >= 0) return true;
-  }
-  return false;
+function closeTetris() { tetOver = true; tetEl.style.display = 'none'; }
+function bbRandomPiece() { return { cells: BB_PIECES[Math.floor(Math.random() * BB_PIECES.length)], color: Math.floor(Math.random() * BB_COLORS.length) }; }
+function bbRefillTray() { bbTray = [bbRandomPiece(), bbRandomPiece(), bbRandomPiece()]; bbRenderTray(); }
+function bbRenderTray() {
+  bbTrayWrap.replaceChildren();
+  bbTray.forEach((p, i) => {
+    const el = document.createElement('div'); el.className = 'bb-piece' + (i === bbSel ? ' sel' : '');
+    if (!p) { el.style.visibility = 'hidden'; bbTrayWrap.appendChild(el); return; }
+    let maxR = 0, maxC = 0; p.cells.forEach(([r, c]) => { maxR = Math.max(maxR, r); maxC = Math.max(maxC, c); });
+    const mini = document.createElement('div'); mini.className = 'bb-mini'; mini.style.gridTemplateColumns = `repeat(${maxC + 1}, 13px)`;
+    for (let r = 0; r <= maxR; r++) for (let c = 0; c <= maxC; c++) { const cell = document.createElement('div'); cell.className = 'bb-mcell'; if (p.cells.some(([pr, pc]) => pr === r && pc === c)) cell.style.background = BB_COLORS[p.color]; mini.appendChild(cell); }
+    el.appendChild(mini); el.addEventListener('click', () => { bbSel = i; bbRenderTray(); });
+    bbTrayWrap.appendChild(el);
+  });
 }
-function tetSpawn() {
-  const idx = Math.floor(Math.random() * TET_SHAPES.length);
-  const shape = TET_SHAPES[idx].map((row) => row.slice());
-  tetPiece = { shape, color: idx, x: Math.floor((TET_COLS - shape[0].length) / 2), y: 0 };
-  if (tetCollide(shape, tetPiece.x, tetPiece.y)) { tetOver = true; clearInterval(tetTimer); tetMsg.textContent = 'Topped out — Close & retry'; }
+function bbFits(p, r, c) { return p.cells.every(([dr, dc]) => { const rr = r + dr, cc = c + dc; return rr >= 0 && rr < BB_N && cc >= 0 && cc < BB_N && bbGrid[rr][cc] < 0; }); }
+function bbAnyMove() { return bbTray.some((p) => { if (!p) return false; for (let r = 0; r < BB_N; r++) for (let c = 0; c < BB_N; c++) if (bbFits(p, r, c)) return true; return false; }); }
+function bbPlace(r, c) {
+  if (tetOver) return;
+  if (bbSel < 0 || !bbTray[bbSel]) { bbMsg.textContent = 'Tap a block below first! 👇'; return; }
+  const p = bbTray[bbSel];
+  if (!bbFits(p, r, c)) { bbMsg.textContent = "Doesn't fit there — try another spot"; return; }
+  p.cells.forEach(([dr, dc]) => { bbGrid[r + dr][c + dc] = p.color; });
+  bbTray[bbSel] = null; bbSel = -1;
+  const fullRows = [], fullCols = [];
+  for (let i = 0; i < BB_N; i++) { if (bbGrid[i].every((v) => v >= 0)) fullRows.push(i); if (bbGrid.every((row) => row[i] >= 0)) fullCols.push(i); }
+  for (const i of fullRows) for (let cc = 0; cc < BB_N; cc++) bbGrid[i][cc] = -1;
+  for (const i of fullCols) for (let rr = 0; rr < BB_N; rr++) bbGrid[rr][i] = -1;
+  bbLines += fullRows.length + fullCols.length;
+  if (bbLines > 0) bbMsg.textContent = `Lines: ${Math.min(bbLines, 3)}/3`;
+  if (bbTray.every((x) => !x)) bbRefillTray(); else bbRenderTray();
+  bbRenderGrid();
+  if (bbLines >= 3) { tetOver = true; bbMsg.textContent = '3 lines! 🎉'; winMiniGame('tetris'); setTimeout(closeTetris, 1300); return; }
+  if (!bbAnyMove()) { tetOver = true; bbMsg.textContent = 'No moves left — Close & retry'; }
 }
-function tetMove(dx, dy) {
-  if (tetOver || !tetPiece) return false;
-  if (tetCollide(tetPiece.shape, tetPiece.x + dx, tetPiece.y + dy)) return false;
-  tetPiece.x += dx; tetPiece.y += dy; tetDraw(); return true;
-}
-function tetRotate() {
-  if (tetOver || !tetPiece) return;
-  const s = tetPiece.shape, rot = s[0].map((_, c) => s.map((row) => row[c]).reverse());
-  if (!tetCollide(rot, tetPiece.x, tetPiece.y)) { tetPiece.shape = rot; tetDraw(); }
-}
-function tetLock() {
-  const { shape, color, x, y } = tetPiece;
-  for (let r = 0; r < shape.length; r++) for (let c = 0; c < shape[r].length; c++) if (shape[r][c] && y + r >= 0) tetBoard[y + r][x + c] = color;
-  for (let r = TET_ROWS - 1; r >= 0; r--) if (tetBoard[r].every((v) => v >= 0)) { tetBoard.splice(r, 1); tetBoard.unshift(new Array(TET_COLS).fill(-1)); tetLines++; r++; }
-  if (tetLines > 0) tetMsg.textContent = `Lines: ${tetLines}/3`;
-  if (tetLines >= 3) { tetOver = true; clearInterval(tetTimer); tetMsg.textContent = '3 lines! 🎉'; winMiniGame('tetris'); setTimeout(closeTetris, 1300); return; }
-  tetSpawn(); tetDraw();
-}
-function tetDraw() {
-  const ctx = tetCtx; ctx.clearRect(0, 0, tetCanvas.width, tetCanvas.height);
-  ctx.fillStyle = 'rgba(255,255,255,0.05)'; ctx.fillRect(0, 0, tetCanvas.width, tetCanvas.height);
-  const cell = (x, y, col) => { ctx.fillStyle = col; ctx.fillRect(x * TET_CELL + 1, y * TET_CELL + 1, TET_CELL - 2, TET_CELL - 2); };
-  for (let r = 0; r < TET_ROWS; r++) for (let c = 0; c < TET_COLS; c++) if (tetBoard[r][c] >= 0) cell(c, r, TET_COLORS[tetBoard[r][c]]);
-  if (tetPiece) { const { shape, color, x, y } = tetPiece; for (let r = 0; r < shape.length; r++) for (let c = 0; c < shape[r].length; c++) if (shape[r][c] && y + r >= 0) cell(x + c, y + r, TET_COLORS[color]); }
-}
+function bbRenderGrid() { for (let r = 0; r < BB_N; r++) for (let c = 0; c < BB_N; c++) { const v = bbGrid[r][c]; bbCells[r * BB_N + c].style.background = v >= 0 ? BB_COLORS[v] : 'rgba(255,255,255,0.06)'; } }
 // keyboard for the open mini-game (registered before the movement handler, so it wins)
 window.addEventListener('keydown', (e) => {
   if (mergeEl && mergeEl.style.display !== 'none' && !mergeOver) {
     const m = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
     if (m[e.key]) { e.preventDefault(); mergeMove(m[e.key]); }
-  } else if (tetEl && tetEl.style.display !== 'none' && !tetOver) {
-    if (e.key === 'ArrowLeft') { e.preventDefault(); tetMove(-1, 0); }
-    else if (e.key === 'ArrowRight') { e.preventDefault(); tetMove(1, 0); }
-    else if (e.key === 'ArrowDown') { e.preventDefault(); tetMove(0, 1); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); tetRotate(); }
   } else if (snakeEl && snakeEl.style.display !== 'none' && !snakeOver) {
     const d = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
     if (d[e.key]) { e.preventDefault(); snakeTurn(d[e.key]); }
@@ -2564,6 +2576,7 @@ function battleWin() {
   const s = battleState;
   battleEl._msg.textContent = `You won! +${s.e.reward} ✨ — you got stronger! 💪`;
   addStars(s.e.reward); addCoins(3); battleWins += 1; applyPrizeEffects();
+  if (typeof onBattleWon === 'function') onBattleWon();
   s.holder.userData.defeatedUntil = timer.getElapsed() + 30; s.holder.visible = false;
   setTimeout(() => { if (s.holder) s.holder.visible = true; }, 30000);
   battleActive = false; setTimeout(() => { battleEl.style.display = 'none'; }, 1700);
@@ -3022,7 +3035,11 @@ const rain = new THREE.Points(rainGeo, rainMat);
 rain.frustumCulled = false; scene.add(rain);
 const _rainGray = new THREE.Color(0x6b7686);
 function updateWeather(t, dt) {
-  if (t > nextWeatherAt) { weather = weather === 'sunny' ? 'rainy' : 'sunny'; nextWeatherAt = t + 35 + Math.random() * 45; }
+  // mostly sunny, with the occasional short rain shower
+  if (t > nextWeatherAt) {
+    if (weather === 'rainy') { weather = 'sunny'; nextWeatherAt = t + 70 + Math.random() * 70; }       // sunny for a good while after rain
+    else { weather = Math.random() < 0.3 ? 'rainy' : 'sunny'; nextWeatherAt = t + (weather === 'rainy' ? 22 + Math.random() * 16 : 45 + Math.random() * 45); }
+  }
   rainAmt += ((weather === 'rainy' ? 1 : 0) - rainAmt) * Math.min(1, dt * 0.5);
   rainMat.opacity = rainAmt * 0.85;
   rain.visible = rainAmt > 0.02;
@@ -3063,6 +3080,7 @@ function updatePuddles(t) {
     if (player && rainAmt > 0.4 && t > p.splashAt && player.userData.moving) {
       if (Math.hypot(player.position.x - p.x, player.position.z - p.z) < 1.1) {
         p.splashAt = t + 0.5; p.ring.visible = true; p.ringT = t; playSplash();
+        if (typeof onSplash === 'function') onSplash();
       }
     }
     if (p.ring.visible) {
@@ -3546,6 +3564,7 @@ function tick() {
   updateEnemies(t);
   // lantern prize: a warm light that follows you (brightest at night)
   if (player) { lanternLight.position.set(player.position.x, 2.4, player.position.z); lanternLight.intensity = prizeLantern ? (isNight ? 5 : 1.5) : 0; }
+  if (player && Math.hypot(player.position.x - CAMP.x, player.position.z - CAMP.z) < 13) onVisitCamp(); // campsite quest
   if (merryGoRound) merryGoRound.rotation.y += dt * 0.7; // roundabout slowly spins
 
   // Characters: wander around, face the camera (upright billboard), and bob/hop.
