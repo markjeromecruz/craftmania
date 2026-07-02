@@ -568,6 +568,7 @@ const hintEl = document.querySelector('#hud .hint');
 const changeBtn = document.getElementById('changeBtn');
 changeBtn.addEventListener('click', showPicker);
 
+const lockedCardRefs = []; // { card, lockBadge, nm, c } for each locked character — kept fresh by refreshPickerLocks()
 function buildPicker(roster) {
   pickerEl = document.createElement('div');
   pickerEl.id = 'picker';
@@ -593,16 +594,52 @@ function buildPicker(roster) {
     });
     grid.appendChild(card);
   };
+  // the first six (the original roster) are always available
   roster.forEach((c) => addCard(c.id, c.name, c.sprite));
-  if (typeof NEIGHBORS !== 'undefined') NEIGHBORS.forEach((n) => addCard(n.id, n.name, n.sprite)); // neighbors
-  if (typeof NEIGHBORS2 !== 'undefined') NEIGHBORS2.forEach((n) => addCard(n.id, n.name, n.sprite)); // new families
+  // the six neighbors start LOCKED — unlock them one at a time with XP
+  (typeof LOCKED_CHARS !== 'undefined' ? LOCKED_CHARS : []).forEach((c) => {
+    const card = document.createElement('button');
+    card.className = 'picker-card';
+    const img = document.createElement('img');
+    img.src = `./assets/characters/${c.sprite}`;
+    img.alt = c.name;
+    const lockBadge = document.createElement('span'); lockBadge.className = 'lock-badge'; lockBadge.textContent = '🔒';
+    const nm = document.createElement('span'); nm.className = 'lock-label';
+    card.append(img, lockBadge, nm);
+    card.addEventListener('click', () => {
+      if (performance.now() < pickerReadyAt) return;
+      if (isCharUnlocked(c.id)) { playAs(c.id); hidePicker(); showPetChoice(); return; }
+      if (totalXP >= c.xpNeeded) {
+        unlockedIds.add(c.id);
+        if (typeof saveGame === 'function') saveGame();
+        if (typeof questToast === 'function') questToast(`🔓 You unlocked ${c.name}!`);
+        if (typeof playDing === 'function') playDing();
+        refreshPickerLocks();
+        playAs(c.id); hidePicker(); showPetChoice();
+      } else if (typeof questToast === 'function') {
+        questToast(`Need ${c.xpNeeded} XP to unlock ${c.name}! You have ${totalXP} XP so far.`);
+      }
+    });
+    grid.appendChild(card);
+    lockedCardRefs.push({ card, lockBadge, nm, c });
+  });
   panel.append(h, grid);
   pickerEl.appendChild(panel);
   document.body.appendChild(pickerEl);
+  refreshPickerLocks();
+}
+function refreshPickerLocks() {
+  for (const { card, lockBadge, nm, c } of lockedCardRefs) {
+    const unlocked = isCharUnlocked(c.id);
+    card.classList.toggle('locked', !unlocked);
+    lockBadge.style.display = unlocked ? 'none' : '';
+    nm.textContent = unlocked ? c.name : `🔒 ${Math.min(totalXP, c.xpNeeded)}/${c.xpNeeded} XP`;
+  }
 }
 
 function showPicker() {
   if (!pickerEl) return;
+  refreshPickerLocks(); // always show current unlock progress
   pickerEl.style.display = 'flex';
   pickerReadyAt = performance.now() + 350; // brief no-click window during fade-in
   animate(pickerEl, { opacity: [0, 1], duration: 280, ease: 'out(3)' });
@@ -630,7 +667,11 @@ function buildPetChoice() {
   const h = document.createElement('h2');
   h.append('Do you want a ', Object.assign(document.createElement('span'), { textContent: 'pet' }), '?');
   const grid = document.createElement('div'); grid.className = 'picker-grid';
-  const pick = (kind) => { applyPetChoice(kind); hidePetChoice(); showChildChoice(); };
+  const pick = (kind) => {
+    hidePetChoice();
+    if (kind === 'none') { applyPetChoice('none'); showChildChoice(); }
+    else showPetNamePrompt(kind); // dog/cat: let them name it first
+  };
   buildChoiceCard(grid, '🐶', 'A dog!', () => pick('dog'), () => petChoiceReadyAt);
   buildChoiceCard(grid, '🐱', 'A cat!', () => pick('cat'), () => petChoiceReadyAt);
   buildChoiceCard(grid, '🚫', "No pet, that's okay!", () => pick('none'), () => petChoiceReadyAt);
@@ -647,6 +688,46 @@ function showPetChoice() {
 function hidePetChoice() {
   if (!petChoiceEl) return;
   animate(petChoiceEl, { opacity: [1, 0], duration: 200, onComplete: () => { petChoiceEl.style.display = 'none'; } });
+}
+
+// ---- Name your pet: shown right after choosing a dog or cat ----
+let petNameEl = null, petNameInput = null, petNameReadyAt = 0, petNameKind = 'dog';
+function buildPetNamePrompt() {
+  petNameEl = document.createElement('div');
+  petNameEl.id = 'petname'; petNameEl.className = 'modal-overlay';
+  const panel = document.createElement('div'); panel.className = 'picker-panel';
+  const h = document.createElement('h2');
+  h.append('Name your ', Object.assign(document.createElement('span'), { textContent: 'pet' }), '!');
+  petNameInput = document.createElement('input');
+  petNameInput.type = 'text'; petNameInput.maxLength = 12; petNameInput.className = 'name-input';
+  petNameInput.autocomplete = 'off';
+  const go = document.createElement('button'); go.className = 'start-btn'; go.textContent = "🐾 Let's go!";
+  const confirmName = () => {
+    if (performance.now() < petNameReadyAt) return;
+    const typed = petNameInput.value.trim().slice(0, 12);
+    hidePetNamePrompt();
+    applyPetChoice(petNameKind, typed);
+    showChildChoice();
+  };
+  go.addEventListener('click', confirmName);
+  petNameInput.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') confirmName(); });
+  panel.append(h, petNameInput, go);
+  petNameEl.appendChild(panel);
+  document.body.appendChild(petNameEl);
+}
+function showPetNamePrompt(kind) {
+  if (!petNameEl) buildPetNamePrompt();
+  petNameKind = kind;
+  petNameInput.value = kind === 'cat' ? CAT_NAME : DOG_NAME;
+  petNameEl.style.display = 'flex';
+  petNameReadyAt = performance.now() + 350;
+  animate(petNameEl, { opacity: [0, 1], duration: 280, ease: 'out(3)' });
+  setTimeout(() => { petNameInput.focus(); petNameInput.select(); }, 150);
+}
+function hidePetNamePrompt() {
+  if (!petNameEl) return;
+  petNameInput.blur();
+  animate(petNameEl, { opacity: [1, 0], duration: 200, onComplete: () => { petNameEl.style.display = 'none'; } });
 }
 
 // ---- Child choice: then, choose whether you have a child companion ----
@@ -691,7 +772,8 @@ function saveGame() {
         outfits[id] = { worn, colors: { ...mesh.userData.itemColors } };
       }
     }
-    localStorage.setItem(SAVE_KEY, JSON.stringify({ coins, level, levelStars, starBalance, battleWins, prizes, bagCount, bagValue, itemOwned, owned, playerId: playerCharId, petKind, hasChild, outfits, questState: (typeof getQuestSave === 'function' ? getQuestSave() : null) }));
+    const activePet = typeof currentPlayerPet === 'function' ? currentPlayerPet() : null;
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ coins, level, levelStars, starBalance, battleWins, prizes, bagCount, bagValue, itemOwned, owned, playerId: playerCharId, petKind, petName: activePet ? activePet.name : '', hasChild, totalXP, unlockedIds: [...unlockedIds], outfits, questState: (typeof getQuestSave === 'function' ? getQuestSave() : null) }));
   } catch (e) { /* storage unavailable */ }
 }
 function hasSave() { try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; } }
@@ -703,6 +785,12 @@ function loadGame() {
   suppressSave = true;
   coins = s.coins ?? coins; level = s.level ?? 1; levelStars = s.levelStars ?? 0;
   starBalance = s.starBalance ?? 0; battleWins = s.battleWins ?? 0;
+  totalXP = s.totalXP ?? 0;
+  unlockedIds.clear(); (s.unlockedIds || []).forEach((id) => unlockedIds.add(id));
+  // grandfather clause: if you were already playing as a "locked" character
+  // before this update, you keep them — you're not suddenly locked out
+  if (s.playerId) unlockedIds.add(s.playerId);
+  if (typeof refreshPickerLocks === 'function') refreshPickerLocks();
   Object.keys(prizes).forEach((k) => delete prizes[k]); Object.assign(prizes, s.prizes || {});
   if (typeof applyPrizeEffects === 'function') applyPrizeEffects();
   if (typeof refreshPrizes === 'function') refreshPrizes();
@@ -744,6 +832,7 @@ function buildStartMenu() {
     if (typeof removePlayerPet === 'function') removePlayerPet();
     if (typeof removePlayerKid === 'function') removePlayerKid();
     petKind = 'none'; hasChild = false;
+    totalXP = 0; unlockedIds.clear(); if (typeof refreshPickerLocks === 'function') refreshPickerLocks();
     renderCoins(); renderLevel();
     if (typeof refreshSell === 'function') refreshSell();
     if (typeof refreshPrizes === 'function') refreshPrizes();
@@ -757,7 +846,7 @@ function buildStartMenu() {
     if (s && s.playerId && holdersById[s.playerId]) {
       playAs(s.playerId);
       // resuming your saved character keeps your pet/child as-is — no re-asking
-      if (typeof applyPetChoice === 'function') applyPetChoice(s.petKind || 'none');
+      if (typeof applyPetChoice === 'function') applyPetChoice(s.petKind || 'none', s.petName || '');
       if (typeof applyChildChoice === 'function') applyChildChoice(!!s.hasChild);
     } else {
       showPicker();
@@ -926,11 +1015,11 @@ renderer.domElement.addEventListener('pointerup', (e) => {
     startPetPark();
   } else if (petDog && obj === petDog.mesh) { // clicked your dog → bark!
     playWoof();
-    showBubble(petDog.mesh, DOG_NAME, 'Woof! 🐶', 1.3);
+    showBubble(petDog.mesh, petDog.name, 'Woof! 🐶', 1.3);
     petDog.reactUntil = timer.getElapsed() + 0.4; // little excited hop
     if (typeof onPetDog === 'function') onPetDog(); // quest progress
   } else if (petCat && obj === petCat.mesh) { // clicked your cat → purr!
-    showBubble(petCat.mesh, CAT_NAME, 'Purr~ 🐱', 1.1);
+    showBubble(petCat.mesh, petCat.name, 'Purr~ 🐱', 1.1);
     petCat.reactUntil = timer.getElapsed() + 0.4; // little excited hop
     if (typeof onPetDog === 'function') onPetDog(); // quest progress
   } else {
@@ -1015,6 +1104,7 @@ function renderCoins() { if (coinsEl) coinsEl.textContent = '🪙 ' + coins; }
 function renderLevel() { if (levelEl) levelEl.textContent = '✨ Lv ' + level + ' (' + levelStars + '/' + starsToNext() + ')'; }
 function addStars(n) { // earn quest stars; level up when you fill the bar
   starBalance += n; // also bank them to spend on prizes
+  totalXP += n;     // and count toward your lifetime total, which unlocks new characters
   for (let k = 0; k < n; k++) {
     levelStars += 1;
     if (levelStars >= starsToNext()) { levelStars -= starsToNext(); level += 1; playDing(); }
@@ -1483,7 +1573,7 @@ let petDog = null, petCat = null;
 const DOG_NAME = 'Daisy', CAT_NAME = 'Whiskers';
 let petKind = 'none'; // 'dog' | 'cat' | 'none' — the CURRENT character's pet choice
 function currentPlayerPet() { return petDog || petCat || null; }
-function spawnPlayerDog() {
+function spawnPlayerDog(name) {
   const tex = textureLoader.load('./assets/characters/dog.png');
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
@@ -1497,15 +1587,16 @@ function spawnPlayerDog() {
   const px = player ? player.position.x + 1.5 : 4, pz = player ? player.position.z + 1.5 : 7;
   holder.position.set(px, 0, pz);
   holder.add(mesh);
-  const label = makeNameLabel(DOG_NAME);
+  const petName = (name || DOG_NAME).trim().slice(0, 12) || DOG_NAME;
+  const label = makeNameLabel(petName);
   label.position.set(0, size + 0.35, 0);
   label.scale.set(2.0, 0.5, 1);
   holder.add(label);
   scene.add(holder);
-  petDog = { holder, mesh, baseY: size / 2, playUntil: 0, station: null };
-  spawnDoghouse();
+  petDog = { holder, mesh, baseY: size / 2, playUntil: 0, station: null, name: petName };
+  spawnDoghouse(petName);
 }
-function spawnPlayerCat() {
+function spawnPlayerCat(name) {
   const tex = textureLoader.load('./assets/characters/cat.png');
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
@@ -1519,12 +1610,13 @@ function spawnPlayerCat() {
   const px = player ? player.position.x + 1.5 : 4, pz = player ? player.position.z + 1.5 : 7;
   holder.position.set(px, 0, pz);
   holder.add(mesh);
-  const label = makeNameLabel(CAT_NAME);
+  const petName = (name || CAT_NAME).trim().slice(0, 12) || CAT_NAME;
+  const label = makeNameLabel(petName);
   label.position.set(0, size + 0.35, 0);
   label.scale.set(2.0, 0.5, 1);
   holder.add(label);
   scene.add(holder);
-  petCat = { holder, mesh, baseY: size / 2, playUntil: 0, station: null };
+  petCat = { holder, mesh, baseY: size / 2, playUntil: 0, station: null, name: petName };
 }
 function removePlayerPet() {
   if (petDog) { scene.remove(petDog.holder); petDog = null; }
@@ -1532,11 +1624,11 @@ function removePlayerPet() {
   if (doghouse) { scene.remove(doghouse); doghouse = null; }
   ballState = 'idle'; if (typeof ball !== 'undefined') ball.visible = false;
 }
-function applyPetChoice(kind) {
+function applyPetChoice(kind, name) {
   removePlayerPet();
   petKind = kind === 'dog' || kind === 'cat' ? kind : 'none';
-  if (petKind === 'dog') spawnPlayerDog();
-  else if (petKind === 'cat') spawnPlayerCat();
+  if (petKind === 'dog') spawnPlayerDog(name);
+  else if (petKind === 'cat') spawnPlayerCat(name);
   if (typeof updateThrowBtnVisibility === 'function') updateThrowBtnVisibility();
   if (typeof saveGame === 'function') saveGame();
 }
@@ -1548,8 +1640,7 @@ function startPetPark() {
   if (!PET_STATIONS.length) return;
   pet.playUntil = timer.getElapsed() + PET_PLAY_DURATION;
   pet.station = PET_STATIONS[Math.floor(Math.random() * PET_STATIONS.length)];
-  const label = pet === petDog ? DOG_NAME : CAT_NAME;
-  if (typeof questToast === 'function') questToast(`${label} is off to play! 🐾`);
+  if (typeof questToast === 'function') questToast(`${pet.name} is off to play! 🐾`);
 }
 // while the pet is off playing, aim it at its chosen pet-park station instead of the player
 function petPlayTargetOrNull(pet, t) {
@@ -1566,31 +1657,39 @@ function perpFollowOffset(originX, originZ, side, dist) {
   return [originX + (-dirZ / len) * side * dist, originZ + (dirX / len) * side * dist];
 }
 
-// ---- A ball you can throw for the dog to fetch (only while you have a dog) ----
+// ---- A toy you can throw for your pet to fetch/chase — a ball for a dog, a
+// lighter yarn toy for a cat (same physics either way, just scaled down a bit) ----
 const BALL_R = 0.28;
 let ballState = 'idle';            // idle | flying | onground | carried
 const ballVel = new THREE.Vector3();
-const ball = new THREE.Mesh(
-  new THREE.SphereGeometry(BALL_R, 16, 12),
-  new THREE.MeshStandardMaterial({ color: 0xd7f25a, roughness: 0.6 })
-);
+const ballDogMat = new THREE.MeshStandardMaterial({ color: 0xd7f25a, roughness: 0.6 }); // tennis ball
+const ballCatMat = new THREE.MeshStandardMaterial({ color: 0xe85a9a, roughness: 0.85 }); // yarn ball
+const ball = new THREE.Mesh(new THREE.SphereGeometry(BALL_R, 16, 12), ballDogMat);
 ball.castShadow = true; ball.visible = false; scene.add(ball);
 const _throwDir = new THREE.Vector3();
+let ballWaitingSince = 0; // when the toy last landed/needed fetching — used to un-stick a lost toy
 function throwBall() {
-  if (!player || ballState !== 'idle' || !petDog) return; // one ball at a time, and only if you have a dog
+  if (!player || ballState !== 'idle' || !currentPlayerPet()) return; // one toy at a time, and only with a pet
+  ball.material = petCat ? ballCatMat : ballDogMat;
   ball.position.set(player.position.x, player.position.y + 1.4, player.position.z);
   camera.getWorldDirection(_throwDir); _throwDir.y = 0;
   if (_throwDir.lengthSq() === 0) _throwDir.set(0, 0, -1);
   _throwDir.normalize();
-  ballVel.copy(_throwDir).multiplyScalar(10); ballVel.y = 7; // forward + up
+  const power = petCat ? 0.55 : 1; // a light yarn toy doesn't arc as far as a tennis ball
+  ballVel.copy(_throwDir).multiplyScalar(10 * power); ballVel.y = 7 * power;
   ball.visible = true; ballState = 'flying';
 }
 function updateBall(dt) {
-  if (ballState !== 'flying') return;
-  ballVel.y -= 18 * dt;            // gravity
-  ball.position.addScaledVector(ballVel, dt);
-  const groundY = houseFloorHeight(ball.position.x, ball.position.z) + BALL_R;
-  if (ball.position.y <= groundY) { ball.position.y = groundY; ballState = 'onground'; }
+  if (ballState === 'flying') {
+    ballVel.y -= 18 * dt;            // gravity — the same for every toy
+    ball.position.addScaledVector(ballVel, dt);
+    const groundY = houseFloorHeight(ball.position.x, ball.position.z) + BALL_R;
+    if (ball.position.y <= groundY) { ball.position.y = groundY; ballState = 'onground'; ballWaitingSince = timer.getElapsed(); }
+  } else if (ballState !== 'idle' && timer.getElapsed() - ballWaitingSince > 10) {
+    // the toy landed somewhere your pet couldn't reach (e.g. behind a wall) —
+    // don't leave the throw button stuck disabled forever, just let it go
+    ballState = 'idle'; ball.visible = false;
+  }
 }
 
 function updateDog(t, dt) {
@@ -1636,9 +1735,12 @@ function updateDog(t, dt) {
 function updatePlayerCat(t, dt) {
   if (!petCat) return;
   const h = petCat.holder;
+  // pick a target: play at the pet park, pounce on the toy, carry it back, or follow the player
   let tx, tz, speed = 9 * prizeSpeed, keep = 1.6, playing = false;
   const playSpot = petPlayTargetOrNull(petCat, t);
   if (playSpot) { tx = playSpot.x; tz = playSpot.z; speed = 7; keep = 0.7; }
+  else if (ballState === 'onground') { tx = ball.position.x; tz = ball.position.z; speed = 14; keep = 0.6; } // a quick pounce — faster than the trot
+  else if (ballState === 'carried') { tx = player ? player.position.x : h.position.x; tz = player ? player.position.z : h.position.z; speed = 12; keep = 1.5; }
   else if (player) { [tx, tz] = perpFollowOffset(player.position.x, player.position.z, -1, 0.9); } // trail beside the player (opposite side from a child)
   else { tx = h.position.x; tz = h.position.z; }
 
@@ -1656,6 +1758,15 @@ function updatePlayerCat(t, dt) {
   } else if (playSpot) { playing = true; }
   h.position.y = houseFloorHeight(h.position.x, h.position.z);
 
+  // pounce state transitions (paused while off playing at the pet park)
+  if (!playSpot) {
+    if (ballState === 'onground' && d <= keep + 0.3) { ballState = 'carried'; }
+    if (ballState === 'carried') {
+      ball.position.set(h.position.x, h.position.y + 0.45, h.position.z); // batted along under the cat
+      if (d <= keep + 0.3) { ballState = 'idle'; ball.visible = false; }  // brought back to you
+    }
+  }
+
   const excited = petCat.reactUntil && t < petCat.reactUntil;
   petCat.mesh.rotation.y = Math.atan2(camera.position.x - h.position.x, camera.position.z - h.position.z);
   petCat.mesh.position.y = petCat.baseY + (playing ? Math.abs(Math.sin(t * 7)) * 0.3 : (moving || excited) ? Math.abs(Math.sin(t * 12)) * 0.2 : Math.sin(t * 2) * 0.06);
@@ -1667,7 +1778,7 @@ function updatePlayerCat(t, dt) {
 // ---------------------------------------------------------------------------
 let doghouse = null;
 const doghouseTarget = new THREE.Vector3(3, 0, 3); // moves to your home when you pick a character
-function spawnDoghouse() {
+function spawnDoghouse(name) {
   const g = new THREE.Group();
   const wallMat = new THREE.MeshStandardMaterial({ color: 0xc98a5a, roughness: 0.9 });
   const roofMat = new THREE.MeshStandardMaterial({ color: 0xb44a3a, roughness: 0.8 });
@@ -1680,7 +1791,7 @@ function spawnDoghouse() {
   door.rotation.x = Math.PI / 2; door.position.set(0, 0.45, 0.76); g.add(door); // arched doorway
   const doorBase = new THREE.Mesh(new THREE.BoxGeometry(0.84, 0.45, 0.2), darkMat);
   doorBase.position.set(0, 0.27, 0.76); g.add(doorBase);
-  const label = makeNameLabel(DOG_NAME);
+  const label = makeNameLabel(name || DOG_NAME);
   label.position.set(0, 2.1, 0); label.scale.set(2.0, 0.5, 1);
   g.add(label);
   g.position.set(doghouseTarget.x, 0, doghouseTarget.z);
@@ -2054,6 +2165,19 @@ const NEIGHBORS2 = [
   { id: 'quacky', name: 'Quacky', sprite: 'duck.png', wall: 0xf6ecc0, roof: 0xe0b84a, lines: ['Quack quack!', 'Off to the pond!', 'Waddle waddle!'], ang: 108, pet: 'dog.png', petName: 'Biscuit' },
   { id: 'pochi', name: 'Pochi', sprite: 'panda.png', wall: 0xe9e9ee, roof: 0x4a4a52, lines: ['Munch munch!', 'Bamboo, yum!', 'Hehe, hello!'], ang: 156, pet: 'cat.png', petName: 'Yuki' },
 ];
+
+// ---------------------------------------------------------------------------
+// Character unlocks: the first 6 (the original roster) are free from the
+// start; these 6 neighbors are LOCKED at first and unlock one at a time as you
+// earn XP (stars) — each one costs 100 XP more than the last (100, 200, 300…).
+// XP here is a lifetime total (never spent/lost) so it's a milestone to reach,
+// separate from the ✨ star balance you spend at the Prize shop.
+// ---------------------------------------------------------------------------
+const LOCKED_CHARS = [...NEIGHBORS, ...NEIGHBORS2].map((c, i) => ({ ...c, xpNeeded: (i + 1) * 100 }));
+let totalXP = 0;                 // lifetime stars earned — a milestone counter, never decreases
+const unlockedIds = new Set();   // ids of locked characters unlocked so far
+function isCharUnlocked(id) { return !LOCKED_CHARS.some((c) => c.id === id) || unlockedIds.has(id); }
+
 function buildNeighborhood() {
   // path from the courtyard out to the park
   buildPath(-6, 0, -18, -4); buildPath(-18, -4, PARK.x + 2, PARK.z);
@@ -2734,7 +2858,16 @@ const ENEMIES = [
   { id: 'goblin', sprite: 'goblin.png', name: 'Goblin', hp: 36, atk: 6, reward: 9 },
   { id: 'bat', sprite: 'bat.png', name: 'Bat', hp: 28, atk: 5, reward: 8 },
 ];
-const BOSS = { id: 'boss', sprite: 'boss.png', name: 'Big Boss Dragon', hp: 90, atk: 9, reward: 25, boss: true };
+// Three big bosses, each tougher than the last, each with its own spot so their
+// battle prompts never overlap. All within reach of PLAY_RADIUS (58 from origin).
+const BOSSES = [
+  { id: 'boss', sprite: 'boss.png', name: 'Big Boss Dragon', hp: 90, atk: 9, reward: 25, boss: true,
+    pos: { x: 34, z: -31 }, scale: 1.9, lines: ['ROAAR!', 'Face me if you dare!', 'GRRRAH!'] },
+  { id: 'boss2', sprite: 'golem.png', name: 'Boulder Golem', hp: 110, atk: 10, reward: 30, boss: true,
+    pos: { x: 46, z: -22 }, scale: 2.0, lines: ['...RUMBLE...', 'You dare wake me?', 'CRUMBLE THIS!'] },
+  { id: 'boss3', sprite: 'yeti.png', name: 'Frost Yeti', hp: 130, atk: 11, reward: 35, boss: true,
+    pos: { x: 50, z: -6 }, scale: 2.1, lines: ['BRRR-OARR!', 'The strongest of all!', 'Feel the chill!'] },
+];
 const enemies = [];
 const ENEMY_AREA = { x: 34, z: -18 };
 function spawnEnemies() {
@@ -2743,11 +2876,14 @@ function spawnEnemies() {
     const h = spawnCritter({ sprite: e.sprite, name: e.name, lines: ['Grr!', 'Wanna battle?', 'Rawr!'], scale: 0.85, center: ENEMY_AREA, radius: 7, x: ENEMY_AREA.x + Math.cos(a) * 4, z: ENEMY_AREA.z + Math.sin(a) * 4 });
     h.userData.isEnemy = true; h.userData.enemy = e; enemies.push(h);
   });
-  // the BIG BOSS — bigger and much tougher, stands alone at the back of the battle area
-  const b = spawnCritter({ sprite: BOSS.sprite, name: BOSS.name, lines: ['ROAAR!', 'Face me if you dare!', 'GRRRAH!'], scale: 1.9, center: { x: ENEMY_AREA.x, z: ENEMY_AREA.z - 13 }, radius: 1.5, x: ENEMY_AREA.x, z: ENEMY_AREA.z - 13 });
-  b.userData.isEnemy = true; b.userData.enemy = BOSS; enemies.push(b);
+  // the BIG BOSSES — each bigger & tougher, standing alone at their own spot
+  BOSSES.forEach((boss) => {
+    const b = spawnCritter({ sprite: boss.sprite, name: boss.name, lines: boss.lines, scale: boss.scale, center: boss.pos, radius: 1.5, x: boss.pos.x, z: boss.pos.z });
+    b.userData.isEnemy = true; b.userData.enemy = boss; enemies.push(b);
+    const bossSign = makeSign('BOSS'); bossSign.scale.setScalar(0.5); bossSign.position.set(boss.pos.x, 3.4 * boss.scale, boss.pos.z - 4); scene.add(bossSign);
+    noTreeZones.push({ x: boss.pos.x, z: boss.pos.z, r: 10 });
+  });
   const sign = makeSign('BATTLE!'); sign.scale.setScalar(0.55); sign.position.set(ENEMY_AREA.x, 2.8, ENEMY_AREA.z + 8); scene.add(sign);
-  const bossSign = makeSign('BOSS'); bossSign.scale.setScalar(0.5); bossSign.position.set(ENEMY_AREA.x, 3.4, ENEMY_AREA.z - 18); scene.add(bossSign);
   noTreeZones.push({ x: ENEMY_AREA.x, z: ENEMY_AREA.z - 4, r: 16 });
 }
 
@@ -3635,9 +3771,10 @@ const MOVE_KEYS = {
 };
 
 window.addEventListener('keydown', (e) => {
+  if (document.activeElement && document.activeElement.tagName === 'INPUT') return; // typing (e.g. naming your pet) — don't move/act
   if (typeof miniGameActive === 'function' && miniGameActive()) return; // let the open mini-game take the keys
   if (MOVE_KEYS[e.code]) { keys.add(MOVE_KEYS[e.code]); e.preventDefault(); }
-  if (e.code === 'Space') { e.preventDefault(); throwBall(); } // throw the ball for the dog
+  if (e.code === 'Space') { e.preventDefault(); throwBall(); } // throw the toy for your pet
 });
 window.addEventListener('keyup', (e) => {
   if (MOVE_KEYS[e.code]) keys.delete(MOVE_KEYS[e.code]);
@@ -3645,11 +3782,16 @@ window.addEventListener('keyup', (e) => {
 // Stop drifting if focus leaves the page mid-press.
 window.addEventListener('blur', () => keys.clear());
 
-// Throw button (works on touch + desktop)
+// Throw button (works on touch + desktop) — shows for either a dog or a cat
 const throwBtnEl = document.getElementById('throwBtn');
 if (throwBtnEl) throwBtnEl.addEventListener('click', throwBall);
-function updateThrowBtnVisibility() { if (throwBtnEl) throwBtnEl.style.display = petDog ? '' : 'none'; }
-updateThrowBtnVisibility(); // hidden until a dog is chosen
+function updateThrowBtnVisibility() {
+  if (!throwBtnEl) return;
+  throwBtnEl.style.display = currentPlayerPet() ? '' : 'none';
+  throwBtnEl.textContent = petCat ? '🧶' : '🎾';
+  throwBtnEl.title = petCat ? 'Throw the toy (Space)' : 'Throw the ball (Space)';
+}
+updateThrowBtnVisibility(); // hidden until you have a pet
 
 // Trading list toggle
 const tradeBtnEl = document.getElementById('tradeBtn');
