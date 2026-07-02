@@ -589,6 +589,7 @@ function buildPicker(roster) {
     card.addEventListener('click', () => {
       if (performance.now() < pickerReadyAt) return; // ignore clicks during fade-in
       playAs(id); hidePicker();
+      showPetChoice(); // then: choose a pet, then whether you have a child
     });
     grid.appendChild(card);
   };
@@ -611,6 +612,70 @@ function hidePicker() {
   animate(pickerEl, { opacity: [1, 0], duration: 220, onComplete: () => { pickerEl.style.display = 'none'; } });
 }
 
+// ---- Pet choice: right after picking a character, choose a dog, a cat, or none ----
+let petChoiceEl = null, petChoiceReadyAt = 0;
+function buildChoiceCard(grid, emoji, label, onPick, readyAtGetter) {
+  const card = document.createElement('button');
+  card.className = 'picker-card';
+  const icon = document.createElement('span'); icon.className = 'emoji-icon'; icon.textContent = emoji;
+  const nm = document.createElement('span'); nm.textContent = label;
+  card.append(icon, nm);
+  card.addEventListener('click', () => { if (performance.now() < readyAtGetter()) return; onPick(); });
+  grid.appendChild(card);
+}
+function buildPetChoice() {
+  petChoiceEl = document.createElement('div');
+  petChoiceEl.id = 'petchoice'; petChoiceEl.className = 'modal-overlay';
+  const panel = document.createElement('div'); panel.className = 'picker-panel';
+  const h = document.createElement('h2');
+  h.append('Do you want a ', Object.assign(document.createElement('span'), { textContent: 'pet' }), '?');
+  const grid = document.createElement('div'); grid.className = 'picker-grid';
+  const pick = (kind) => { applyPetChoice(kind); hidePetChoice(); showChildChoice(); };
+  buildChoiceCard(grid, '🐶', 'A dog!', () => pick('dog'), () => petChoiceReadyAt);
+  buildChoiceCard(grid, '🐱', 'A cat!', () => pick('cat'), () => petChoiceReadyAt);
+  buildChoiceCard(grid, '🚫', "No pet, that's okay!", () => pick('none'), () => petChoiceReadyAt);
+  panel.append(h, grid);
+  petChoiceEl.appendChild(panel);
+  document.body.appendChild(petChoiceEl);
+}
+function showPetChoice() {
+  if (!petChoiceEl) buildPetChoice();
+  petChoiceEl.style.display = 'flex';
+  petChoiceReadyAt = performance.now() + 350;
+  animate(petChoiceEl, { opacity: [0, 1], duration: 280, ease: 'out(3)' });
+}
+function hidePetChoice() {
+  if (!petChoiceEl) return;
+  animate(petChoiceEl, { opacity: [1, 0], duration: 200, onComplete: () => { petChoiceEl.style.display = 'none'; } });
+}
+
+// ---- Child choice: then, choose whether you have a child companion ----
+let childChoiceEl = null, childChoiceReadyAt = 0;
+function buildChildChoice() {
+  childChoiceEl = document.createElement('div');
+  childChoiceEl.id = 'childchoice'; childChoiceEl.className = 'modal-overlay';
+  const panel = document.createElement('div'); panel.className = 'picker-panel';
+  const h = document.createElement('h2');
+  h.append('Do you have a ', Object.assign(document.createElement('span'), { textContent: 'child' }), '?');
+  const grid = document.createElement('div'); grid.className = 'picker-grid cols-2';
+  const pick = (want) => { applyChildChoice(want); hideChildChoice(); };
+  buildChoiceCard(grid, '👶', 'Yes!', () => pick(true), () => childChoiceReadyAt);
+  buildChoiceCard(grid, '🚫', "No, that's okay!", () => pick(false), () => childChoiceReadyAt);
+  panel.append(h, grid);
+  childChoiceEl.appendChild(panel);
+  document.body.appendChild(childChoiceEl);
+}
+function showChildChoice() {
+  if (!childChoiceEl) buildChildChoice();
+  childChoiceEl.style.display = 'flex';
+  childChoiceReadyAt = performance.now() + 350;
+  animate(childChoiceEl, { opacity: [0, 1], duration: 280, ease: 'out(3)' });
+}
+function hideChildChoice() {
+  if (!childChoiceEl) return;
+  animate(childChoiceEl, { opacity: [1, 0], duration: 200, onComplete: () => { childChoiceEl.style.display = 'none'; } });
+}
+
 // ---- Save / load progress (localStorage) ----
 const SAVE_KEY = 'sandyten_save_v1';
 let suppressSave = false;
@@ -626,7 +691,7 @@ function saveGame() {
         outfits[id] = { worn, colors: { ...mesh.userData.itemColors } };
       }
     }
-    localStorage.setItem(SAVE_KEY, JSON.stringify({ coins, level, levelStars, starBalance, battleWins, prizes, bagCount, bagValue, itemOwned, owned, playerId: playerCharId, outfits, questState: (typeof getQuestSave === 'function' ? getQuestSave() : null) }));
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ coins, level, levelStars, starBalance, battleWins, prizes, bagCount, bagValue, itemOwned, owned, playerId: playerCharId, petKind, hasChild, outfits, questState: (typeof getQuestSave === 'function' ? getQuestSave() : null) }));
   } catch (e) { /* storage unavailable */ }
 }
 function hasSave() { try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; } }
@@ -676,18 +741,27 @@ function buildStartMenu() {
     clearSave();
     coins = 20; level = 1; levelStars = 0; bagCount = 0; bagValue = 0;
     starBalance = 0; battleWins = 0; Object.keys(prizes).forEach((k) => delete prizes[k]); applyPrizeEffects();
+    if (typeof removePlayerPet === 'function') removePlayerPet();
+    if (typeof removePlayerKid === 'function') removePlayerKid();
+    petKind = 'none'; hasChild = false;
     renderCoins(); renderLevel();
     if (typeof refreshSell === 'function') refreshSell();
     if (typeof refreshPrizes === 'function') refreshPrizes();
     if (typeof resetQuests === 'function') resetQuests();
-    hideStartMenu(); showPicker();
+    hideStartMenu(); showPicker(); // picking a character then asks about a pet & a child
   });
   contBtn.addEventListener('click', () => {
     if (contBtn.disabled || performance.now() < startReadyAt) return;
     const s = loadGame();
     hideStartMenu();
-    if (s && s.playerId && holdersById[s.playerId]) playAs(s.playerId);
-    else showPicker();
+    if (s && s.playerId && holdersById[s.playerId]) {
+      playAs(s.playerId);
+      // resuming your saved character keeps your pet/child as-is — no re-asking
+      if (typeof applyPetChoice === 'function') applyPetChoice(s.petKind || 'none');
+      if (typeof applyChildChoice === 'function') applyChildChoice(!!s.hasChild);
+    } else {
+      showPicker();
+    }
   });
   panel.append(h, sub, newBtn, contBtn);
   startEl.appendChild(panel);
@@ -828,9 +902,12 @@ function positionBubble(mesh) {
 let downX = 0, downY = 0;
 renderer.domElement.addEventListener('pointerdown', (e) => { downX = e.clientX; downY = e.clientY; });
 function clickTargets() {
-  let list = petDog ? billboards.concat(petDog.mesh) : billboards;
+  let list = billboards;
+  if (petDog) list = list.concat(petDog.mesh);
+  if (petCat) list = list.concat(petCat.mesh);
   if (gardenSpots.length) list = list.concat(gardenSpots.map((r) => r.mound));
   if (pondSurface) list = list.concat(pondSurface);
+  if (petParkTrigger) list = list.concat(petParkTrigger);
   return list;
 }
 renderer.domElement.addEventListener('pointerup', (e) => {
@@ -845,13 +922,22 @@ renderer.domElement.addEventListener('pointerup', (e) => {
     startFishing();
   } else if (obj.userData.isGarden) {         // tapped a garden plot → plant/harvest
     handleGardenClick(obj);
-  } else if (petDog && obj === petDog.mesh) { // clicked the puppy → bark!
+  } else if (obj.userData.isPetPark) {        // tapped the pet park → your pet goes to play
+    startPetPark();
+  } else if (petDog && obj === petDog.mesh) { // clicked your dog → bark!
     playWoof();
     showBubble(petDog.mesh, DOG_NAME, 'Woof! 🐶', 1.3);
-    petDog.barkUntil = timer.getElapsed() + 0.4; // little excited hop
+    petDog.reactUntil = timer.getElapsed() + 0.4; // little excited hop
+    if (typeof onPetDog === 'function') onPetDog(); // quest progress
+  } else if (petCat && obj === petCat.mesh) { // clicked your cat → purr!
+    showBubble(petCat.mesh, CAT_NAME, 'Purr~ 🐱', 1.1);
+    petCat.reactUntil = timer.getElapsed() + 0.4; // little excited hop
     if (typeof onPetDog === 'function') onPetDog(); // quest progress
   } else {
     showSpeech(obj);
+    // petting any other cat/dog around town (neighbors' pets, park cats) counts too
+    const holderData = obj.parent && obj.parent.userData;
+    if (holderData && holderData.playArea === 'petpark' && typeof onPetDog === 'function') onPetDog();
   }
 });
 
@@ -1390,9 +1476,14 @@ function updateAmbulance(t) {
 // ---------------------------------------------------------------------------
 // A pet dog that trots after the player (and climbs stairs with them).
 // ---------------------------------------------------------------------------
-let petDog = null;
-const DOG_NAME = 'Daisy';
-function createDog() {
+// ---------------------------------------------------------------------------
+// Your own pet — chosen after picking a character: a dog, a cat, or none.
+// ---------------------------------------------------------------------------
+let petDog = null, petCat = null;
+const DOG_NAME = 'Daisy', CAT_NAME = 'Whiskers';
+let petKind = 'none'; // 'dog' | 'cat' | 'none' — the CURRENT character's pet choice
+function currentPlayerPet() { return petDog || petCat || null; }
+function spawnPlayerDog() {
   const tex = textureLoader.load('./assets/characters/dog.png');
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
@@ -1403,18 +1494,79 @@ function createDog() {
   );
   mesh.position.y = size / 2;
   const holder = new THREE.Group();
-  holder.position.set(4, 0, 7);
+  const px = player ? player.position.x + 1.5 : 4, pz = player ? player.position.z + 1.5 : 7;
+  holder.position.set(px, 0, pz);
   holder.add(mesh);
   const label = makeNameLabel(DOG_NAME);
   label.position.set(0, size + 0.35, 0);
   label.scale.set(2.0, 0.5, 1);
   holder.add(label);
   scene.add(holder);
-  petDog = { holder, mesh, baseY: size / 2 };
+  petDog = { holder, mesh, baseY: size / 2, playUntil: 0, station: null };
+  spawnDoghouse();
 }
-createDog();
+function spawnPlayerCat() {
+  const tex = textureLoader.load('./assets/characters/cat.png');
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  const size = 1.4;
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(size, size),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.5, side: THREE.DoubleSide })
+  );
+  mesh.position.y = size / 2;
+  const holder = new THREE.Group();
+  const px = player ? player.position.x + 1.5 : 4, pz = player ? player.position.z + 1.5 : 7;
+  holder.position.set(px, 0, pz);
+  holder.add(mesh);
+  const label = makeNameLabel(CAT_NAME);
+  label.position.set(0, size + 0.35, 0);
+  label.scale.set(2.0, 0.5, 1);
+  holder.add(label);
+  scene.add(holder);
+  petCat = { holder, mesh, baseY: size / 2, playUntil: 0, station: null };
+}
+function removePlayerPet() {
+  if (petDog) { scene.remove(petDog.holder); petDog = null; }
+  if (petCat) { scene.remove(petCat.holder); petCat = null; }
+  if (doghouse) { scene.remove(doghouse); doghouse = null; }
+  ballState = 'idle'; if (typeof ball !== 'undefined') ball.visible = false;
+}
+function applyPetChoice(kind) {
+  removePlayerPet();
+  petKind = kind === 'dog' || kind === 'cat' ? kind : 'none';
+  if (petKind === 'dog') spawnPlayerDog();
+  else if (petKind === 'cat') spawnPlayerCat();
+  if (typeof updateThrowBtnVisibility === 'function') updateThrowBtnVisibility();
+  if (typeof saveGame === 'function') saveGame();
+}
+// send the current pet off to play at the pet park (tap/click the pet park to trigger)
+const PET_PLAY_DURATION = 9;
+function startPetPark() {
+  const pet = currentPlayerPet();
+  if (!pet) { if (typeof questToast === 'function') questToast("You don't have a pet right now! 🐾"); return; }
+  if (!PET_STATIONS.length) return;
+  pet.playUntil = timer.getElapsed() + PET_PLAY_DURATION;
+  pet.station = PET_STATIONS[Math.floor(Math.random() * PET_STATIONS.length)];
+  const label = pet === petDog ? DOG_NAME : CAT_NAME;
+  if (typeof questToast === 'function') questToast(`${label} is off to play! 🐾`);
+}
+// while the pet is off playing, aim it at its chosen pet-park station instead of the player
+function petPlayTargetOrNull(pet, t) {
+  if (!pet.playUntil || t >= pet.playUntil) { pet.playUntil = 0; pet.station = null; return null; }
+  if (!pet.station) pet.station = PET_STATIONS[Math.floor(Math.random() * PET_STATIONS.length)];
+  return pet.station;
+}
+// offsets a follow point to the LEFT/RIGHT of the camera's view (not fore/aft of
+// the player), so a pet/child never lines up directly behind — and gets hidden
+// behind — the character they're following, no matter which way the camera faces
+function perpFollowOffset(originX, originZ, side, dist) {
+  const dirX = camera.position.x - originX, dirZ = camera.position.z - originZ;
+  const len = Math.hypot(dirX, dirZ) || 1;
+  return [originX + (-dirZ / len) * side * dist, originZ + (dirX / len) * side * dist];
+}
 
-// ---- A ball you can throw for the dog to fetch ----
+// ---- A ball you can throw for the dog to fetch (only while you have a dog) ----
 const BALL_R = 0.28;
 let ballState = 'idle';            // idle | flying | onground | carried
 const ballVel = new THREE.Vector3();
@@ -1425,7 +1577,7 @@ const ball = new THREE.Mesh(
 ball.castShadow = true; ball.visible = false; scene.add(ball);
 const _throwDir = new THREE.Vector3();
 function throwBall() {
-  if (!player || ballState !== 'idle') return; // one ball at a time
+  if (!player || ballState !== 'idle' || !petDog) return; // one ball at a time, and only if you have a dog
   ball.position.set(player.position.x, player.position.y + 1.4, player.position.z);
   camera.getWorldDirection(_throwDir); _throwDir.y = 0;
   if (_throwDir.lengthSq() === 0) _throwDir.set(0, 0, -1);
@@ -1444,41 +1596,78 @@ function updateBall(dt) {
 function updateDog(t, dt) {
   if (!petDog) return;
   const h = petDog.holder;
-  // pick a target: fetch the ball, carry it back, or follow the player
-  let tx, tz, speed = 8, keep = 1.6;
-  if (ballState === 'onground') { tx = ball.position.x; tz = ball.position.z; speed = 12; keep = 0.6; }
+  // pick a target: play at the pet park, fetch the ball, carry it back, or follow the player
+  let tx, tz, speed = 9 * prizeSpeed, keep = 1.6, playing = false;
+  const playSpot = petPlayTargetOrNull(petDog, t);
+  if (playSpot) { tx = playSpot.x; tz = playSpot.z; speed = 7; keep = 0.7; }
+  else if (ballState === 'onground') { tx = ball.position.x; tz = ball.position.z; speed = 12; keep = 0.6; }
   else if (ballState === 'carried') { tx = player ? player.position.x : h.position.x; tz = player ? player.position.z : h.position.z; speed = 12; keep = 1.5; }
-  else { tx = player ? player.position.x : 4; tz = player ? player.position.z : 7; }
+  else if (player) { [tx, tz] = perpFollowOffset(player.position.x, player.position.z, -1, 0.9); } // trail beside the player (opposite side from a child)
+  else { tx = 4; tz = 7; }
 
   const dx = tx - h.position.x, dz = tz - h.position.z;
   const d = Math.hypot(dx, dz);
   let moving = false;
   if (d > keep) {
+    const prevX = h.position.x, prevZ = h.position.z;
     const step = Math.min(speed * dt, d - keep * 0.7);
     h.position.x += (dx / d) * step;
     h.position.z += (dz / d) * step;
+    const [rx, rz] = resolveWalls(h.position.x, h.position.z, prevX, prevZ); // don't clip through houses
+    h.position.x = rx; h.position.z = rz;
     moving = true;
-  }
+  } else if (playSpot) { playing = true; } // arrived at the activity — play in place
   h.position.y = houseFloorHeight(h.position.x, h.position.z); // climbs stairs too
 
-  // fetch state transitions
-  if (ballState === 'onground' && d <= keep + 0.3) { ballState = 'carried'; }
-  if (ballState === 'carried') {
-    ball.position.set(h.position.x, h.position.y + 0.55, h.position.z); // in the puppy's mouth
-    if (d <= keep + 0.3) { ballState = 'idle'; ball.visible = false; }  // returned to player
+  // fetch state transitions (paused while off playing at the pet park)
+  if (!playSpot) {
+    if (ballState === 'onground' && d <= keep + 0.3) { ballState = 'carried'; }
+    if (ballState === 'carried') {
+      ball.position.set(h.position.x, h.position.y + 0.55, h.position.z); // in the puppy's mouth
+      if (d <= keep + 0.3) { ballState = 'idle'; ball.visible = false; }  // returned to player
+    }
   }
 
-  const excited = petDog.barkUntil && t < petDog.barkUntil;
+  const excited = petDog.reactUntil && t < petDog.reactUntil;
   petDog.mesh.rotation.y = Math.atan2(camera.position.x - h.position.x, camera.position.z - h.position.z);
-  petDog.mesh.position.y = petDog.baseY + ((moving || excited) ? Math.abs(Math.sin(t * 12)) * 0.2 : Math.sin(t * 2) * 0.06);
+  petDog.mesh.position.y = petDog.baseY + (playing ? Math.abs(Math.sin(t * 7)) * 0.3 : (moving || excited) ? Math.abs(Math.sin(t * 12)) * 0.2 : Math.sin(t * 2) * 0.06);
+}
+
+function updatePlayerCat(t, dt) {
+  if (!petCat) return;
+  const h = petCat.holder;
+  let tx, tz, speed = 9 * prizeSpeed, keep = 1.6, playing = false;
+  const playSpot = petPlayTargetOrNull(petCat, t);
+  if (playSpot) { tx = playSpot.x; tz = playSpot.z; speed = 7; keep = 0.7; }
+  else if (player) { [tx, tz] = perpFollowOffset(player.position.x, player.position.z, -1, 0.9); } // trail beside the player (opposite side from a child)
+  else { tx = h.position.x; tz = h.position.z; }
+
+  const dx = tx - h.position.x, dz = tz - h.position.z;
+  const d = Math.hypot(dx, dz);
+  let moving = false;
+  if (d > keep) {
+    const prevX = h.position.x, prevZ = h.position.z;
+    const step = Math.min(speed * dt, d - keep * 0.7);
+    h.position.x += (dx / d) * step;
+    h.position.z += (dz / d) * step;
+    const [rx, rz] = resolveWalls(h.position.x, h.position.z, prevX, prevZ); // don't clip through houses
+    h.position.x = rx; h.position.z = rz;
+    moving = true;
+  } else if (playSpot) { playing = true; }
+  h.position.y = houseFloorHeight(h.position.x, h.position.z);
+
+  const excited = petCat.reactUntil && t < petCat.reactUntil;
+  petCat.mesh.rotation.y = Math.atan2(camera.position.x - h.position.x, camera.position.z - h.position.z);
+  petCat.mesh.position.y = petCat.baseY + (playing ? Math.abs(Math.sin(t * 7)) * 0.3 : (moving || excited) ? Math.abs(Math.sin(t * 12)) * 0.2 : Math.sin(t * 2) * 0.06);
 }
 
 // ---------------------------------------------------------------------------
-// Daisy's doghouse — a little kennel that sits next to your character's home.
+// The doghouse — a little kennel that sits next to your character's home
+// (only exists while your pet is a dog).
 // ---------------------------------------------------------------------------
 let doghouse = null;
 const doghouseTarget = new THREE.Vector3(3, 0, 3); // moves to your home when you pick a character
-function createDoghouse() {
+function spawnDoghouse() {
   const g = new THREE.Group();
   const wallMat = new THREE.MeshStandardMaterial({ color: 0xc98a5a, roughness: 0.9 });
   const roofMat = new THREE.MeshStandardMaterial({ color: 0xb44a3a, roughness: 0.8 });
@@ -1494,11 +1683,10 @@ function createDoghouse() {
   const label = makeNameLabel(DOG_NAME);
   label.position.set(0, 2.1, 0); label.scale.set(2.0, 0.5, 1);
   g.add(label);
-  g.position.set(3, 0, 3);
+  g.position.set(doghouseTarget.x, 0, doghouseTarget.z);
   scene.add(g);
   doghouse = g;
 }
-createDoghouse();
 function updateDoghouse(dt) {
   if (!doghouse) return;
   const k = Math.min(1, dt * 2.5); // smooth glide toward the home spot
@@ -1515,6 +1703,7 @@ const POND = { x: -30, z: -22 };    // duck pond on the SOUTH side of the park
 const PETPARK = { x: -47, z: -16 }; // pet park near the SW end, between the playground and the pond
 let merryGoRound = null; // the spinning park roundabout
 let pondSurface = null;  // the pond water mesh (tap it to fish)
+let petParkTrigger = null; // invisible tap-target over the pet park (send your pet to play)
 const PLAY_STATIONS = []; // playground activity spots (kids run between them to play)
 const PET_STATIONS = [];  // pet-park activity spots (cats & dogs play here)
 const SLIDE_TOP = new THREE.Vector3();
@@ -1591,6 +1780,48 @@ function spawnCritter({ sprite, name, lines, scale = 0.6, center, radius = 9, in
   characterGroup.add(holder);
   billboards.push(mesh);
   return holder;
+}
+
+// ---------------------------------------------------------------------------
+// Your child companion — chosen after picking a character: "<Name> Jr." who
+// trails you around (and plays at the playground) just like the neighbor kids.
+// ---------------------------------------------------------------------------
+let playerKid = null, hasChild = false;
+function getCharInfo(id) {
+  const r = ((window.SANDYTEN && window.SANDYTEN.roster) || []).find((c) => c.id === id);
+  if (r) return r;
+  const n1 = (typeof NEIGHBORS !== 'undefined') && NEIGHBORS.find((c) => c.id === id);
+  if (n1) return n1;
+  const n2 = (typeof NEIGHBORS2 !== 'undefined') && NEIGHBORS2.find((c) => c.id === id);
+  if (n2) return n2;
+  return null;
+}
+function spawnPlayerKid(id) {
+  const info = getCharInfo(id);
+  if (!info || !player) return;
+  const kid = spawnRoamer({
+    id: id + '_playerkid', name: info.name + ' Jr.', sprite: info.sprite,
+    x: player.position.x, z: player.position.z, scale: 0.6,
+    child: true, parent: player, lines: ['Wheee!', `Hi, I'm with ${info.name}!`, 'Hehe!'],
+  });
+  kid.userData.speed = 9;              // keep up with the player, not just an idle-roamer pace
+  kid.userData.playArea = 'playground'; // plays on every activity when near the playground, like other kids
+  kid.userData.followSide = 1; // trail a step to the side (opposite the pet) so they don't overlap
+  playerKid = kid;
+}
+function removePlayerKid() {
+  if (!playerKid) return;
+  characterGroup.remove(playerKid);
+  const mesh = playerKid.userData.mesh;
+  const idx = billboards.indexOf(mesh);
+  if (idx !== -1) billboards.splice(idx, 1);
+  playerKid = null;
+}
+function applyChildChoice(want) {
+  removePlayerKid();
+  hasChild = !!want;
+  if (hasChild && playerCharId) spawnPlayerKid(playerCharId);
+  if (typeof saveGame === 'function') saveGame();
 }
 
 const FOREST_ANIMALS = [
@@ -1790,6 +2021,14 @@ function buildPark() {
   const ballCols = [red, blue, yellow, green];
   for (let i = 0; i < 9; i++) { const b = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), ballCols[i % 4]); b.position.set((Math.random() - 0.5) * 1.4, 0.22, (Math.random() - 0.5) * 1.4); bp.add(b); }
   const bone = makeSign('PET PARK'); bone.scale.setScalar(0.5); bone.position.set(PETPARK.x, 2.6, PETPARK.z - 7); scene.add(bone);
+  // an invisible tap target over the whole pet park — tap/click it to send your pet to play
+  const petParkGround = new THREE.Mesh(new THREE.CircleGeometry(R + 1, 32), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0 }));
+  petParkGround.rotation.x = -Math.PI / 2; petParkGround.position.set(PETPARK.x, 0.06, PETPARK.z);
+  petParkGround.userData.isPetPark = true;
+  scene.add(petParkGround); petParkTrigger = petParkGround;
+  // a little floating paw print by the sign so kids know they can tap here
+  const petParkHint = makeEmojiSprite('🐾'); petParkHint.position.set(PETPARK.x, 3.5, PETPARK.z - 7); petParkHint.visible = true;
+  petParkHint.scale.set(1.1, 1.1, 1); scene.add(petParkHint);
   // record pet-park activities so cats & dogs run between them and play on each
   petStation(0, -1.5); petStation(-1.4, -2.6); petStation(1.6, 2);  // hoops, A-frame
   petStation(-1.8, 1.8); petStation(-1, -2.8); petStation(3.4, -1.1); // tunnel, weave, hurdles
@@ -1878,7 +2117,7 @@ function buildForest() {
 const quests = [
   { id: 'coins', name: 'Collect 12 coins', target: 12, prog: 0, reward: 5, done: false },
   { id: 'trade', name: 'Trade with 3 friends', target: 3, prog: 0, reward: 5, done: false },
-  { id: 'pet', name: 'Pet Daisy 3 times', target: 3, prog: 0, reward: 5, done: false },
+  { id: 'pet', name: 'Pet a furry friend 3 times 🐾', target: 3, prog: 0, reward: 5, done: false },
   { id: 'fish', name: 'Catch 3 fish 🎣', target: 3, prog: 0, reward: 6, done: false },
   { id: 'crop', name: 'Harvest 4 crops 🥕', target: 4, prog: 0, reward: 6, done: false },
   { id: 'puzzle', name: 'Win the Memory game', target: 1, prog: 0, reward: 10, done: false, puzzle: true, game: 'memory' },
@@ -3409,6 +3648,8 @@ window.addEventListener('blur', () => keys.clear());
 // Throw button (works on touch + desktop)
 const throwBtnEl = document.getElementById('throwBtn');
 if (throwBtnEl) throwBtnEl.addEventListener('click', throwBall);
+function updateThrowBtnVisibility() { if (throwBtnEl) throwBtnEl.style.display = petDog ? '' : 'none'; }
+updateThrowBtnVisibility(); // hidden until a dog is chosen
 
 // Trading list toggle
 const tradeBtnEl = document.getElementById('tradeBtn');
@@ -3559,6 +3800,7 @@ function tick() {
   updateAmbulance(t);
   updateBall(dt);
   updateDog(t, dt);
+  updatePlayerCat(t, dt);
   updateDoghouse(dt);
   updateBalloons(t);
 
@@ -3615,8 +3857,11 @@ function tick() {
       } else if (playAtStations(holder, w, t, dt)) {
         // running between the playground / pet-park activities and playing on each
       } else if (w.child && w.parent) {
-        // trail the parent around (and into the park)
-        _charDir.set(w.parent.position.x - holder.position.x, 0, w.parent.position.z - holder.position.z);
+        // trail the parent around (and into the park); the player's own child
+        // gets a small camera-relative sideways offset so it doesn't stack on a pet/parent
+        let px = w.parent.position.x, pz = w.parent.position.z;
+        if (w.followSide) { [px, pz] = perpFollowOffset(px, pz, w.followSide, 0.9); }
+        _charDir.set(px - holder.position.x, 0, pz - holder.position.z);
         const d = _charDir.length();
         if (d > 1.7) { w.moving = true; const step = Math.min(w.speed * 1.4 * dt, d - 1.4); holder.position.x += (_charDir.x / d) * step; holder.position.z += (_charDir.z / d) * step; }
         else { w.moving = false; }

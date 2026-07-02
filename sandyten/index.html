@@ -85,11 +85,14 @@
     }
 
     /* ---------- Character picker ---------- */
-    #picker {
+    #picker, .modal-overlay {
       position: fixed; inset: 0; z-index: 40; display: none;
       align-items: center; justify-content: center;
       background: rgba(8, 17, 29, .78); backdrop-filter: blur(8px);
     }
+    .picker-card .emoji-icon { font-size: 52px; line-height: 1; }
+    @media (max-width: 520px) { .picker-card .emoji-icon { font-size: 40px; } }
+    .picker-grid.cols-2 { grid-template-columns: repeat(2, 1fr); }
     .picker-panel {
       background: linear-gradient(180deg, #16314d, #0c1d30);
       border: 1px solid rgba(127, 209, 255, .25); border-radius: 22px;
