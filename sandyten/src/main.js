@@ -1014,6 +1014,15 @@ const MUSIC_TRACKS = [
   { name: 'Dreamy', bpm: 108, lead: 'sine',
     melody: [7, 9, 11, 12, 11, 9, 7, 4, 5, 7, 9, 7, 4, 2, 0, 4],
     bass:   [0, 0, 9, 9, 5, 5, 7, 7] },
+  { name: 'Sunbeam', bpm: 116, lead: 'triangle',
+    melody: [0, 2, 4, 5, 7, 9, 7, 5, 4, 2, 0, 4, 7, 9, 11, 12],
+    bass:   [0, 0, 5, 5, 7, 7, 4, 4] },
+  { name: 'Parade', bpm: 130, lead: 'sawtooth',
+    melody: [0, 0, 7, 0, 5, 0, 7, 0, 4, 4, 9, 4, 7, 4, 9, 4],
+    bass:   [0, 7, 0, 7, 5, 9, 0, 7] },
+  { name: 'Twinkle', bpm: 156, lead: 'triangle',
+    melody: [12, 16, 19, 16, 14, 12, 11, 9, 7, 9, 11, 12, 14, 16, 19, 24],
+    bass:   [0, 5, 7, 9, 0, 5, 7, 12] },
 ];
 const musFreq = (semi, base) => base * Math.pow(2, semi / 12);
 function musTone(freq, time, dur, type, gain) {
@@ -1029,10 +1038,12 @@ function scheduleMusic() {
   if (!musicOn) return;
   const tr = MUSIC_TRACKS[musicTrack];
   const eighth = (60 / tr.bpm) / 2;
+  // index by each track's own array length (not a hardcoded 16/8) so a
+  // mismatched track array fails safe instead of reading undefined -> NaN
   while (nextNoteTime < audioCtx.currentTime + 0.25) {
-    const i = musicStep % 16;
+    const i = musicStep % tr.melody.length;
     musTone(musFreq(tr.melody[i], 523.25), nextNoteTime, eighth * 0.9, tr.lead, 0.12); // lead
-    if (i % 2 === 0) musTone(musFreq(tr.bass[(i / 2) % 8], 130.81), nextNoteTime, eighth * 1.7, 'sine', 0.16); // bass
+    if (i % 2 === 0) musTone(musFreq(tr.bass[(i / 2) % tr.bass.length], 130.81), nextNoteTime, eighth * 1.7, 'sine', 0.16); // bass
     nextNoteTime += eighth; musicStep++;
   }
   musicTimer = setTimeout(scheduleMusic, 60);
