@@ -94,6 +94,7 @@
       background: linear-gradient(180deg, #16314d, #0c1d30);
       border: 1px solid rgba(127, 209, 255, .25); border-radius: 22px;
       padding: 24px 26px; max-width: 680px; width: 92%;
+      max-height: 85vh; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
       box-shadow: 0 24px 60px rgba(0, 0, 0, .55);
     }
     .picker-panel h2 { text-align: center; font-size: 24px; margin-bottom: 16px; }
@@ -107,13 +108,19 @@
       transition: transform .12s ease, border-color .12s ease, background .12s ease;
     }
     .picker-card img { width: 96px; height: 96px; object-fit: contain; pointer-events: none; }
-    .picker-card:hover, .picker-card:focus {
-      transform: translateY(-4px); border-color: var(--accent);
-      background: rgba(255, 255, 255, .12); outline: none;
+    /* only apply the hover lift on devices that actually have hover (mouse) —
+       otherwise a tap on touch leaves the card permanently "stuck" lifted */
+    @media (hover: hover) {
+      .picker-card:hover { transform: translateY(-4px); border-color: var(--accent); background: rgba(255, 255, 255, .12); }
     }
+    .picker-card:focus { border-color: var(--accent); background: rgba(255, 255, 255, .12); outline: none; }
+    .picker-card:active { transform: translateY(-2px); border-color: var(--accent); background: rgba(255, 255, 255, .14); }
     @media (max-width: 520px) {
-      .picker-grid { grid-template-columns: repeat(2, 1fr); }
-      .picker-card img { width: 76px; height: 76px; }
+      .picker-panel { padding: 16px 14px; max-height: 90vh; }
+      .picker-panel h2 { font-size: 19px; margin-bottom: 10px; }
+      .picker-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+      .picker-card { padding: 8px 4px; font-size: 14px; }
+      .picker-card img { width: 78px; height: 78px; }
     }
 
     /* ---------- Start menu (New Game / Continue) ---------- */
