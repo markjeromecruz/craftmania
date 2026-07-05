@@ -58,7 +58,11 @@
     }
     /* on phones the 9 pills can't fit one row — wrap them instead of crushing/clipping */
     #hud .topbar > div:last-child { flex-wrap: wrap; justify-content: flex-end; row-gap: 6px; min-width: 0; }
-    @media (pointer: coarse) { #hud .pill { min-height: 40px; display: inline-flex; align-items: center; } }
+    @media (pointer: coarse) {
+      #hud .pill { min-height: 40px; display: inline-flex; align-items: center; }
+      /* early readers: bump the instructional text that tells a kid what to do next */
+      #hud .pill, #hud .hint, .shop-sub, .lock-label { font-size: 15px; }
+    }
     @media (max-width: 520px) {
       #hud .topbar { padding: 8px 10px; }
       #hud .pill { padding: 7px 10px; }
@@ -282,8 +286,9 @@
       max-width: 94vw; flex-wrap: wrap; justify-content: center;
     }
     /* on touch, sit above the joystick instead of on top of it */
-    @media (hover: none) and (pointer: coarse) { #battleprompt { bottom: 170px; } }
+    @media (hover: none) and (pointer: coarse) { #battleprompt { bottom: 170px; } #hud .hint { bottom: 170px; } }
     body.touch #battleprompt { bottom: 170px; }
+    body.touch #hud .hint { bottom: 170px; } /* the how-to-play hint clears the joystick too */
     .bp-btn { padding: 8px 14px; border-radius: 12px; cursor: pointer; color: #fff; font-weight: 700;
       background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.3); }
     .bp-btn.fight { background: #e0556a; border-color: #ff8a9a; }
