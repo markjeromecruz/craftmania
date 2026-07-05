@@ -854,32 +854,38 @@ function loadGame() {
   try { s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); } catch (e) { return null; }
   if (!s) return null;
   suppressSave = true;
-  coins = s.coins ?? coins; level = s.level ?? 1; levelStars = s.levelStars ?? 0;
-  starBalance = s.starBalance ?? 0; battleWins = s.battleWins ?? 0;
-  totalXP = s.totalXP ?? 0;
-  unlockedIds.clear(); (s.unlockedIds || []).forEach((id) => unlockedIds.add(id));
-  // grandfather clause: if you were already playing as a "locked" character
-  // before this update, you keep them — you're not suddenly locked out
-  if (s.playerId) unlockedIds.add(s.playerId);
-  if (typeof refreshPickerLocks === 'function') refreshPickerLocks();
-  Object.keys(prizes).forEach((k) => delete prizes[k]); Object.assign(prizes, s.prizes || {});
-  if (typeof applyPrizeEffects === 'function') applyPrizeEffects();
-  if (typeof refreshPrizes === 'function') refreshPrizes();
-  bagCount = s.bagCount ?? 0; bagValue = s.bagValue ?? 0; if (typeof refreshSell === 'function') refreshSell();
-  if (typeof resetQuests === 'function') resetQuests(); // your LEVEL is kept, but the quests start fresh each time you play
-  Object.assign(itemOwned, s.itemOwned || {});
-  Object.assign(owned, s.owned || {});
-  renderCoins(); renderLevel();
-  for (const id in (s.outfits || {})) {
-    const holder = holdersById[id]; if (!holder || !holder.userData.mesh) continue;
-    const mesh = holder.userData.mesh, o = s.outfits[id];
-    Object.assign(mesh.userData.itemColors, o.colors || {});
-    for (const itemId of (o.worn || [])) {
-      const item = DRESS_ITEMS.find((it) => it.id === itemId);
-      if (item) wearItem(mesh, item);
+  try { // a malformed save must never leave suppressSave stuck on (it would silently disable saving)
+    coins = s.coins ?? coins; level = s.level ?? 1; levelStars = s.levelStars ?? 0;
+    starBalance = s.starBalance ?? 0; battleWins = s.battleWins ?? 0;
+    totalXP = s.totalXP ?? 0;
+    unlockedIds.clear(); (Array.isArray(s.unlockedIds) ? s.unlockedIds : []).forEach((id) => unlockedIds.add(id));
+    // grandfather clause: if you were already playing as a "locked" character
+    // before this update, you keep them — you're not suddenly locked out
+    if (s.playerId) unlockedIds.add(s.playerId);
+    if (typeof refreshPickerLocks === 'function') refreshPickerLocks();
+    Object.keys(prizes).forEach((k) => delete prizes[k]); Object.assign(prizes, s.prizes || {});
+    if (typeof applyPrizeEffects === 'function') applyPrizeEffects();
+    if (typeof refreshPrizes === 'function') refreshPrizes();
+    bagCount = s.bagCount ?? 0; bagValue = s.bagValue ?? 0; if (typeof refreshSell === 'function') refreshSell();
+    if (typeof resetQuests === 'function') resetQuests(); // your LEVEL is kept, but the quests start fresh each time you play
+    Object.assign(itemOwned, s.itemOwned || {});
+    Object.assign(owned, s.owned || {});
+    renderCoins(); renderLevel();
+    for (const id in (s.outfits || {})) {
+      const holder = holdersById[id]; if (!holder || !holder.userData.mesh) continue;
+      const mesh = holder.userData.mesh, o = s.outfits[id];
+      Object.assign(mesh.userData.itemColors, o.colors || {});
+      for (const itemId of (o.worn || [])) {
+        const item = DRESS_ITEMS.find((it) => it.id === itemId);
+        if (item) wearItem(mesh, item);
+      }
     }
+  } catch (e) {
+    console.warn('Corrupted save — starting fresh', e);
+    s = null; // callers fall back to the character picker
+  } finally {
+    suppressSave = false;
   }
-  suppressSave = false;
   return s;
 }
 
@@ -912,7 +918,8 @@ function buildStartMenu() {
   });
   contBtn.addEventListener('click', () => {
     if (contBtn.disabled || performance.now() < startReadyAt) return;
-    const s = loadGame();
+    let s = null;
+    try { s = loadGame(); } catch (e) { console.warn('Continue failed — starting fresh', e); }
     hideStartMenu();
     if (s && s.playerId && holdersById[s.playerId]) {
       playAs(s.playerId);
@@ -930,6 +937,21 @@ function buildStartMenu() {
 function showStartMenu() { if (startEl) { startEl.style.display = 'flex'; startReadyAt = performance.now() + 500; animate(startEl, { opacity: [0, 1], duration: 280, ease: 'out(3)' }); } }
 function hideStartMenu() { if (startEl) animate(startEl, { opacity: [1, 0], duration: 220, onComplete: () => { startEl.style.display = 'none'; } }); }
 
+// If a character is standing inside a house, step them just outside its door —
+// so taking control of a night-sleeper doesn't start you hidden indoors, and a
+// released character isn't stranded pathing against interior walls.
+function stepOutsideHouseDoor(holder) {
+  for (const h of houses) {
+    const [lx, lz] = rotXZ(holder.position.x - h.x, holder.position.z - h.z, -h.ry);
+    if (Math.abs(lx) < HOUSE_W / 2 && Math.abs(lz) < HOUSE_D / 2) {
+      const [wx, wz] = rotXZ(0, HOUSE_D / 2 + 1.2, h.ry); // just past the doorway
+      holder.position.set(h.x + wx, 0, h.z + wz);
+      return true;
+    }
+  }
+  return false;
+}
+
 function playAs(id) {
   const holder = holdersById[id];
   if (!holder) return;
@@ -939,11 +961,13 @@ function playAs(id) {
     player.userData.moving = false;
     player.userData.pauseUntil = 0; // start strolling again right away
     player.position.y = 0;          // drop back to the ground (in case it was upstairs)
+    stepOutsideHouseDoor(player);   // if they were indoors, walk them out first
     pickRoamTarget(player);         // give it a fresh place to wander to
   }
   player = holder;
   playerCharId = id;
   holder.position.y = 0;            // start on the ground
+  stepOutsideHouseDoor(holder);     // a sleeping character shouldn't start hidden in its house
   holder.userData.isPlayer = true;
   holder.userData.moving = false;
   holder.userData.pauseUntil = Infinity; // never roam while controlled
@@ -1054,6 +1078,7 @@ function positionBubble(mesh) {
   _headPos.y += (activeBubble ? activeBubble.offsetY : CHAR_HEIGHT * 0.5); // float above
   _headPos.project(camera);
   if (_headPos.z > 1) { bubbleEl.style.display = 'none'; return; } // behind camera
+  bubbleEl.style.display = 'block'; // …and back again when the speaker returns into view
   bubbleEl.style.left = ((_headPos.x * 0.5 + 0.5) * window.innerWidth) + 'px';
   bubbleEl.style.top = ((-_headPos.y * 0.5 + 0.5) * window.innerHeight) + 'px';
 }
@@ -1090,6 +1115,7 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   raycaster.setFromCamera(pointerNDC, camera);
   const hits = raycaster.intersectObjects(clickTargets(), false);
   if (!hits.length) return;
+  if (tapBlockedByWall(hits[0])) return; // can't tap someone hidden behind a solid wall
   const obj = hits[0].object;
   if (obj.userData.isPond) {                  // tapped the pond → go fishing
     startFishing();
@@ -1114,12 +1140,23 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   }
 });
 
+// A tap is blocked when a still-opaque wall/roof/tree sits in front of the hit
+// (a wall the occlusion system has already faded is see-through — tapping
+// through it is fine, since the kid can see what they're tapping).
+function tapBlockedByWall(hit) {
+  raycaster.far = hit.distance - 0.05;
+  const blockers = raycaster.intersectObjects(occludables, false);
+  raycaster.far = Infinity;
+  return blockers.some((b) => b.object.material.opacity >= 0.5);
+}
+
 // Show a pointer cursor when hovering a character or the puppy.
 renderer.domElement.addEventListener('pointermove', (e) => {
   pointerNDC.x = (e.clientX / window.innerWidth) * 2 - 1;
   pointerNDC.y = -(e.clientY / window.innerHeight) * 2 + 1;
   raycaster.setFromCamera(pointerNDC, camera);
-  renderer.domElement.style.cursor = raycaster.intersectObjects(clickTargets(), false).length ? 'pointer' : '';
+  const hover = raycaster.intersectObjects(clickTargets(), false);
+  renderer.domElement.style.cursor = hover.length && !tapBlockedByWall(hover[0]) ? 'pointer' : '';
 });
 
 // ---------------------------------------------------------------------------
@@ -2484,6 +2521,7 @@ function buildPuzzle() {
 function flashPad(i) { const p = puzzlePads[i]; p.classList.add('lit'); setTimeout(() => p.classList.remove('lit'), 360); }
 function startPuzzle() {
   if (!puzzleEl) return;
+  keys.clear(); // a held movement key shouldn't keep walking the character behind the modal
   puzzleEl.style.display = 'flex'; puzzleEl._msg.textContent = 'Watch carefully…';
   puzzleSeq = Array.from({ length: 4 }, () => Math.floor(Math.random() * 4));
   puzzleInput = []; puzzleLocked = true;
@@ -2681,6 +2719,7 @@ function buildMatch() {
 }
 function startMatch() {
   if (!matchEl) buildMatch();
+  keys.clear(); // a held movement key shouldn't keep walking the character behind the modal
   const deck = [...MATCH_EMOJI, ...MATCH_EMOJI].sort(() => Math.random() - 0.5);
   matchGrid.replaceChildren(); matchCards = []; matchUp = []; matchLock = false; matchDone = 0;
   matchMsg.textContent = 'Find all the matching pairs!';
@@ -3067,6 +3106,7 @@ function buildBattle() {
 }
 function openBattle(holder) {
   if (!battleEl) buildBattle();
+  keys.clear(); // a held movement key shouldn't keep walking the character behind the battle
   const e = holder.userData.enemy, mhp = playerMaxHp();
   battleState = { holder, e, eHp: e.hp, eMax: e.hp, pHp: mhp, pMax: mhp, busy: false };
   battleActive = true;
@@ -3206,10 +3246,18 @@ function resolveWalls(x, z, fromX, fromZ, radius = PLAYER_RADIUS) {
     let ox = x - cx, oz = z - cz;
     let d = Math.hypot(ox, oz);
     if (d < radius) {
-      if (d < 1e-4) { ox = x - fromX; oz = z - fromZ; d = Math.hypot(ox, oz) || 1; }
-      ox /= d; oz /= d;
-      const push = radius - d;
-      x += ox * push; z += oz * push;
+      if (d < 1e-4) {
+        // degenerate case (standing exactly ON the wall line): push a full
+        // radius BACK the way the mover came — the old code pushed along the
+        // movement direction, tunneling them through to the far side
+        const bx = fromX - x, bz = fromZ - z;
+        const bl = Math.hypot(bx, bz) || 1;
+        x += (bx / bl) * radius; z += (bz / bl) * radius;
+      } else {
+        ox /= d; oz /= d;
+        const push = radius - d;
+        x += ox * push; z += oz * push;
+      }
     }
   }
   return [x, z];
