@@ -156,6 +156,52 @@ for (let i = 0; i < 5; i++) {
 const gltfLoader = new GLTFLoader();
 
 // helper: load a model, enable shadows, place + scale it, add to the scene.
+// --- Occlusion fade -------------------------------------------------------
+// Anything solid that comes between the camera and YOUR character (house
+// walls, roofs, trees…) fades to see-through, so you're never invisible
+// inside or behind a building. Meshes opt in via registerOccluder().
+const occludables = [];
+function registerOccluder(mesh) {
+  mesh.material = mesh.material.clone(); // per-mesh material so only the blocking pane fades
+  mesh.userData.occBase = mesh.material.opacity;
+  occludables.push(mesh);
+}
+const _occRay = new THREE.Raycaster();
+const _occAim = new THREE.Vector3();
+const _occSide = new THREE.Vector3();
+const _occFading = new Set();
+function updateOcclusionFade(dt) {
+  if (!player) return;
+  // three rays — straight at the character plus one to each side — so the
+  // whole pane hiding them fades, not just a pin-hole
+  _occSide.set(camera.position.x - player.position.x, 0, camera.position.z - player.position.z);
+  _occSide.set(-_occSide.z, 0, _occSide.x).normalize(); // camera-perpendicular
+  for (const side of [-1.1, 0, 1.1]) {
+    _occAim.set(player.position.x + _occSide.x * side, player.position.y + 1.4, player.position.z + _occSide.z * side);
+    const dist = camera.position.distanceTo(_occAim);
+    _occRay.set(camera.position, _occAim.sub(camera.position).normalize());
+    _occRay.near = 0;
+    _occRay.far = Math.max(0, dist - 0.4); // stop just short of the character
+    for (const h of _occRay.intersectObjects(occludables, false)) {
+      h.object.userData.occHidden = true;
+      _occFading.add(h.object);
+    }
+  }
+  const k = Math.min(1, dt * 10);
+  for (const m of _occFading) {
+    const base = m.userData.occBase ?? 1;
+    const want = m.userData.occHidden ? 0.15 : base;
+    m.material.transparent = true;
+    m.material.opacity += (want - m.material.opacity) * k;
+    if (!m.userData.occHidden && Math.abs(m.material.opacity - base) < 0.02) {
+      m.material.opacity = base;
+      m.material.transparent = false;
+      _occFading.delete(m);
+    }
+    m.userData.occHidden = false; // the raycast re-marks it next frame if it still blocks
+  }
+}
+
 function loadModel(file, { position = [0, 0, 0], rotationY = 0, scale = 1 } = {}) {
   gltfLoader.load(`./assets/models/${file}`, (gltf) => {
     const model = gltf.scene;
@@ -163,7 +209,10 @@ function loadModel(file, { position = [0, 0, 0], rotationY = 0, scale = 1 } = {}
     model.rotation.y = rotationY;
     model.scale.setScalar(scale);
     model.traverse((o) => {
-      if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; }
+      if (o.isMesh) {
+        o.castShadow = true; o.receiveShadow = true;
+        if (file.startsWith('tree')) registerOccluder(o); // trees go see-through when they hide you
+      }
     });
     scene.add(model);
     // gentle "place down" pop using anime.js
@@ -353,7 +402,9 @@ function buildTradePanel() {
   sub.textContent = "Everyone's goods — tap Trade to get one!";
   tradeListEl = document.createElement('div'); tradeListEl.className = 'shop-list';
   tradeMsgEl = document.createElement('p'); tradeMsgEl.className = 'shop-msg';
-  tradeEl.append(h, sub, tradeListEl, tradeMsgEl);
+  const x = document.createElement('button'); x.className = 'panel-close'; x.textContent = '✕';
+  x.addEventListener('click', () => closeTrade());
+  tradeEl.append(x, h, sub, tradeListEl, tradeMsgEl);
   document.body.appendChild(tradeEl);
 }
 function refreshTradePanel() {
@@ -392,7 +443,7 @@ function playerTradeWith(holder) {
   refreshTradePanel();
   if (typeof saveGame === 'function') saveGame();
 }
-function openTrade() { if (typeof questOpen !== 'undefined' && questOpen) closeQuests(); tradeOpen = true; refreshTradePanel(); tradeEl.style.display = 'block'; animate(tradeEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' }); }
+function openTrade() { if (typeof questOpen !== 'undefined' && questOpen) closeQuests(); if (typeof prizeOpen !== 'undefined' && prizeOpen) closePrizes(); tradeOpen = true; refreshTradePanel(); tradeEl.style.display = 'block'; animate(tradeEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' }); }
 function closeTrade() { tradeOpen = false; animate(tradeEl, { opacity: [1, 0], duration: 200, onComplete: () => { tradeEl.style.display = 'none'; } }); }
 buildTradePanel();
 
@@ -568,12 +619,30 @@ const hintEl = document.querySelector('#hud .hint');
 const changeBtn = document.getElementById('changeBtn');
 changeBtn.addEventListener('click', showPicker);
 
+// true while any full-screen choice modal is up — world input should pause
+function uiModalOpen() {
+  for (const el of [pickerEl,
+    typeof petChoiceEl !== 'undefined' ? petChoiceEl : null,
+    typeof petNameEl !== 'undefined' ? petNameEl : null,
+    typeof childChoiceEl !== 'undefined' ? childChoiceEl : null]) {
+    if (el && el.style.display === 'flex') return true;
+  }
+  return false;
+}
+
 const lockedCardRefs = []; // { card, lockBadge, nm, c } for each locked character — kept fresh by refreshPickerLocks()
+let pickerCloseBtn = null;
 function buildPicker(roster) {
   pickerEl = document.createElement('div');
   pickerEl.id = 'picker';
   const panel = document.createElement('div');
   panel.className = 'picker-panel';
+  // a ✕ so an accidental "Change character" tap is recoverable (hidden until a character exists)
+  pickerCloseBtn = document.createElement('button');
+  pickerCloseBtn.className = 'panel-close';
+  pickerCloseBtn.textContent = '✕';
+  pickerCloseBtn.addEventListener('click', () => { if (playerCharId) hidePicker(); });
+  panel.appendChild(pickerCloseBtn);
   const h = document.createElement('h2');
   h.append('Choose your ', Object.assign(document.createElement('span'), { textContent: 'character' }), '!');
   const grid = document.createElement('div');
@@ -640,6 +709,7 @@ function refreshPickerLocks() {
 function showPicker() {
   if (!pickerEl) return;
   refreshPickerLocks(); // always show current unlock progress
+  if (pickerCloseBtn) pickerCloseBtn.style.display = playerCharId ? '' : 'none'; // first pick is mandatory; changes are cancellable
   pickerEl.style.display = 'flex';
   pickerReadyAt = performance.now() + 350; // brief no-click window during fade-in
   animate(pickerEl, { opacity: [0, 1], duration: 280, ease: 'out(3)' });
@@ -701,6 +771,7 @@ function buildPetNamePrompt() {
   petNameInput = document.createElement('input');
   petNameInput.type = 'text'; petNameInput.maxLength = 12; petNameInput.className = 'name-input';
   petNameInput.autocomplete = 'off';
+  petNameInput.enterKeyHint = 'go'; // label the on-screen keyboard's confirm key
   const go = document.createElement('button'); go.className = 'start-btn'; go.textContent = "🐾 Let's go!";
   const confirmName = () => {
     if (performance.now() < petNameReadyAt) return;
@@ -881,7 +952,7 @@ function playAs(id) {
   const p = holder.position;
   controls.target.set(p.x, 1.5, p.z);
   camera.position.set(p.x + 11, 9, p.z + 15);
-  controls.minDistance = 4;
+  controls.minDistance = 2.5; // let kids zoom right in (helps see indoors too)
   controls.maxDistance = 40;
   controls.update();
 
@@ -903,6 +974,7 @@ function playAs(id) {
 function updatePlayer(dt) {
   if (!player) return;
   const w = player.userData;
+  if (typeof uiModalOpen === 'function' && uiModalOpen()) { w.moving = false; return; } // choice modal up — hold still
   if (keys.size === 0 && !joyVec.active) { w.moving = false; return; }
 
   camera.getWorldDirection(_forward); _forward.y = 0;
@@ -988,19 +1060,31 @@ function positionBubble(mesh) {
 
 // Tap detection: only count it as a click if the pointer barely moved
 // (so dragging to look around doesn't trigger a speech bubble).
-let downX = 0, downY = 0;
-renderer.domElement.addEventListener('pointerdown', (e) => { downX = e.clientX; downY = e.clientY; });
+let downX = 0, downY = 0, downCount = 0, multiTouch = false;
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  downCount++;
+  if (downCount > 1) multiTouch = true; // a pinch-zoom in progress — don't treat either release as a tap
+  downX = e.clientX; downY = e.clientY;
+});
+renderer.domElement.addEventListener('pointercancel', () => { downCount = Math.max(0, downCount - 1); if (downCount === 0) multiTouch = false; });
 function clickTargets() {
   let list = billboards;
   if (petDog) list = list.concat(petDog.mesh);
   if (petCat) list = list.concat(petCat.mesh);
-  if (gardenSpots.length) list = list.concat(gardenSpots.map((r) => r.mound));
+  if (gardenSpots.length) {
+    list = list.concat(gardenSpots.map((r) => r.mound));
+    for (const r of gardenSpots) r.plant.traverse((o) => { if (o.isMesh) list = list.concat(o); }); // the visible crop is tappable too
+  }
   if (pondSurface) list = list.concat(pondSurface);
   if (petParkTrigger) list = list.concat(petParkTrigger);
   return list;
 }
 renderer.domElement.addEventListener('pointerup', (e) => {
-  if (Math.hypot(e.clientX - downX, e.clientY - downY) > 6) return;
+  downCount = Math.max(0, downCount - 1);
+  if (multiTouch) { if (downCount === 0) multiTouch = false; return; }
+  // wobbly kid fingers get a bigger tap-vs-drag allowance than a mouse does
+  const slop = e.pointerType === 'mouse' ? 6 : 18;
+  if (Math.hypot(e.clientX - downX, e.clientY - downY) > slop) return;
   pointerNDC.x = (e.clientX / window.innerWidth) * 2 - 1;
   pointerNDC.y = -(e.clientY / window.innerHeight) * 2 + 1;
   raycaster.setFromCamera(pointerNDC, camera);
@@ -1322,7 +1406,7 @@ function buildStore() {
   const woodMat = new THREE.MeshStandardMaterial({ color: 0x9c6b3f, roughness: 0.9 });
   const floorMat = new THREE.MeshStandardMaterial({ color: 0xd8c59a, roughness: 1 });
 
-  const W = 9, D = 6, H = 4, T = 0.4, DOOR = 4;
+  const W = 9, D = 6, H = 4.8, T = 0.4, DOOR = 4; // tall enough that a 3.4-unit character clears the door lintel
   const parts = [];
   const box = (w, h, d, mat, x, y, z) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
@@ -1340,6 +1424,7 @@ function buildStore() {
   box(W - 2, 1.2, 0.8, woodMat, 0, 0.6, -D / 2 + 2);           // shop counter
 
   parts.forEach((m) => { m.castShadow = true; m.receiveShadow = true; store.add(m); });
+  parts.forEach((m) => { if (m.position.y > 0.2) registerOccluder(m); }); // walls/roof fade when they hide you
 
   const sign = makeSign('THE STORE');
   sign.position.set(0, H + 1.3, D / 2 - 0.05);                  // on top, facing the courtyard
@@ -1361,7 +1446,7 @@ function buildHospital() {
   const bedW = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85 });
   const bedFrame = new THREE.MeshStandardMaterial({ color: 0xb9c0c7, roughness: 0.6 });
 
-  const W = 9, D = 6, H = 4, T = 0.4, DOOR = 4;
+  const W = 9, D = 6, H = 4.8, T = 0.4, DOOR = 4; // tall enough that a 3.4-unit character clears the door lintel
   const parts = [];
   const box = (w, h, d, mat, x, y, z) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
@@ -1387,6 +1472,7 @@ function buildHospital() {
   box(0.55, 0.2, 0.85, bedW, -2.85, 0.78, -D / 2 + 1.6); // pillow
 
   parts.forEach((m) => { m.castShadow = true; m.receiveShadow = true; g.add(m); });
+  parts.forEach((m) => { if (m.position.y > 0.2) registerOccluder(m); }); // walls/roof fade when they hide you
 
   const sign = makeSign('HOSPITAL');
   sign.position.set(0, H + 1.3, D / 2 - 0.05);
@@ -1526,7 +1612,7 @@ function updateCampfire(t) {
 // ---------------------------------------------------------------------------
 const ambulanceLights = [];
 let ambulance = null;
-const AMB_R = 14, AMB_SPEED = 0.16; // it slowly loops around the city
+const AMB_R = 13.4, AMB_SPEED = 0.16; // it slowly loops around the city (13.4 clears every house front & the dressing room)
 function buildAmbulance(x, z, ry) {
   const g = new THREE.Group();
   const white = new THREE.MeshStandardMaterial({ color: 0xf4f6f8, roughness: 0.55, metalness: 0.1 });
@@ -1550,16 +1636,46 @@ function buildAmbulance(x, z, ry) {
   ambulanceLights.push(rl.material, bl.material); ambulance = g;
 }
 buildAmbulance(AMB_R, -0, 0);
-function updateAmbulance(t) {
+// keep the ambulance's driving lane clear of scattered trees (trees have no
+// collision, so steering alone can't avoid them) — must be pushed before
+// scatterTrees() runs in the roster-fetch callback
+for (let i = 0; i < 20; i++) {
+  const a = (i / 20) * Math.PI * 2;
+  noTreeZones.push({ x: Math.cos(a) * AMB_R, z: Math.sin(a) * AMB_R, r: 2.5 });
+}
+// The driving lane: a circle at AMB_R that dips inward across the plaza in
+// front of THE STORE (the plain circle used to drive straight through it).
+// Verified against every wall segment: the lane clears all buildings, tents
+// and the fountain with margin, so the ambulance never clips or stalls.
+const AMB_BYPASS = 12.4; // radius while passing the store's sector
+function ambLaneRadius(rad) {
+  let deg = rad * 180 / Math.PI;
+  if (deg > 180) deg -= 360; if (deg < -180) deg += 360;
+  if (deg >= -110 && deg <= -70) return AMB_BYPASS;                              // in front of the store
+  if (deg >= -118 && deg < -110) return AMB_R + (AMB_BYPASS - AMB_R) * (deg + 118) / 8; // ramp in
+  if (deg > -70 && deg <= -62) return AMB_R + (AMB_BYPASS - AMB_R) * (-62 - deg) / 8;   // ramp out
+  return AMB_R;
+}
+function updateAmbulance(t, dt) {
   if (ambulanceLights.length < 2) return;
   const on = Math.sin(t * 6) > 0;
   ambulanceLights[0].emissiveIntensity = on ? 1.5 : 0.2; // red
   ambulanceLights[1].emissiveIntensity = on ? 0.2 : 1.5; // blue (alternates)
-  // drive a slow loop around the city, facing the direction of travel
-  if (ambulance) {
-    const a = t * AMB_SPEED;
-    ambulance.position.set(Math.cos(a) * AMB_R, 0, Math.sin(a) * AMB_R);
-    ambulance.rotation.y = Math.atan2(-Math.cos(a), -Math.sin(a)); // body forward (+x) points along the path
+  if (ambulance && dt) {
+    const prevX = ambulance.position.x, prevZ = ambulance.position.z;
+    // aim one step further along the lane from where it ACTUALLY is, so any
+    // wall pushback makes it slide along the wall instead of tunneling through
+    const a = Math.atan2(prevZ, prevX) + AMB_SPEED * dt;
+    const R = ambLaneRadius(a);
+    let nx = Math.cos(a) * R, nz = Math.sin(a) * R;
+    const stepX = nx - prevX, stepZ = nz - prevZ;
+    const stepLen = Math.hypot(stepX, stepZ);
+    const maxStep = AMB_R * AMB_SPEED * dt + 0.08;
+    if (stepLen > maxStep) { nx = prevX + (stepX / stepLen) * maxStep; nz = prevZ + (stepZ / stepLen) * maxStep; }
+    [nx, nz] = resolveWalls(nx, nz, prevX, prevZ, 0.45); // safety net — lane already clears everything
+    const mx = nx - prevX, mz = nz - prevZ;
+    ambulance.position.set(nx, 0, nz);
+    if (Math.hypot(mx, mz) > 1e-3) ambulance.rotation.y = Math.atan2(-mz, mx); // face travel direction
   }
 }
 
@@ -1701,7 +1817,11 @@ function updateDog(t, dt) {
   if (playSpot) { tx = playSpot.x; tz = playSpot.z; speed = 7; keep = 0.7; }
   else if (ballState === 'onground') { tx = ball.position.x; tz = ball.position.z; speed = 12; keep = 0.6; }
   else if (ballState === 'carried') { tx = player ? player.position.x : h.position.x; tz = player ? player.position.z : h.position.z; speed = 12; keep = 1.5; }
-  else if (player) { [tx, tz] = perpFollowOffset(player.position.x, player.position.z, -1, 0.9); } // trail beside the player (opposite side from a child)
+  else if (player) {
+    [tx, tz] = perpFollowOffset(player.position.x, player.position.z, -1, 0.9); // trail beside the player (opposite side from a child)
+    const [wx, wz] = resolveWalls(tx, tz, player.position.x, player.position.z);
+    if (wx !== tx || wz !== tz) { tx = player.position.x; tz = player.position.z; } // side spot is inside a wall (doorway) — aim at the player instead
+  }
   else { tx = 4; tz = 7; }
 
   const dx = tx - h.position.x, dz = tz - h.position.z;
@@ -1741,7 +1861,11 @@ function updatePlayerCat(t, dt) {
   if (playSpot) { tx = playSpot.x; tz = playSpot.z; speed = 7; keep = 0.7; }
   else if (ballState === 'onground') { tx = ball.position.x; tz = ball.position.z; speed = 14; keep = 0.6; } // a quick pounce — faster than the trot
   else if (ballState === 'carried') { tx = player ? player.position.x : h.position.x; tz = player ? player.position.z : h.position.z; speed = 12; keep = 1.5; }
-  else if (player) { [tx, tz] = perpFollowOffset(player.position.x, player.position.z, -1, 0.9); } // trail beside the player (opposite side from a child)
+  else if (player) {
+    [tx, tz] = perpFollowOffset(player.position.x, player.position.z, -1, 0.9); // trail beside the player (opposite side from a child)
+    const [wx, wz] = resolveWalls(tx, tz, player.position.x, player.position.z);
+    if (wx !== tx || wz !== tz) { tx = player.position.x; tz = player.position.z; } // side spot is inside a wall (doorway) — aim at the player instead
+  }
   else { tx = h.position.x; tz = h.position.z; }
 
   const dx = tx - h.position.x, dz = tz - h.position.z;
@@ -1979,6 +2103,8 @@ function renderPlant(rec) {
   } else if (rec.stage >= 3) { // ripe crop (harvestable)
     rec.crop.build(rec.plant);
   }
+  // the plant itself is tappable too — kids aim at the carrot, not the soil under it
+  rec.plant.traverse((o) => { if (o.isMesh) { o.userData.isGarden = true; o.userData.gardenRec = rec; } });
 }
 function buildGarden() {
   const wood = new THREE.MeshStandardMaterial({ color: 0x9c6b3f, roughness: 0.9 });
@@ -1987,6 +2113,8 @@ function buildGarden() {
   for (const dz of [-1.1, 1.1]) { const r = new THREE.Mesh(new THREE.BoxGeometry(6.7, 0.42, 0.2), wood); r.position.set(0, 0.21, dz); g.add(r); }
   for (const dx of [-3.25, 3.25]) { const r = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.42, 2.3), wood); r.position.set(dx, 0.21, 0); g.add(r); }
   const sign = makeSign('GARDEN'); sign.scale.setScalar(0.5); sign.position.set(GARDEN.x, 2.3, GARDEN.z - 1.7); scene.add(sign);
+  const plantHint = makeEmojiSprite('🌱'); plantHint.position.set(GARDEN.x, 3.3, GARDEN.z - 1.7); plantHint.visible = true;
+  plantHint.scale.set(1.1, 1.1, 1); scene.add(plantHint); // tap-the-soil affordance, same style as the pet park's 🐾
   noTreeZones.push({ x: GARDEN.x, z: GARDEN.z, r: 5 });
   for (let i = 0; i < 5; i++) {
     const spot = new THREE.Group(); spot.position.set(-2.4 + i * 1.2, 0.3, 0); g.add(spot);
@@ -2107,6 +2235,8 @@ function buildPark() {
   const pad = new THREE.MeshStandardMaterial({ color: 0x4fae54, roughness: 0.8 });
   for (const [px, pz] of [[-2, 1], [2.3, -1.4], [0.6, 2.6]]) { const lp = new THREE.Mesh(new THREE.CircleGeometry(0.6, 16), pad); lp.rotation.x = -Math.PI / 2; lp.position.set(px, 0.16, pz); pondGrp.add(lp); }
   const pondSign = makeSign('POND'); pondSign.scale.setScalar(0.45); pondSign.position.set(POND.x, 2.2, POND.z - 6.5); scene.add(pondSign);
+  const fishHint = makeEmojiSprite('🎣'); fishHint.position.set(POND.x, 3.2, POND.z - 6.5); fishHint.visible = true;
+  fishHint.scale.set(1.1, 1.1, 1); scene.add(fishHint); // tap-the-pond affordance, same style as the pet park's 🐾
 
   // ===== PET PARK — south side of the park, off the path to town =====
   const dp = new THREE.Group(); dp.position.set(PETPARK.x, 0, PETPARK.z); scene.add(dp);
@@ -2188,7 +2318,7 @@ function buildNeighborhood() {
     const a = angs[i] * Math.PI / 180, cs = Math.cos(a), sn = Math.sin(a);
     const hx = cs * R2, hz = sn * R2;
     buildHouse({ x: hx, z: hz, rotationY: Math.atan2(-hx, -hz), name: n.name, wall: n.wall, roof: n.roof });
-    buildPath(cs * 19, sn * 19, cs * (R2 - 2.5), sn * (R2 - 2.5)); // path behind the six to this home
+    buildPath(cs * 19, sn * 19, cs * (R2 - 3.6), sn * (R2 - 3.6)); // path behind the six to this home
     const parent = spawnRoamer({
       id: n.id, name: n.name, sprite: n.sprite,
       x: PARK.x + (i - 1) * 4, z: PARK.z + (i - 1) * 3,
@@ -2203,7 +2333,7 @@ function buildNeighborhood() {
     const a = n.ang * Math.PI / 180, cs = Math.cos(a), sn = Math.sin(a);
     const hx = cs * R3, hz = sn * R3;
     buildHouse({ x: hx, z: hz, rotationY: Math.atan2(-hx, -hz), name: n.name, wall: n.wall, roof: n.roof });
-    buildPath(cs * 20, sn * 20, cs * (R3 - 2.5), sn * (R3 - 2.5));
+    buildPath(cs * 20, sn * 20, cs * (R3 - 3.6), sn * (R3 - 3.6));
     // Quacky the duck and her kid live at the pond and paddle around in it
     const atPond = n.id === 'quacky';
     const center = atPond ? POND : PARK;
@@ -2293,7 +2423,9 @@ function buildQuestPanel() {
   const h = document.createElement('h3'); h.append('🎯 Quests');
   const sub = document.createElement('p'); sub.className = 'shop-sub'; sub.textContent = 'Finish quests to earn ✨ stars & level up!';
   questListEl = document.createElement('div'); questListEl.className = 'shop-list';
-  questEl.append(h, sub, questListEl);
+  const x = document.createElement('button'); x.className = 'panel-close'; x.textContent = '✕';
+  x.addEventListener('click', () => closeQuests());
+  questEl.append(x, h, sub, questListEl);
   document.body.appendChild(questEl);
 }
 function refreshQuests() {
@@ -2318,7 +2450,7 @@ function refreshQuests() {
     questListEl.appendChild(row);
   }
 }
-function openQuests() { if (typeof tradeOpen !== 'undefined' && tradeOpen) closeTrade(); questOpen = true; refreshQuests(); questEl.style.display = 'block'; animate(questEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' }); }
+function openQuests() { if (typeof tradeOpen !== 'undefined' && tradeOpen) closeTrade(); if (typeof prizeOpen !== 'undefined' && prizeOpen) closePrizes(); questOpen = true; refreshQuests(); questEl.style.display = 'block'; animate(questEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' }); }
 function closeQuests() { questOpen = false; animate(questEl, { opacity: [1, 0], duration: 200, onComplete: () => { questEl.style.display = 'none'; } }); }
 let toastEl = null;
 function questToast(msg) {
@@ -2751,7 +2883,9 @@ function buildShop() {
   shopMsgEl.className = 'shop-msg';
   ownedEl = document.createElement('p');
   ownedEl.className = 'shop-owned';
-  shopEl.append(h, sub, list, sellRow, shopMsgEl, ownedEl);
+  const x = document.createElement('button'); x.className = 'panel-close'; x.textContent = '✕';
+  x.addEventListener('click', () => { shopDismissed = true; closeShop(); }); // stays closed until you walk away & back
+  shopEl.append(x, h, sub, list, sellRow, shopMsgEl, ownedEl);
   refreshSell();
   document.body.appendChild(shopEl);
 }
@@ -2822,7 +2956,9 @@ function buildPrizes() {
   prizeBalEl = document.createElement('p'); prizeBalEl.className = 'shop-sub';
   prizeListEl = document.createElement('div'); prizeListEl.className = 'shop-list';
   const msg = document.createElement('p'); msg.className = 'shop-msg'; prizeEl._msg = msg;
-  prizeEl.append(h, prizeBalEl, prizeListEl, msg);
+  const x = document.createElement('button'); x.className = 'panel-close'; x.textContent = '✕';
+  x.addEventListener('click', () => closePrizes());
+  prizeEl.append(x, h, prizeBalEl, prizeListEl, msg);
   document.body.appendChild(prizeEl); refreshPrizes();
 }
 function refreshPrizes() {
@@ -2901,6 +3037,7 @@ function showBattlePrompt(holder) { battlePromptFor = holder; battlePromptEl._tx
 function hideBattlePrompt() { battlePromptFor = null; if (battlePromptEl) battlePromptEl.style.display = 'none'; }
 function updateEnemies(t) {
   if (!player || battleActive) { hideBattlePrompt(); return; }
+  if (typeof uiModalOpen === 'function' && uiModalOpen()) { hideBattlePrompt(); return; } // don't pop a Fight prompt over a choice modal
   if (t < battlePromptCool) return;
   let near = null, nd = 4;
   for (const h of enemies) {
@@ -2924,7 +3061,7 @@ function buildBattle() {
   const pBar = document.createElement('div'); pBar.className = 'hpbar'; const pFill = document.createElement('div'); pFill.className = 'hpfill'; pBar.appendChild(pFill); battleEl._pFill = pFill;
   const msg = document.createElement('p'); msg.className = 'puzzle-msg'; battleEl._msg = msg;
   const atk = document.createElement('button'); atk.className = 'puzzle-close'; atk.style.background = '#e0556a'; atk.textContent = '⚔️ Attack!'; atk.addEventListener('click', battleAttack); battleEl._atk = atk;
-  const run = document.createElement('button'); run.className = 'puzzle-close'; run.textContent = '🏃 Run away'; run.addEventListener('click', () => { battleActive = false; battleEl.style.display = 'none'; });
+  const run = document.createElement('button'); run.className = 'puzzle-close'; run.textContent = '🏃 Run away'; run.addEventListener('click', () => { battleActive = false; battleEl.style.display = 'none'; battlePromptCool = timer.getElapsed() + 6; }); // cooldown so the prompt doesn't instantly re-open
   panel.append(h, eName, eBar, img, pName, pBar, msg, atk, run);
   battleEl.appendChild(panel); document.body.appendChild(battleEl);
 }
@@ -2970,11 +3107,13 @@ function battleWin() {
 }
 function battleLose() {
   battleEl._msg.textContent = `You fainted! Level up & try again. 💫`;
+  battlePromptCool = timer.getElapsed() + 8; // breathing room before the prompt can re-open
   battleActive = false; setTimeout(() => { battleEl.style.display = 'none'; }, 1700);
 }
 buildBattlePrompt(); buildBattle();
 
 // Open the shop when the player walks up to the shopkeeper.
+let shopDismissed = false; // ✕ was tapped — don't auto-reopen until they leave and come back
 function updateShop() {
   let near = false;
   if (player) {
@@ -2982,7 +3121,8 @@ function updateShop() {
     const dz = player.position.z - SHOPKEEPER_POS.z;
     near = (dx * dx + dz * dz) < 5.5 * 5.5;
   }
-  if (near && !shopOpen) openShop();
+  if (!near) shopDismissed = false;
+  if (near && !shopOpen && !shopDismissed) openShop();
   else if (!near && shopOpen) closeShop();
 }
 
@@ -3001,7 +3141,7 @@ function buildDressingRoom() {
   const mirrorGlass = new THREE.MeshStandardMaterial({ color: 0xd9f0ff, emissive: 0x9fd8ff, emissiveIntensity: 0.4, roughness: 0.1, metalness: 0.2 });
   const floorMat = new THREE.MeshStandardMaterial({ color: 0xead2e6, roughness: 1 });
 
-  const W = 8, D = 6, H = 4, T = 0.4, DOOR = 4;
+  const W = 8, D = 6, H = 4.8, T = 0.4, DOOR = 4; // tall enough that a 3.4-unit character clears the door lintel
   const parts = [];
   const box = (w, h, d, mat, x, y, z) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
@@ -3022,6 +3162,7 @@ function buildDressingRoom() {
   glass.position.set(2.2, 1.8, -D / 2 + 0.36); parts.push(glass);
 
   parts.forEach((m) => { m.castShadow = true; m.receiveShadow = true; room.add(m); });
+  parts.forEach((m) => { if (m.position.y > 0.2) registerOccluder(m); }); // walls/roof fade when they hide you
 
   const sign = makeSign('DRESSING ROOM');
   sign.position.set(0, H + 1.3, D / 2 - 0.05);
@@ -3055,7 +3196,7 @@ function addWall(gx, gz, ry, lx1, lz1, lx2, lz2) {
   const [x2, z2] = rotXZ(lx2, lz2, ry);
   wallSegments.push({ x1: x1 + gx, z1: z1 + gz, x2: x2 + gx, z2: z2 + gz });
 }
-function resolveWalls(x, z, fromX, fromZ) {
+function resolveWalls(x, z, fromX, fromZ, radius = PLAYER_RADIUS) {
   for (const s of wallSegments) {
     const dx = s.x2 - s.x1, dz = s.z2 - s.z1;
     const L2 = dx * dx + dz * dz || 1;
@@ -3064,21 +3205,56 @@ function resolveWalls(x, z, fromX, fromZ) {
     const cx = s.x1 + t * dx, cz = s.z1 + t * dz;
     let ox = x - cx, oz = z - cz;
     let d = Math.hypot(ox, oz);
-    if (d < PLAYER_RADIUS) {
+    if (d < radius) {
       if (d < 1e-4) { ox = x - fromX; oz = z - fromZ; d = Math.hypot(ox, oz) || 1; }
       ox /= d; oz /= d;
-      const push = PLAYER_RADIUS - d;
+      const push = radius - d;
       x += ox * push; z += oz * push;
     }
   }
   return [x, z];
 }
 
+// Walls for the PUBLIC buildings (store, hospital, dressing room) — same
+// 5-segment doorway pattern the houses use. These are registered here (not in
+// their build functions) because those run before wallSegments exists above.
+for (const b of [
+  { x: 0, z: -16, W: 9, D: 6, DOOR: 4 },                        // THE STORE
+  { x: 14, z: -14, W: 9, D: 6, DOOR: 4 },                       // HOSPITAL
+  { x: DRESS_CENTER.x, z: DRESS_CENTER.z, W: 8, D: 6, DOOR: 4 }, // DRESSING ROOM
+]) {
+  addWall(b.x, b.z, 0, -b.W / 2, -b.D / 2, b.W / 2, -b.D / 2);   // back
+  addWall(b.x, b.z, 0, -b.W / 2, -b.D / 2, -b.W / 2, b.D / 2);   // left
+  addWall(b.x, b.z, 0, b.W / 2, -b.D / 2, b.W / 2, b.D / 2);     // right
+  addWall(b.x, b.z, 0, -b.W / 2, b.D / 2, -b.DOOR / 2, b.D / 2); // front, left of door
+  addWall(b.x, b.z, 0, b.DOOR / 2, b.D / 2, b.W / 2, b.D / 2);   // front, right of door
+}
+// The fountain basin (r≈2.4 at the courtyard center) — an octagon of segments.
+for (let i = 0; i < 8; i++) {
+  const a1 = (i / 8) * Math.PI * 2, a2 = ((i + 1) / 8) * Math.PI * 2, FR = 2.45;
+  wallSegments.push({ x1: Math.cos(a1) * FR, z1: Math.sin(a1) * FR, x2: Math.cos(a2) * FR, z2: Math.sin(a2) * FR });
+}
+// Campsite tents (cones r=1.4, kid tents r=0.77) — a small square of segments each.
+CAMP_TENTS.forEach((c, i) => {
+  const a = (i / CAMP_TENTS.length) * Math.PI * 2 + 0.26;
+  const spots = [{ x: CAMP.x + Math.cos(a) * 10, z: CAMP.z + Math.sin(a) * 10, r: 1.15 }];
+  if (c.kid) spots.push({ x: spots[0].x - Math.sin(a) * 2.1, z: spots[0].z + Math.cos(a) * 2.1, r: 0.63 });
+  for (const s of spots) {
+    addWall(s.x, s.z, 0, -s.r, -s.r, s.r, -s.r);
+    addWall(s.x, s.z, 0, -s.r, s.r, s.r, s.r);
+    addWall(s.x, s.z, 0, -s.r, -s.r, -s.r, s.r);
+    addWall(s.x, s.z, 0, s.r, -s.r, s.r, s.r);
+  }
+});
+
 // House dimensions + the stairs/loft layout (shared with houseFloorHeight).
-const HOUSE_W = 5, HOUSE_D = 5, HOUSE_T = 0.35, HOUSE_DOOR = 1.9;
-const HOUSE_H1 = 3.0, HOUSE_H2 = 2.4;
+// Sized so a 3.4-unit character actually FITS: the door opening (H1 - 0.5
+// lintel = 3.7) clears their head, and the bigger footprint gives the camera
+// something to see inside (walls also fade via the occlusion system).
+const HOUSE_W = 6.5, HOUSE_D = 6.5, HOUSE_T = 0.35, HOUSE_DOOR = 2.6;
+const HOUSE_H1 = 4.2, HOUSE_H2 = 3.0;
 const LOFT_Y = HOUSE_H1 + 0.1;                 // height you stand at on the loft
-const STAIR_FRONT_Z = 0.8, STAIR_BACK_Z = -0.6; // stairs run between these (local z)
+const STAIR_FRONT_Z = 1.3, STAIR_BACK_Z = -0.6; // stairs run between these (local z)
 const houses = []; // { x, z, ry } for the floor-height lookup
 
 // Party balloons tied to the houses.
@@ -3162,6 +3338,7 @@ function buildHouse({ x, z, rotationY, name, wall, roof }) {
   parts.push(roofMesh);
 
   parts.forEach((m) => { m.castShadow = true; m.receiveShadow = true; g.add(m); });
+  parts.forEach((m) => { if (m.position.y > 0.2) registerOccluder(m); }); // walls/roof/loft fade when they hide you (not the ground slab)
 
   // --- furniture ---
   const wood = new THREE.MeshStandardMaterial({ color: 0x9c6b3f, roughness: 0.9 });
@@ -3198,7 +3375,7 @@ function buildHouse({ x, z, rotationY, name, wall, roof }) {
   g.rotation.y = rotationY;
   scene.add(g);
   houses.push({ x, z, ry: rotationY });
-  noTreeZones.push({ x, z, r: 5.5 });
+  noTreeZones.push({ x, z, r: 6.5 });
 
   // register the solid ground-floor walls for collision (doorway stays open)
   addWall(x, z, rotationY, -W / 2, -D / 2, W / 2, -D / 2);  // back
@@ -3256,8 +3433,8 @@ function placeHouses(roster) {
     homeById[c.id] = { x: cs * (R - 2), z: sn * (R - 2) };       // sleep spot inside the house
     // doghouse spot: in front of the house door (toward the courtyard) and to one side
     const px = -sn, pz = cs; // perpendicular to the radial direction
-    doghouseSpotById[c.id] = { x: cs * (R - 4) + px * 2.6, z: sn * (R - 4) + pz * 2.6 };
-    buildPath(cs * 3, sn * 3, cs * (R - 2.5), sn * (R - 2.5));    // path out to this house
+    doghouseSpotById[c.id] = { x: cs * (R - 4.8) + px * 2.6, z: sn * (R - 4.8) + pz * 2.6 }; // clear of the bigger house front
+    buildPath(cs * 3, sn * 3, cs * (R - 3.6), sn * (R - 3.6));    // path out to this house (stops at the wider wall)
   });
   // paths to THE STORE, the DRESSING ROOM, and the HOSPITAL
   buildPath(0, -3, 0, -13);
@@ -3634,7 +3811,9 @@ function buildDress() {
   dressListEl.className = 'shop-list';
   dressMsgEl = document.createElement('p');
   dressMsgEl.className = 'shop-msg';
-  dressEl.append(h, sub, dressListEl, dressMsgEl);
+  const x = document.createElement('button'); x.className = 'panel-close'; x.textContent = '✕';
+  x.addEventListener('click', () => closeDress());
+  dressEl.append(x, h, sub, dressListEl, dressMsgEl);
   document.body.appendChild(dressEl);
 }
 function refreshDress() {
@@ -3773,6 +3952,11 @@ const MOVE_KEYS = {
 window.addEventListener('keydown', (e) => {
   if (document.activeElement && document.activeElement.tagName === 'INPUT') return; // typing (e.g. naming your pet) — don't move/act
   if (typeof miniGameActive === 'function' && miniGameActive()) return; // let the open mini-game take the keys
+  if (typeof uiModalOpen === 'function' && uiModalOpen()) {
+    if (e.code === 'Escape' && playerCharId && pickerEl && pickerEl.style.display === 'flex') hidePicker(); // Esc cancels an accidental character change
+    keys.clear();
+    return; // a choice modal is up — the world shouldn't move underneath it
+  }
   if (MOVE_KEYS[e.code]) { keys.add(MOVE_KEYS[e.code]); e.preventDefault(); }
   if (e.code === 'Space') { e.preventDefault(); throwBall(); } // throw the toy for your pet
 });
@@ -3939,7 +4123,7 @@ function tick() {
   updateBirds(t);
   updateOwl(t);
   updateCampfire(t);
-  updateAmbulance(t);
+  updateAmbulance(t, dt);
   updateBall(dt);
   updateDog(t, dt);
   updatePlayerCat(t, dt);
@@ -4002,7 +4186,11 @@ function tick() {
         // trail the parent around (and into the park); the player's own child
         // gets a small camera-relative sideways offset so it doesn't stack on a pet/parent
         let px = w.parent.position.x, pz = w.parent.position.z;
-        if (w.followSide) { [px, pz] = perpFollowOffset(px, pz, w.followSide, 0.9); }
+        if (w.followSide) {
+          [px, pz] = perpFollowOffset(px, pz, w.followSide, 0.9);
+          const [wx2, wz2] = resolveWalls(px, pz, w.parent.position.x, w.parent.position.z);
+          if (wx2 !== px || wz2 !== pz) { px = w.parent.position.x; pz = w.parent.position.z; } // side spot is in a wall (doorway) — follow the parent directly
+        }
         _charDir.set(px - holder.position.x, 0, pz - holder.position.z);
         const d = _charDir.length();
         if (d > 1.7) { w.moving = true; const step = Math.min(w.speed * 1.4 * dt, d - 1.4); holder.position.x += (_charDir.x / d) * step; holder.position.z += (_charDir.z / d) * step; }
@@ -4021,10 +4209,13 @@ function tick() {
       } else if (t >= w.pauseUntil) {
         _charDir.set(w.target.x - holder.position.x, 0, w.target.z - holder.position.z);
         const dist = _charDir.length();
-        if (dist < 0.25) {
+        if (dist < 0.25 || t > w.targetGiveUp) { // arrived — or stuck against a wall too long
           w.moving = false;
           w.pauseUntil = t + 0.6 + Math.random() * 1.8; // rest a moment
           pickRoamTarget(holder);
+          // budget: travel time to the new target plus slack, so a wall-stuck
+          // walker re-rolls within seconds instead of marching in place forever
+          w.targetGiveUp = t + 5 + holder.position.distanceTo(w.target) / w.speed;
         } else {
           w.moving = true;
           const step = Math.min(w.speed * dt, dist);
@@ -4039,6 +4230,7 @@ function tick() {
       if (cid !== 'boo' && !w.sliding) {
         const [rx, rz] = resolveWalls(holder.position.x, holder.position.z, prevX, prevZ);
         holder.position.x = rx; holder.position.z = rz;
+        holder.position.y = houseFloorHeight(rx, rz); // stand on stairs/lofts, not inside them
       }
     }
 
@@ -4085,6 +4277,7 @@ function tick() {
   }
 
   controls.update();
+  updateOcclusionFade(dt); // after the camera settles: fade anything hiding the player
   const _u = performance.now();
   composer.render();
   perfTick(_u - _f0, performance.now() - _u);

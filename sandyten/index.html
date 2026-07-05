@@ -54,6 +54,15 @@
       pointer-events: auto;
       background: rgba(13,27,42,.6); border: 1px solid rgba(127,209,255,.25);
       padding: 7px 13px; border-radius: 99px; font-size: 13px; backdrop-filter: blur(6px);
+      white-space: nowrap;
+    }
+    /* on phones the 9 pills can't fit one row — wrap them instead of crushing/clipping */
+    #hud .topbar > div:last-child { flex-wrap: wrap; justify-content: flex-end; row-gap: 6px; min-width: 0; }
+    @media (pointer: coarse) { #hud .pill { min-height: 40px; display: inline-flex; align-items: center; } }
+    @media (max-width: 520px) {
+      #hud .topbar { padding: 8px 10px; }
+      #hud .pill { padding: 7px 10px; }
+      #fps { display: none; } /* debug readout, not a kid-facing control */
     }
     #hud .hint {
       position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%);
@@ -90,6 +99,8 @@
       align-items: center; justify-content: center;
       background: rgba(8, 17, 29, .78); backdrop-filter: blur(8px);
     }
+    /* on touch, keep modals near the top so the on-screen keyboard never covers their buttons */
+    body.touch .modal-overlay { align-items: flex-start; padding-top: max(24px, env(safe-area-inset-top)); }
     .picker-card .emoji-icon { font-size: 52px; line-height: 1; }
     @media (max-width: 520px) { .picker-card .emoji-icon { font-size: 40px; } }
     .picker-grid.cols-2 { grid-template-columns: repeat(2, 1fr); }
@@ -101,6 +112,7 @@
     }
     .name-input:focus { border-color: var(--accent); background: rgba(127, 209, 255, .16); }
     .picker-panel {
+      position: relative; /* anchors the ✕ close button */
       background: linear-gradient(180deg, #16314d, #0c1d30);
       border: 1px solid rgba(127, 209, 255, .25); border-radius: 22px;
       padding: 24px 26px; max-width: 680px; width: 92%;
@@ -240,13 +252,38 @@
     #prizepanel h3 { text-align: center; font-size: 18px; margin-bottom: 2px; }
     #prizepanel .shop-sub { color: #9be6c0; text-align: center; }
     #prizepanel .shop-item.worn { opacity: .6; }
+    /* every side panel gets a ✕ so kids can always close it */
+    .panel-close {
+      position: absolute; top: 8px; right: 10px; width: 30px; height: 30px; border-radius: 50%;
+      cursor: pointer; color: #fff; font-weight: 700; font-size: 14px;
+      background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.25);
+    }
+    /* keep scrolling panels clear of the touch joystick (bottom-left) */
+    @media (hover: none) and (pointer: coarse) {
+      #dressroom { top: 12px; transform: none; max-height: calc(100vh - 196px); }
+      #questpanel, #prizepanel, #tradepanel { max-height: calc(100vh - 196px); }
+      .swatch { width: 34px; height: 34px; }
+      .swatches { gap: 8px; }
+    }
+    body.touch #dressroom { top: 12px; transform: none; max-height: calc(100vh - 196px); }
+    /* on phones, drop the panels below the (wrapped, up-to-3-row) top bar so its
+       buttons stay tappable, and stop above the joystick (declared after the
+       coarse-pointer rules so this tighter cap wins on portrait phones) */
+    @media (max-width: 520px) {
+      #questpanel, #prizepanel, #tradepanel { top: 136px; max-height: calc(100vh - 300px); }
+    }
+    button.shop-price { font: inherit; font-size: 14px; padding: 8px 12px; min-height: 40px; }
     /* battle prompt (small bar above the controls) */
     #battleprompt {
       position: fixed; z-index: 55; left: 50%; transform: translateX(-50%); bottom: 86px;
       display: none; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 16px; color: #fff;
       background: linear-gradient(180deg, #3a1f2a, #221016); border: 1px solid rgba(255,140,160,.5);
       box-shadow: 0 12px 32px rgba(0,0,0,.5); font-weight: 600;
+      max-width: 94vw; flex-wrap: wrap; justify-content: center;
     }
+    /* on touch, sit above the joystick instead of on top of it */
+    @media (hover: none) and (pointer: coarse) { #battleprompt { bottom: 170px; } }
+    body.touch #battleprompt { bottom: 170px; }
     .bp-btn { padding: 8px 14px; border-radius: 12px; cursor: pointer; color: #fff; font-weight: 700;
       background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.3); }
     .bp-btn.fight { background: #e0556a; border-color: #ff8a9a; }
