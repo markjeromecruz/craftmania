@@ -221,12 +221,12 @@ function loadModel(file, { position = [0, 0, 0], rotationY = 0, scale = 1 } = {}
   });
 }
 
-const TREE_RING = 11;
+const TREE_RING = 7.5; // ring the fountain, tucked INSIDE the ambulance road (r=11) so the van never clips them
 loadModel('fountain-round.glb', { position: [0, 0, 0], scale: 2.4 });
 for (let i = 0; i < 6; i++) {
-  const a = (i / 6) * Math.PI * 2;
+  const a = (i / 6) * Math.PI * 2 + 0.5;
   const file = i % 2 === 0 ? 'tree-high-round.glb' : 'tree.glb';
-  loadModel(file, { position: [Math.cos(a) * TREE_RING, 0, Math.sin(a) * TREE_RING], rotationY: a, scale: 2.2 });
+  loadModel(file, { position: [Math.cos(a) * TREE_RING, 0, Math.sin(a) * TREE_RING], rotationY: a, scale: 1.9 });
 }
 loadModel('lantern.glb', { position: [3.5, 0, 3.5], rotationY: -0.6, scale: 2 });
 loadModel('lantern.glb', { position: [-3.5, 0, -3.5], rotationY: 2.4, scale: 2 });
@@ -280,8 +280,8 @@ for (let i = 0; i < 8; i++) {
   const a = (i / 8) * Math.PI * 2 + 0.2;
   makeLampPost(Math.cos(a) * 19, Math.sin(a) * 19);
 }
-// lamps along the path out to the park
-makeLampPost(-12, -2); makeLampPost(-21, -6);
+// lamps along the path out to the park (the first is pulled inside the ambulance road)
+makeLampPost(-8.5, -1.4); makeLampPost(-21, -6);
 
 // ---------------------------------------------------------------------------
 // The girls' characters — 2D sprites standing in the 3D world.
@@ -1107,6 +1107,7 @@ function clickTargets() {
   }
   if (pondSurface) list = list.concat(pondSurface);
   if (petParkTrigger) list = list.concat(petParkTrigger);
+  if (campfireTrigger) list = list.concat(campfireTrigger);
   return list;
 }
 renderer.domElement.addEventListener('pointerup', (e) => {
@@ -1128,6 +1129,8 @@ renderer.domElement.addEventListener('pointerup', (e) => {
     handleGardenClick(obj);
   } else if (obj.userData.isPetPark) {        // tapped the pet park → your pet goes to play
     startPetPark();
+  } else if (obj.userData.isCampfire) {       // tapped the campfire → toast a marshmallow
+    toastMarshmallow();
   } else if (petDog && obj === petDog.mesh) { // clicked your dog → bark!
     playWoof();
     showBubble(petDog.mesh, petDog.name, 'Woof! 🐶', 1.3);
@@ -1203,14 +1206,49 @@ const prizes = {};     // owned special prizes -> true
 // the player gets stronger as they level up (and from the Power prize / winning battles)
 let battleWins = 0;
 function playerAtk() { return 8 + level * 2 + battlePower; }
-function playerMaxHp() { return 30 + level * 6 + battlePower * 3; }
+function playerMaxHp() { return 30 + level * 6 + battlePower * 3 + (prizeHeart ? 20 : 0); } // Heart Charm: +20 health
 // special-prize effects the player can buy with stars
 let prizeSpeed = 1, prizeMagnet = false, prizeLucky = false, prizeLantern = false;
+let prizeGreen = false, prizeRod = false, prizeHeart = false, prizeTrail = false;
 function applyPrizeEffects() {
   prizeSpeed = prizes.speed ? 1.4 : 1;
   prizeMagnet = !!prizes.magnet; prizeLucky = !!prizes.lucky; prizeLantern = !!prizes.lantern;
+  prizeGreen = !!prizes.green; prizeRod = !!prizes.rod; prizeHeart = !!prizes.heart; prizeTrail = !!prizes.trail;
   battlePower = battleWins + (prizes.power ? 6 : 0);
 }
+// ---- Rainbow Trail prize: little sparkles that follow the player ----
+const TRAIL_COLORS = [0xff5a5a, 0xffa94d, 0xffe066, 0x74e08c, 0x57d7d7, 0x6aa6ff, 0xb18cff, 0xff7eb6];
+const trailDotTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 32;
+  const g = c.getContext('2d'), grd = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+  grd.addColorStop(0, 'rgba(255,255,255,1)'); grd.addColorStop(0.4, 'rgba(255,255,255,0.9)'); grd.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grd; g.beginPath(); g.arc(16, 16, 16, 0, Math.PI * 2); g.fill();
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+})();
+const trailPool = [];
+for (let i = 0; i < 16; i++) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: trailDotTex, transparent: true, opacity: 0, depthWrite: false }));
+  s.scale.setScalar(0.5); s.visible = false; s.userData.life = 0; scene.add(s); trailPool.push(s);
+}
+let trailIdx = 0, trailEmitAt = 0, trailColorI = 0;
+function updateTrail(t, dt) {
+  if (prizeTrail && player && player.userData.moving && t >= trailEmitAt) {
+    trailEmitAt = t + 0.08;
+    const s = trailPool[trailIdx]; trailIdx = (trailIdx + 1) % trailPool.length;
+    s.position.set(player.position.x + (Math.random() - 0.5) * 0.6, 0.5 + Math.random() * 0.8, player.position.z + (Math.random() - 0.5) * 0.6);
+    s.material.color.setHex(TRAIL_COLORS[trailColorI % TRAIL_COLORS.length]); trailColorI++;
+    s.userData.life = 1; s.visible = true;
+  }
+  for (const s of trailPool) {
+    if (s.userData.life <= 0) continue;
+    s.userData.life -= dt * 1.5;
+    if (s.userData.life <= 0) { s.visible = false; s.material.opacity = 0; continue; }
+    s.material.opacity = s.userData.life * 0.9;
+    s.scale.setScalar(0.3 + (1 - s.userData.life) * 0.5);
+    s.position.y += dt * 0.4; // drift up gently
+  }
+}
+
 let bagCount = 0, bagValue = 0; // crops & fish you've gathered, waiting to be sold at THE STORE
 function addProduce(value) { bagCount += 1; bagValue += value; if (typeof refreshSell === 'function') refreshSell(); }
 function sellProduce() {
@@ -1557,6 +1595,12 @@ addStandee('doctor.png', 'Doctor', new THREE.Vector3(14, 0, -15.8)); // inside t
 // Campfire in the middle of town — stones, logs, flickering flames + warm light.
 // ---------------------------------------------------------------------------
 const campfire = { flames: [], light: null };
+let campfireTrigger = null; // invisible tap-target over the campfire (toast a marshmallow)
+function toastMarshmallow() {
+  if (typeof questToast === 'function') questToast('Toasty marshmallow! 🔥😋');
+  if (typeof playDing === 'function') playDing();
+  if (typeof onToastMarshmallow === 'function') onToastMarshmallow();
+}
 function buildCampfire(x, z) {
   const g = new THREE.Group();
   const stoneMat = new THREE.MeshStandardMaterial({ color: 0x8c8782, roughness: 1 });
@@ -1573,14 +1617,14 @@ function buildCampfire(x, z) {
   const flameColors = [0xff5a1a, 0xffa523, 0xffe04a];
   for (let i = 0; i < 3; i++) {
     const f = new THREE.Mesh(
-      new THREE.ConeGeometry(0.3 - i * 0.07, 0.95 - i * 0.2, 8),
+      new THREE.ConeGeometry(0.34 - i * 0.07, 1.25 - i * 0.24, 8), // a bit taller/bigger flames
       new THREE.MeshBasicMaterial({ color: flameColors[i] })
     );
-    f.position.set((i - 1) * 0.08, 0.55 - i * 0.08, 0);
+    f.position.set((i - 1) * 0.08, 0.65 - i * 0.08, 0);
     f.userData.phase = Math.random() * Math.PI * 2;
     g.add(f); campfire.flames.push(f);
   }
-  campfire.light = new THREE.PointLight(0xff8a30, 1.4, 13, 2);
+  campfire.light = new THREE.PointLight(0xff8a30, 2.2, 17, 2); // brighter + reaches a bit further (still warm, decay 2)
   campfire.light.position.set(0, 1, 0); g.add(campfire.light);
 
   // marshmallows roasting on sticks over the fire
@@ -1599,6 +1643,12 @@ function buildCampfire(x, z) {
     mallow.castShadow = true;
     g.add(mallow);
   }
+
+  // invisible tap-target so tapping the campfire toasts a marshmallow (transparent,
+  // not visible:false — a visible:false mesh can't be raycast/tapped)
+  const trigger = new THREE.Mesh(new THREE.PlaneGeometry(2.8, 2.8), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }));
+  trigger.rotation.x = -Math.PI / 2; trigger.position.y = 0.6; trigger.userData.isCampfire = true;
+  g.add(trigger); campfireTrigger = trigger;
 
   g.position.set(x, 0, z); scene.add(g);
 }
@@ -1666,7 +1716,7 @@ function updateCampfire(t) {
     f.scale.y = 0.85 + Math.sin(t * 10 + f.userData.phase) * 0.22;
     f.rotation.y = t * 2 + f.userData.phase;
   }
-  if (campfire.light) campfire.light.intensity = (isNight ? 3.4 : 1.7) * flick;
+  if (campfire.light) campfire.light.intensity = (isNight ? 4.6 : 2.6) * flick; // brighter, warm glow
 }
 
 // ---------------------------------------------------------------------------
@@ -1674,7 +1724,7 @@ function updateCampfire(t) {
 // ---------------------------------------------------------------------------
 const ambulanceLights = [];
 let ambulance = null;
-const AMB_R = 13.4, AMB_SPEED = 0.16; // it slowly loops around the city (13.4 clears every house front & the dressing room)
+const AMB_R = 11, AMB_SPEED = 0.16; // radius of its road loop — small enough that the body clears every building (house fronts ~13.75, store front 13)
 function buildAmbulance(x, z, ry) {
   const g = new THREE.Group();
   const white = new THREE.MeshStandardMaterial({ color: 0xf4f6f8, roughness: 0.55, metalness: 0.1 });
@@ -1705,19 +1755,27 @@ for (let i = 0; i < 20; i++) {
   const a = (i / 20) * Math.PI * 2;
   noTreeZones.push({ x: Math.cos(a) * AMB_R, z: Math.sin(a) * AMB_R, r: 2.5 });
 }
-// The driving lane: a circle at AMB_R that dips inward across the plaza in
-// front of THE STORE (the plain circle used to drive straight through it).
-// Verified against every wall segment: the lane clears all buildings, tents
-// and the fountain with margin, so the ambulance never clips or stalls.
-const AMB_BYPASS = 12.4; // radius while passing the store's sector
-function ambLaneRadius(rad) {
-  let deg = rad * 180 / Math.PI;
-  if (deg > 180) deg -= 360; if (deg < -180) deg += 360;
-  if (deg >= -110 && deg <= -70) return AMB_BYPASS;                              // in front of the store
-  if (deg >= -118 && deg < -110) return AMB_R + (AMB_BYPASS - AMB_R) * (deg + 118) / 8; // ramp in
-  if (deg > -70 && deg <= -62) return AMB_R + (AMB_BYPASS - AMB_R) * (-62 - deg) / 8;   // ramp out
-  return AMB_R;
+// A visible ring ROAD the ambulance drives on: a flat dark asphalt annulus at
+// y=0.03 (below the wheels, no collision so kids can cross it) with a dashed
+// yellow centerline. The van follows this exact circle, which is small enough
+// to clear every building — so it never drives through a house wall again.
+function buildAmbulanceRoad() {
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(AMB_R - 1.0, AMB_R + 1.0, 64),
+    new THREE.MeshStandardMaterial({ color: 0x3c3f47, roughness: 1 })
+  );
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.03; ring.receiveShadow = true; scene.add(ring);
+  // dashed yellow centerline
+  const dashMat = new THREE.MeshBasicMaterial({ color: 0xffd24a });
+  for (let i = 0; i < 32; i++) {
+    const a = (i / 32) * Math.PI * 2;
+    const dash = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.16), dashMat);
+    dash.rotation.x = -Math.PI / 2; dash.rotation.z = -a;
+    dash.position.set(Math.cos(a) * AMB_R, 0.05, Math.sin(a) * AMB_R);
+    scene.add(dash);
+  }
 }
+buildAmbulanceRoad();
 function updateAmbulance(t, dt) {
   if (ambulanceLights.length < 2) return;
   const on = Math.sin(t * 6) > 0;
@@ -1725,16 +1783,15 @@ function updateAmbulance(t, dt) {
   ambulanceLights[1].emissiveIntensity = on ? 0.2 : 1.5; // blue (alternates)
   if (ambulance && dt) {
     const prevX = ambulance.position.x, prevZ = ambulance.position.z;
-    // aim one step further along the lane from where it ACTUALLY is, so any
+    // aim one step further along the circle from where it ACTUALLY is, so any
     // wall pushback makes it slide along the wall instead of tunneling through
     const a = Math.atan2(prevZ, prevX) + AMB_SPEED * dt;
-    const R = ambLaneRadius(a);
-    let nx = Math.cos(a) * R, nz = Math.sin(a) * R;
+    let nx = Math.cos(a) * AMB_R, nz = Math.sin(a) * AMB_R;
     const stepX = nx - prevX, stepZ = nz - prevZ;
     const stepLen = Math.hypot(stepX, stepZ);
     const maxStep = AMB_R * AMB_SPEED * dt + 0.08;
     if (stepLen > maxStep) { nx = prevX + (stepX / stepLen) * maxStep; nz = prevZ + (stepZ / stepLen) * maxStep; }
-    [nx, nz] = resolveWalls(nx, nz, prevX, prevZ, 0.45); // safety net — lane already clears everything
+    [nx, nz] = resolveWalls(nx, nz, prevX, prevZ, 0.45); // safety net — the road already clears everything
     const mx = nx - prevX, mz = nz - prevZ;
     ambulance.position.set(nx, 0, nz);
     if (Math.hypot(mx, mz) > 1e-3) ambulance.rotation.y = Math.atan2(-mz, mx); // face travel direction
@@ -1819,6 +1876,7 @@ function startPetPark() {
   pet.playUntil = timer.getElapsed() + PET_PLAY_DURATION;
   pet.station = PET_STATIONS[Math.floor(Math.random() * PET_STATIONS.length)];
   if (typeof questToast === 'function') questToast(`${pet.name} is off to play! 🐾`);
+  if (typeof onPetParkPlay === 'function') onPetParkPlay(); // quest: send your pet to play
 }
 // while the pet is off playing, aim it at its chosen pet-park station instead of the player
 function petPlayTargetOrNull(pet, t) {
@@ -2203,10 +2261,11 @@ function handleGardenClick(mesh) {
   }
 }
 function updateGarden(t) {
+  const g3 = prizeGreen ? 6 : 12, g2 = prizeGreen ? 3 : 6; // Green Thumb: crops grow twice as fast
   for (const rec of gardenSpots) {
     if (rec.stage >= 1 && rec.stage < 3) {
       const e = t - rec.plantedAt;
-      const ns = e > 12 ? 3 : e > 6 ? 2 : 1;
+      const ns = e > g3 ? 3 : e > g2 ? 2 : 1;
       if (ns !== rec.stage) { rec.stage = ns; renderPlant(rec); }
     }
   }
@@ -2430,6 +2489,10 @@ function buildForest() {
   noTreeZones.push({ x: FOREST.x, z: FOREST.z, r: 12 });
 }
 
+// Mini-game win targets — declared here so the quest names below can reference
+// them and never desync from the actual win logic in each game.
+const SNAKE_WIN = 8; // fruits to eat to win Snake (was 5 — a bit longer now)
+const BB_WIN = 5;    // lines to clear to win Block Blast (was 3 — a bit longer now)
 const quests = [
   { id: 'coins', name: 'Collect 12 coins', target: 12, prog: 0, reward: 5, done: false },
   { id: 'trade', name: 'Trade with 3 friends', target: 3, prog: 0, reward: 5, done: false },
@@ -2438,13 +2501,17 @@ const quests = [
   { id: 'crop', name: 'Harvest 4 crops 🥕', target: 4, prog: 0, reward: 6, done: false },
   { id: 'puzzle', name: 'Win the Memory game', target: 1, prog: 0, reward: 10, done: false, puzzle: true, game: 'memory' },
   { id: 'merge', name: 'Win Fruit Merge', target: 1, prog: 0, reward: 10, done: false, puzzle: true, game: 'merge' },
-  { id: 'tetris', name: 'Clear 3 lines (Block Blast!)', target: 1, prog: 0, reward: 10, done: false, puzzle: true, game: 'tetris' },
+  { id: 'tetris', name: `Clear ${BB_WIN} lines (Block Blast!)`, target: 1, prog: 0, reward: 10, done: false, puzzle: true, game: 'tetris' },
   { id: 'match', name: 'Win Match Pairs', target: 1, prog: 0, reward: 8, done: false, puzzle: true, game: 'match' },
-  { id: 'snake', name: 'Score 5 in Snake', target: 1, prog: 0, reward: 10, done: false, puzzle: true, game: 'snake' },
+  { id: 'snake', name: `Score ${SNAKE_WIN} in Snake`, target: 1, prog: 0, reward: 10, done: false, puzzle: true, game: 'snake' },
   { id: 'battle', name: 'Win a battle ⚔️', target: 1, prog: 0, reward: 8, done: false },
   { id: 'splash', name: 'Splash in 3 puddles 💦', target: 3, prog: 0, reward: 5, done: false },
   { id: 'sell', name: 'Sell at THE STORE 💰', target: 1, prog: 0, reward: 5, done: false },
   { id: 'camp', name: 'Visit the campsite 🏕️', target: 1, prog: 0, reward: 5, done: false },
+  { id: 'dress', name: 'Dress up in the Dressing Room 👗', target: 1, prog: 0, reward: 6, done: false },
+  { id: 'prize', name: 'Buy a prize from the shop 🎁', target: 1, prog: 0, reward: 6, done: false },
+  { id: 'petpark', name: 'Send your pet to play 🐾', target: 1, prog: 0, reward: 6, done: false },
+  { id: 'mallow', name: 'Toast a marshmallow at the fire 🔥', target: 2, prog: 0, reward: 7, done: false },
 ];
 function questBump(id) {
   const q = quests.find((x) => x.id === id);
@@ -2469,6 +2536,10 @@ function onBattleWon() { questBump('battle'); }
 function onSplash() { questBump('splash'); }
 function onSell() { questBump('sell'); }
 function onVisitCamp() { questBump('camp'); }
+function onDressUp() { questBump('dress'); }
+function onBuyPrize() { questBump('prize'); }
+function onPetParkPlay() { questBump('petpark'); }
+function onToastMarshmallow() { questBump('mallow'); }
 function resetQuests() {
   for (const q of quests) { q.prog = 0; q.done = false; }
   if (sideQuest) { scene.remove(sideQuest.item); scene.remove(sideQuest.animal); sideQuest = null; }
@@ -2666,7 +2737,7 @@ function buildTetris() {
   tetEl = document.createElement('div'); tetEl.id = 'tetris'; tetEl.className = 'gamemodal'; tetEl.style.display = 'none';
   const panel = document.createElement('div'); panel.className = 'puzzle-panel';
   const h = document.createElement('h3'); h.textContent = '🟦 Block Blast!';
-  bbMsg = document.createElement('p'); bbMsg.className = 'puzzle-msg'; bbMsg.textContent = 'Drag a block onto the board. Clear 3 lines!';
+  bbMsg = document.createElement('p'); bbMsg.className = 'puzzle-msg'; bbMsg.textContent = `Drag a block onto the board. Clear ${BB_WIN} lines!`;
   bbGridEl = document.createElement('div'); bbGridEl.className = 'bb-grid';
   for (let i = 0; i < BB_N * BB_N; i++) { const cell = document.createElement('div'); cell.className = 'bb-cell'; const r = Math.floor(i / BB_N), col = i % BB_N; cell.addEventListener('click', () => bbPlace(r, col)); bbGridEl.appendChild(cell); bbCells.push(cell); }
   bbTrayWrap = document.createElement('div'); bbTrayWrap.className = 'bb-tray';
@@ -2679,7 +2750,7 @@ function startTetris() {
   keys.clear();
   bbGrid = Array.from({ length: BB_N }, () => new Array(BB_N).fill(-1));
   bbLines = 0; bbSel = -1; tetOver = false;
-  bbMsg.textContent = 'Drag a block onto the board. Clear 3 lines!';
+  bbMsg.textContent = `Drag a block onto the board. Clear ${BB_WIN} lines!`;
   bbRefillTray(); bbRenderGrid(); tetEl.style.display = 'flex';
 }
 function closeTetris() { tetOver = true; tetEl.style.display = 'none'; }
@@ -2712,10 +2783,10 @@ function bbPlace(r, c) {
   for (const i of fullRows) for (let cc = 0; cc < BB_N; cc++) bbGrid[i][cc] = -1;
   for (const i of fullCols) for (let rr = 0; rr < BB_N; rr++) bbGrid[rr][i] = -1;
   bbLines += fullRows.length + fullCols.length;
-  if (bbLines > 0) bbMsg.textContent = `Lines: ${Math.min(bbLines, 3)}/3`;
+  if (bbLines > 0) bbMsg.textContent = `Lines: ${Math.min(bbLines, BB_WIN)}/${BB_WIN}`;
   if (bbTray.every((x) => !x)) bbRefillTray(); else bbRenderTray();
   bbRenderGrid();
-  if (bbLines >= 3) { tetOver = true; bbMsg.textContent = '3 lines! 🎉'; winMiniGame('tetris'); setTimeout(closeTetris, 1300); return; }
+  if (bbLines >= BB_WIN) { tetOver = true; bbMsg.textContent = `${BB_WIN} lines! 🎉`; winMiniGame('tetris'); setTimeout(closeTetris, 1300); return; }
   if (!bbAnyMove()) { tetOver = true; bbMsg.textContent = 'No moves left — Close & retry'; }
 }
 function bbRenderGrid() { for (let r = 0; r < BB_N; r++) for (let c = 0; c < BB_N; c++) { const v = bbGrid[r][c]; bbCells[r * BB_N + c].style.background = v >= 0 ? BB_COLORS[v] : 'rgba(255,255,255,0.06)'; } }
@@ -2845,8 +2916,12 @@ function matchFlip(i) {
 
 // ---- Snake (eat 5 fruits to win) — pick your fruit & color, then a 3-2-1-GO start ----
 const SNK_N = 13, SNK_CELL = 18;
-// many bright, high-contrast choices; all free so any kid plays instantly
+// many bright, high-contrast choices; all free so any kid plays instantly. each
+// fruit has its OWN circle color so the food is unmistakably the chosen fruit,
+// even on platforms where canvas emoji render as a plain dark glyph.
 const SNAKE_FRUITS = ['🍎', '🍓', '🍒', '🍊', '🍇', '🍉', '🍌', '🥝', '🍑', '🫐', '🍍', '🍈'];
+const SNAKE_FRUIT_COLORS = ['#ff5a5a', '#ff4d7a', '#e0334d', '#ffa63a', '#a06cff', '#ff6b6b', '#ffe14a', '#a6e05a', '#ffc07a', '#6a8cff', '#ffd24a', '#c8f06a'];
+function snakeFoodColor() { const i = SNAKE_FRUITS.indexOf(snakeFruit); return SNAKE_FRUIT_COLORS[i] || '#ff5a5a'; }
 const SNAKE_COLORS = [
   { name: 'Green', head: '#8cf0a4', body: '#4faf54' },
   { name: 'Blue', head: '#8cc4ff', body: '#3a7bd6' },
@@ -2890,7 +2965,7 @@ function buildSnake() {
 
   // --- game screen: board + d-pad ---
   snakeGameEl = document.createElement('div'); snakeGameEl.style.display = 'none';
-  snakeMsg = document.createElement('p'); snakeMsg.className = 'puzzle-msg'; snakeMsg.textContent = 'Eat 5 fruits to win!';
+  snakeMsg = document.createElement('p'); snakeMsg.className = 'puzzle-msg'; snakeMsg.textContent = `Eat ${SNAKE_WIN} fruits to win!`;
   const canvasWrap = document.createElement('div'); canvasWrap.className = 'snake-canvas-wrap';
   snakeCanvas = document.createElement('canvas'); snakeCanvas.width = SNK_N * SNK_CELL; snakeCanvas.height = SNK_N * SNK_CELL; snakeCanvas.className = 'tet-canvas'; snakeCtx = snakeCanvas.getContext('2d');
   snakeCountEl = document.createElement('div'); snakeCountEl.className = 'snake-count'; snakeCountEl.style.display = 'none';
@@ -2936,7 +3011,7 @@ function snakeBeginCountdown() {
   const show = (i) => {
     if (i >= steps.length) {
       snakeCountEl.style.display = 'none';
-      snakeMsg.textContent = `Fruits: 0/5`;
+      snakeMsg.textContent = `Fruits: 0/${SNAKE_WIN}`;
       snakeRunning = true;
       clearInterval(snakeTimer); snakeTimer = setInterval(snakeStep, 220);
       return;
@@ -2963,8 +3038,8 @@ function snakeStep() {
   }
   snakeBody.unshift(head);
   if (head[0] === snakeFood[0] && head[1] === snakeFood[1]) {
-    snakeScore++; snakeMsg.textContent = `Fruits: ${snakeScore}/5`;
-    if (snakeScore >= 5) { snakeOver = true; snakeRunning = false; clearInterval(snakeTimer); snakeMsg.textContent = '5 fruits! 🎉'; winMiniGame('snake'); setTimeout(closeSnake, 1300); return; }
+    snakeScore++; snakeMsg.textContent = `Fruits: ${snakeScore}/${SNAKE_WIN}`;
+    if (snakeScore >= SNAKE_WIN) { snakeOver = true; snakeRunning = false; clearInterval(snakeTimer); snakeMsg.textContent = `${SNAKE_WIN} fruits! 🎉`; winMiniGame('snake'); setTimeout(closeSnake, 1300); return; }
     snakePlaceFood();
   } else { snakeBody.pop(); }
   snakeDraw();
@@ -2976,9 +3051,9 @@ function snakeDraw() {
   // render on canvas) with the chosen fruit emoji layered on top
   const fx = snakeFood[0] * SNK_CELL + SNK_CELL / 2, fy = snakeFood[1] * SNK_CELL + SNK_CELL / 2;
   ctx.beginPath(); ctx.arc(fx, fy, SNK_CELL / 2 - 1, 0, Math.PI * 2);
-  ctx.fillStyle = '#fff6e0'; ctx.fill();
-  ctx.lineWidth = 2; ctx.strokeStyle = '#e0553a'; ctx.stroke();
-  ctx.fillStyle = '#2a1a10'; // opaque, so a monochrome-emoji fallback is still dark & visible
+  ctx.fillStyle = snakeFoodColor(); ctx.fill();       // the CHOSEN fruit's own color — unmistakable
+  ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.stroke();
+  ctx.fillStyle = '#ffffff'; // white emoji glyph reads on every fruit color if emoji fall back to monochrome
   ctx.font = `${SNK_CELL - 4}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText(snakeFruit, fx, fy);
   // SNAKE: in the chosen color, head lighter than the body
@@ -2996,7 +3071,8 @@ function startFishing() {
   const a = Math.random() * Math.PI * 2, r = Math.random() * 3;
   bobber.position.set(POND.x + Math.cos(a) * r, 0.35, POND.z + Math.sin(a) * r);
   scene.add(bobber);
-  fishing = { bobber, until: timer.getElapsed() + 2 + Math.random() * 3, base: bobber.position.y };
+  const wait = prizeRod ? 0.6 + Math.random() * 1.2 : 2 + Math.random() * 3; // Lucky Rod: bites much faster
+  fishing = { bobber, until: timer.getElapsed() + wait, base: bobber.position.y };
   questToast('Casting… 🎣 wait for a bite!');
 }
 function updateFishing(t) {
@@ -3169,6 +3245,10 @@ const PRIZES = [
   { id: 'lucky', emoji: '🍀', name: 'Lucky Clover', cost: 18, desc: 'Sell produce for 2×' },
   { id: 'lantern', emoji: '🔦', name: 'Lantern', cost: 14, desc: 'A light that follows you' },
   { id: 'power', emoji: '💪', name: 'Power Crystal', cost: 22, desc: '+6 battle strength' },
+  { id: 'green', emoji: '🌱', name: 'Green Thumb', cost: 15, desc: 'Crops grow twice as fast' },
+  { id: 'rod', emoji: '🎣', name: 'Lucky Rod', cost: 13, desc: 'Fish bite much faster' },
+  { id: 'heart', emoji: '💗', name: 'Heart Charm', cost: 20, desc: '+20 health in battles' },
+  { id: 'trail', emoji: '🌈', name: 'Rainbow Trail', cost: 10, desc: 'Sparkles follow you' },
 ];
 let prizeEl = null, prizeOpen = false, prizeListEl = null, prizeBalEl = null;
 function buildPrizes() {
@@ -3200,6 +3280,7 @@ function buyPrize(p) {
   if (starBalance < p.cost) { prizeEl._msg.textContent = `Need ${p.cost} ⭐ — earn more from quests!`; return; }
   starBalance -= p.cost; prizes[p.id] = true; applyPrizeEffects();
   prizeEl._msg.textContent = `Got ${p.emoji} ${p.name}!`; if (typeof playDing === 'function') playDing();
+  if (typeof onBuyPrize === 'function') onBuyPrize(); // quest: buy a prize
   refreshPrizes(); if (typeof saveGame === 'function') saveGame();
 }
 function openPrizes() { if (typeof questOpen !== 'undefined' && questOpen) closeQuests(); if (typeof tradeOpen !== 'undefined' && tradeOpen) closeTrade(); prizeOpen = true; refreshPrizes(); prizeEl.style.display = 'block'; animate(prizeEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' }); }
@@ -3960,20 +4041,39 @@ function updateBirds(t) {
 // ---- Things you can buy, wear, and (for clothes) recolor ----
 const DRESS_ITEMS = [
   // `layer` controls draw order so nothing z-fights: bottoms(1) < tops(2) < accessories(3).
+  // `anchor` picks which per-character landmark this item sits on (see CHAR_FIT),
+  // and `dy` nudges it up/down from that landmark. This is what makes clothes fit
+  // every character (whose head/torso sit at different heights in their sprite).
   // accessories — fixed colors, sit on the head/face
-  { id: 'crown', name: 'Crown', emoji: '👑', price: 15, y: 1.05, scale: 1.7, recolor: false, layer: 3 },
-  { id: 'hat', name: 'Party Hat', emoji: '🎉', price: 6, y: 1.2, scale: 1.7, recolor: false, layer: 3 },
-  { id: 'glasses', name: 'Sunglasses', emoji: '🕶️', price: 8, y: 0.35, scale: 1.5, recolor: false, layer: 3 },
-  { id: 'bow', name: 'Bow', emoji: '🎀', price: 5, y: 0.9, scale: 1.2, recolor: false, layer: 3 },
+  { id: 'crown', name: 'Crown', emoji: '👑', price: 15, anchor: 'hat', dy: 0.15, scale: 1.7, recolor: false, layer: 3 },
+  { id: 'hat', name: 'Party Hat', emoji: '🎉', price: 6, anchor: 'hat', dy: 0.28, scale: 1.7, recolor: false, layer: 3 },
+  { id: 'glasses', name: 'Sunglasses', emoji: '🕶️', price: 8, anchor: 'eyes', dy: 0, scale: 1.5, recolor: false, layer: 3 },
+  { id: 'bow', name: 'Bow', emoji: '🎀', price: 5, anchor: 'hat', dy: -0.05, scale: 1.2, recolor: false, layer: 3 },
   // clothes — white base, recolor them to any color to make your own outfit.
   // Tops cover the torso; bottoms cover the legs; tops draw over bottoms.
-  { id: 'tshirt', name: 'T-Shirt', emoji: '👕', price: 7, y: -0.5, scale: 1.4, recolor: true, layer: 2 },
-  { id: 'croptop', name: 'Crop Top', emoji: '🎽', price: 7, y: -0.4, scale: 1.2, recolor: true, layer: 2 },
-  { id: 'skirt', name: 'Skirt', emoji: '👗', price: 8, y: -0.95, scale: 1.5, recolor: true, layer: 1 },
-  { id: 'shorts', name: 'Shorts', emoji: '🩳', price: 6, y: -1.05, scale: 1.4, recolor: true, layer: 1 },
-  { id: 'pants', name: 'Pants', emoji: '👖', price: 9, y: -1.05, scale: 1.4, recolor: true, layer: 1 },
-  { id: 'rippedpants', name: 'Ripped Pants', emoji: '👖', price: 11, y: -1.05, scale: 1.4, recolor: true, layer: 1 },
+  { id: 'tshirt', name: 'T-Shirt', emoji: '👕', price: 7, anchor: 'top', dy: 0, scale: 1.4, recolor: true, layer: 2 },
+  { id: 'croptop', name: 'Crop Top', emoji: '🎽', price: 7, anchor: 'top', dy: 0.12, scale: 1.2, recolor: true, layer: 2 },
+  { id: 'skirt', name: 'Skirt', emoji: '👗', price: 8, anchor: 'bot', dy: 0.12, scale: 1.5, recolor: true, layer: 1 },
+  { id: 'shorts', name: 'Shorts', emoji: '🩳', price: 6, anchor: 'bot', dy: 0, scale: 1.4, recolor: true, layer: 1 },
+  { id: 'pants', name: 'Pants', emoji: '👖', price: 9, anchor: 'bot', dy: 0, scale: 1.4, recolor: true, layer: 1 },
+  { id: 'rippedpants', name: 'Ripped Pants', emoji: '👖', price: 11, anchor: 'bot', dy: 0, scale: 1.4, recolor: true, layer: 1 },
 ];
+// Per-character fit: the plane-Y (the char plane spans -1.7..+1.7) where each
+// accessory landmark sits. Kiki/Spike carry their faces lower in the sprite;
+// Bronte/Cliff/Boo/Lloyd carry them higher. Tuned by eye and verified in-browser.
+const CHAR_FIT = {
+  kiki:    { hat: 0.98, eyes: 0.42, top: -0.10, bot: -1.02 },
+  bronte:  { hat: 1.18, eyes: 0.66, top:  0.06, bot: -0.95 },
+  spike:   { hat: 0.92, eyes: 0.38, top: -0.08, bot: -1.02 },
+  cliff:   { hat: 1.08, eyes: 0.66, top:  0.14, bot: -1.00 },
+  boo:     { hat: 1.28, eyes: 0.70, top:  0.04, bot: -0.95 },
+  lloyd:   { hat: 1.20, eyes: 0.60, top:  0.06, bot: -1.02 },
+  _default:{ hat: 1.05, eyes: 0.52, top: -0.02, bot: -1.00 },
+};
+function charFit(charMesh) {
+  const id = charMesh && charMesh.userData && charMesh.userData.char && charMesh.userData.char.id;
+  return (id && CHAR_FIT[id]) || CHAR_FIT._default;
+}
 const PALETTE = [
   0xff7eb6, 0xff5a5a, 0xffa94d, 0xffe066, 0x74e08c,
   0x57d7d7, 0x6aa6ff, 0xb18cff, 0xffffff, 0x4a4f5a,
@@ -4006,12 +4106,17 @@ function wearItem(charMesh, item) {
       depthWrite: false, // don't write depth, so layered clothes never z-fight
     })
   );
-  // hug the body (small z), and paint strictly by layer so tops cover bottoms
-  m.position.set(0, item.y, 0.02 + layer * 0.01);
+  // sit on this character's own landmark for that item (so it fits every
+  // character), nudged by the item's dy; hug the body (small z), and paint
+  // strictly by layer so tops cover bottoms
+  const fit = charFit(charMesh);
+  const y = (item.anchor && fit[item.anchor] != null ? fit[item.anchor] : (item.y || 0)) + (item.dy || 0);
+  m.position.set(0, y, 0.02 + layer * 0.01);
   m.renderOrder = 10 + layer;
   charMesh.add(m);
   charMesh.userData.accessories[item.id] = m;
   if (item.recolor) charMesh.userData.itemColors[item.id] = color;
+  if (typeof onDressUp === 'function') onDressUp(); // quest: dress up in the dressing room
   if (typeof saveGame === 'function') saveGame();
 }
 function takeOffItem(charMesh, item) {
@@ -4365,6 +4470,7 @@ function tick() {
   if (player) updatePlayer(dt); else updateMovement(dt);
 
   updateCollectibles(t, dt);
+  updateTrail(t, dt);
   updateShop();
   updateDress();
   updateTrades(t);
