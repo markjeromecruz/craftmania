@@ -831,6 +831,9 @@ function hideChildChoice() {
 // ---- Save / load progress (localStorage) ----
 const SAVE_KEY = 'sandyten_save_v1';
 let suppressSave = false;
+// the player's last-picked Snake fruit & color (persisted); declared up here so
+// saveGame/loadGame can reference them safely regardless of module load order
+let snakeFruit = '🍎', snakeColorIdx = 0;
 function saveGame() {
   if (suppressSave) return;
   try {
@@ -844,7 +847,7 @@ function saveGame() {
       }
     }
     const activePet = typeof currentPlayerPet === 'function' ? currentPlayerPet() : null;
-    localStorage.setItem(SAVE_KEY, JSON.stringify({ coins, level, levelStars, starBalance, battleWins, prizes, bagCount, bagValue, itemOwned, owned, playerId: playerCharId, petKind, petName: activePet ? activePet.name : '', hasChild, totalXP, unlockedIds: [...unlockedIds], outfits, questState: (typeof getQuestSave === 'function' ? getQuestSave() : null) }));
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ coins, level, levelStars, starBalance, battleWins, prizes, bagCount, bagValue, itemOwned, owned, playerId: playerCharId, petKind, petName: activePet ? activePet.name : '', hasChild, totalXP, unlockedIds: [...unlockedIds], snakeFruit, snakeColorIdx, outfits, questState: (typeof getQuestSave === 'function' ? getQuestSave() : null) }));
   } catch (e) { /* storage unavailable */ }
 }
 function hasSave() { try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; } }
@@ -858,6 +861,8 @@ function loadGame() {
     coins = s.coins ?? coins; level = s.level ?? 1; levelStars = s.levelStars ?? 0;
     starBalance = s.starBalance ?? 0; battleWins = s.battleWins ?? 0;
     totalXP = s.totalXP ?? 0;
+    if (typeof s.snakeFruit === 'string' && SNAKE_FRUITS.includes(s.snakeFruit)) snakeFruit = s.snakeFruit;
+    if (Number.isInteger(s.snakeColorIdx) && s.snakeColorIdx >= 0 && s.snakeColorIdx < SNAKE_COLORS.length) snakeColorIdx = s.snakeColorIdx;
     unlockedIds.clear(); (Array.isArray(s.unlockedIds) ? s.unlockedIds : []).forEach((id) => unlockedIds.add(id));
     // grandfather clause: if you were already playing as a "locked" character
     // before this update, you keep them — you're not suddenly locked out
@@ -1617,18 +1622,38 @@ const CAMP_TENTS = [
   { color: 0x9aa6c9, kid: true }, { color: 0xe08a4a, kid: true }, { color: 0x8a5a36, kid: true },
   { color: 0x6fae54, kid: true }, { color: 0xe0b84a, kid: true }, { color: 0x4a4a52, kid: true },
 ];
+// The tents sit in a HORSESHOE, not a full ring — leaving a wide opening on the
+// town-facing (+z) side so players can walk straight in without bumping a tent.
+// One shared layout drives both the visible tents and their colliders, so the
+// two can never drift out of sync.
+const CAMP_ENTRANCE_A = Math.PI / 2;         // opening faces +z, toward town
+const CAMP_OPEN_HALF = 0.52;                 // half-width of the opening (~30°)
+const CAMP_TENT_R = 10, CAMP_TENT_COLL = 1.0, CAMP_KIDTENT_COLL = 0.55;
+function campTentLayout() {
+  const start = CAMP_ENTRANCE_A + CAMP_OPEN_HALF;              // first tent just past the opening
+  const span = Math.PI * 2 - CAMP_OPEN_HALF * 2;              // arc the tents occupy
+  return CAMP_TENTS.map((c, i) => {
+    const a = start + (i + 0.5) * (span / CAMP_TENTS.length);
+    const tx = CAMP.x + Math.cos(a) * CAMP_TENT_R, tz = CAMP.z + Math.sin(a) * CAMP_TENT_R;
+    const kid = c.kid ? { x: tx - Math.sin(a) * 2.1, z: tz + Math.cos(a) * 2.1 } : null;
+    return { a, tx, tz, color: c.color, kid };
+  });
+}
 function buildCampsite() {
   const dirt = new THREE.Mesh(new THREE.CircleGeometry(13, 48), new THREE.MeshStandardMaterial({ color: 0x6e5a3e, roughness: 1 }));
   dirt.rotation.x = -Math.PI / 2; dirt.position.set(CAMP.x, 0.05, CAMP.z); dirt.receiveShadow = true; scene.add(dirt);
   noTreeZones.push({ x: CAMP.x, z: CAMP.z, r: 14 });
+  // a welcoming dirt walkway from the town side, through the tent opening, up to
+  // the campfire — a flat ground decal (no collision), so kids walk right in
+  const ex = CAMP.x + Math.cos(CAMP_ENTRANCE_A) * 15, ez = CAMP.z + Math.sin(CAMP_ENTRANCE_A) * 15;
+  const ix = CAMP.x + Math.cos(CAMP_ENTRANCE_A) * 4, iz = CAMP.z + Math.sin(CAMP_ENTRANCE_A) * 4;
+  buildPath(ex, ez, ix, iz, 2.6);
   buildCampfire(CAMP.x, CAMP.z); // the campfire + marshmallows live at the campsite now
   const logMat = new THREE.MeshStandardMaterial({ color: 0x6b4a2f, roughness: 0.9 });
   for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2 + 0.3; const log = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 1.4, 8), logMat); log.rotation.z = Math.PI / 2; log.rotation.y = a; log.position.set(CAMP.x + Math.cos(a) * 3.2, 0.22, CAMP.z + Math.sin(a) * 3.2); scene.add(log); }
-  CAMP_TENTS.forEach((c, i) => {
-    const a = (i / CAMP_TENTS.length) * Math.PI * 2 + 0.26;
-    const tx = CAMP.x + Math.cos(a) * 10, tz = CAMP.z + Math.sin(a) * 10;
-    buildTent(tx, tz, c.color, 1);
-    if (c.kid) buildTent(tx - Math.sin(a) * 2.1, tz + Math.cos(a) * 2.1, c.color, 0.55); // small kid tent beside the parent's
+  campTentLayout().forEach((t) => {
+    buildTent(t.tx, t.tz, t.color, 1);
+    if (t.kid) buildTent(t.kid.x, t.kid.z, t.color, 0.55); // small kid tent beside the parent's
   });
   const sign = makeSign('CAMP'); sign.scale.setScalar(0.55); sign.position.set(CAMP.x, 2.8, CAMP.z - 13); scene.add(sign);
   // a few lamp posts around the campsite so it glows at night
@@ -2641,7 +2666,7 @@ function buildTetris() {
   tetEl = document.createElement('div'); tetEl.id = 'tetris'; tetEl.className = 'gamemodal'; tetEl.style.display = 'none';
   const panel = document.createElement('div'); panel.className = 'puzzle-panel';
   const h = document.createElement('h3'); h.textContent = '🟦 Block Blast!';
-  bbMsg = document.createElement('p'); bbMsg.className = 'puzzle-msg'; bbMsg.textContent = 'Tap a block, then tap the board. Clear 3 lines!';
+  bbMsg = document.createElement('p'); bbMsg.className = 'puzzle-msg'; bbMsg.textContent = 'Drag a block onto the board. Clear 3 lines!';
   bbGridEl = document.createElement('div'); bbGridEl.className = 'bb-grid';
   for (let i = 0; i < BB_N * BB_N; i++) { const cell = document.createElement('div'); cell.className = 'bb-cell'; const r = Math.floor(i / BB_N), col = i % BB_N; cell.addEventListener('click', () => bbPlace(r, col)); bbGridEl.appendChild(cell); bbCells.push(cell); }
   bbTrayWrap = document.createElement('div'); bbTrayWrap.className = 'bb-tray';
@@ -2654,7 +2679,7 @@ function startTetris() {
   keys.clear();
   bbGrid = Array.from({ length: BB_N }, () => new Array(BB_N).fill(-1));
   bbLines = 0; bbSel = -1; tetOver = false;
-  bbMsg.textContent = 'Tap a block, then tap the board. Clear 3 lines!';
+  bbMsg.textContent = 'Drag a block onto the board. Clear 3 lines!';
   bbRefillTray(); bbRenderGrid(); tetEl.style.display = 'flex';
 }
 function closeTetris() { tetOver = true; tetEl.style.display = 'none'; }
@@ -2668,7 +2693,8 @@ function bbRenderTray() {
     let maxR = 0, maxC = 0; p.cells.forEach(([r, c]) => { maxR = Math.max(maxR, r); maxC = Math.max(maxC, c); });
     const mini = document.createElement('div'); mini.className = 'bb-mini'; mini.style.gridTemplateColumns = `repeat(${maxC + 1}, 13px)`;
     for (let r = 0; r <= maxR; r++) for (let c = 0; c <= maxC; c++) { const cell = document.createElement('div'); cell.className = 'bb-mcell'; if (p.cells.some(([pr, pc]) => pr === r && pc === c)) cell.style.background = BB_COLORS[p.color]; mini.appendChild(cell); }
-    el.appendChild(mini); el.addEventListener('click', () => { bbSel = i; bbRenderTray(); });
+    el.appendChild(mini);
+    el.addEventListener('pointerdown', (e) => bbStartDrag(i, e)); // drag to place (a plain tap still selects — fallback)
     bbTrayWrap.appendChild(el);
   });
 }
@@ -2693,6 +2719,73 @@ function bbPlace(r, c) {
   if (!bbAnyMove()) { tetOver = true; bbMsg.textContent = 'No moves left — Close & retry'; }
 }
 function bbRenderGrid() { for (let r = 0; r < BB_N; r++) for (let c = 0; c < BB_N; c++) { const v = bbGrid[r][c]; bbCells[r * BB_N + c].style.background = v >= 0 ? BB_COLORS[v] : 'rgba(255,255,255,0.06)'; } }
+
+// ---- Drag a block from the tray onto the board (pointer events; touch-safe) ----
+// A plain tap (no drag) still just selects the piece, so the old tap-a-block-
+// then-tap-a-cell flow keeps working for little kids who can't drag yet.
+let bbDrag = null;
+function bbCellSize() { return bbCells[0].getBoundingClientRect().width; }
+function bbNearestCell(sx, sy) {
+  let best = null, bestD = Infinity;
+  for (let i = 0; i < bbCells.length; i++) {
+    const rect = bbCells[i].getBoundingClientRect();
+    const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+    const d = (cx - sx) ** 2 + (cy - sy) ** 2;
+    if (d < bestD) { bestD = d; best = [Math.floor(i / BB_N), i % BB_N]; }
+  }
+  return best;
+}
+function bbClearGhost() { for (const c of bbCells) c.classList.remove('bb-ghost-ok', 'bb-ghost-no'); }
+function bbStartDrag(i, e) {
+  if (tetOver || !bbTray[i]) return;
+  e.preventDefault();
+  const p = bbTray[i], cs = bbCellSize(), gap = 3;
+  let maxR = 0, maxC = 0; p.cells.forEach(([r, c]) => { maxR = Math.max(maxR, r); maxC = Math.max(maxC, c); });
+  const clone = document.createElement('div'); clone.className = 'bb-drag';
+  const grid = document.createElement('div'); grid.style.display = 'grid'; grid.style.gap = gap + 'px';
+  grid.style.gridTemplateColumns = `repeat(${maxC + 1}, ${cs}px)`;
+  for (let r = 0; r <= maxR; r++) for (let c = 0; c <= maxC; c++) {
+    const cell = document.createElement('div'); cell.style.width = cs + 'px'; cell.style.height = cs + 'px'; cell.style.borderRadius = '5px';
+    if (p.cells.some(([pr, pc]) => pr === r && pc === c)) cell.style.background = BB_COLORS[p.color];
+    grid.appendChild(cell);
+  }
+  clone.appendChild(grid); document.body.appendChild(clone);
+  bbDrag = { idx: i, p, clone, cs, gap, pieceW: (maxC + 1) * cs + maxC * gap, pieceH: (maxR + 1) * cs + maxR * gap, moved: false, lastFit: null, downX: e.clientX, downY: e.clientY };
+  bbSel = i; bbRenderTray();
+  bbMoveDrag(e);
+  window.addEventListener('pointermove', bbMoveDrag);
+  window.addEventListener('pointerup', bbEndDrag);
+  window.addEventListener('pointercancel', bbEndDrag);
+}
+function bbMoveDrag(e) {
+  const d = bbDrag; if (!d) return;
+  if (Math.hypot(e.clientX - d.downX, e.clientY - d.downY) > 5) d.moved = true;
+  const LIFT = 46; // float the piece above the finger so a kid can see where it lands
+  const left = e.clientX - d.pieceW / 2, top = e.clientY - LIFT - d.pieceH;
+  d.clone.style.left = left + 'px'; d.clone.style.top = top + 'px';
+  bbClearGhost();
+  if (!d.moved) { d.lastFit = null; return; }
+  const anchor = bbNearestCell(left + d.cs / 2, top + d.cs / 2); // board cell under the piece's top-left
+  if (!anchor) { d.lastFit = null; return; }
+  const [r, c] = anchor, ok = bbFits(d.p, r, c);
+  d.lastFit = ok ? [r, c] : null;
+  d.p.cells.forEach(([dr, dc]) => { const rr = r + dr, cc = c + dc; if (rr >= 0 && rr < BB_N && cc >= 0 && cc < BB_N) bbCells[rr * BB_N + cc].classList.add(ok ? 'bb-ghost-ok' : 'bb-ghost-no'); });
+}
+function bbEndDrag() {
+  window.removeEventListener('pointermove', bbMoveDrag);
+  window.removeEventListener('pointerup', bbEndDrag);
+  window.removeEventListener('pointercancel', bbEndDrag);
+  const d = bbDrag; if (!d) return;
+  bbDrag = null; bbClearGhost();
+  if (d.moved && d.lastFit) { d.clone.remove(); bbSel = d.idx; bbPlace(d.lastFit[0], d.lastFit[1]); return; }
+  if (d.moved) { // dropped somewhere it doesn't fit → spring back to the tray, keep the piece
+    const origin = bbTrayWrap.children[d.idx];
+    if (origin) { const rect = origin.getBoundingClientRect(); d.clone.style.transition = 'left .16s ease-out, top .16s ease-out, opacity .16s'; d.clone.style.left = rect.left + 'px'; d.clone.style.top = rect.top + 'px'; d.clone.style.opacity = '0'; setTimeout(() => d.clone.remove(), 180); }
+    else d.clone.remove();
+    return;
+  }
+  d.clone.remove(); bbSel = d.idx; bbRenderTray(); // a plain tap → just select (tap-to-place fallback)
+}
 // keyboard for the open mini-game (registered before the movement handler, so it wins)
 window.addEventListener('keydown', (e) => {
   if (mergeEl && mergeEl.style.display !== 'none' && !mergeOver) {
@@ -2750,48 +2843,128 @@ function matchFlip(i) {
   }
 }
 
-// ---- Snake (eat 5 apples to win) ----
+// ---- Snake (eat 5 fruits to win) — pick your fruit & color, then a 3-2-1-GO start ----
 const SNK_N = 13, SNK_CELL = 18;
+// many bright, high-contrast choices; all free so any kid plays instantly
+const SNAKE_FRUITS = ['🍎', '🍓', '🍒', '🍊', '🍇', '🍉', '🍌', '🥝', '🍑', '🫐', '🍍', '🍈'];
+const SNAKE_COLORS = [
+  { name: 'Green', head: '#8cf0a4', body: '#4faf54' },
+  { name: 'Blue', head: '#8cc4ff', body: '#3a7bd6' },
+  { name: 'Pink', head: '#ff9ec7', body: '#e0558a' },
+  { name: 'Orange', head: '#ffc07a', body: '#e0872e' },
+  { name: 'Purple', head: '#c9a6ff', body: '#8c5ad6' },
+  { name: 'Cyan', head: '#8cf0e0', body: '#2eb0b0' },
+  { name: 'Yellow', head: '#ffe98c', body: '#e0b82e' },
+  { name: 'Red', head: '#ff9e9e', body: '#e0453a' },
+];
 let snakeEl = null, snakeCanvas = null, snakeCtx = null, snakeMsg = null, snakeBody = null, snakeDir = null, snakeNext = null, snakeFood = null, snakeScore = 0, snakeTimer = 0, snakeOver = true;
+let snakeSetupEl = null, snakeGameEl = null, snakeCountEl = null, snakeRunning = false;
+const snakeCountTimers = [];
+// snakeFruit / snakeColorIdx are declared up near SAVE_KEY (persisted picks)
+function snakeColor() { return SNAKE_COLORS[snakeColorIdx] || SNAKE_COLORS[0]; }
 function buildSnake() {
   snakeEl = document.createElement('div'); snakeEl.id = 'snake'; snakeEl.className = 'gamemodal'; snakeEl.style.display = 'none';
   const panel = document.createElement('div'); panel.className = 'puzzle-panel';
   const h = document.createElement('h3'); h.textContent = '🐍 Snake';
-  snakeMsg = document.createElement('p'); snakeMsg.className = 'puzzle-msg'; snakeMsg.textContent = 'Eat 5 apples 🍎 to win!';
+
+  // --- setup screen: pick a fruit & a color, then Start ---
+  snakeSetupEl = document.createElement('div');
+  const fLabel = document.createElement('p'); fLabel.className = 'puzzle-msg'; fLabel.textContent = 'Pick your fruit!';
+  const fRow = document.createElement('div'); fRow.className = 'snake-choices';
+  SNAKE_FRUITS.forEach((fr) => {
+    const b = document.createElement('button'); b.className = 'snake-fruit'; b.textContent = fr;
+    b.addEventListener('click', () => { snakeFruit = fr; if (typeof saveGame === 'function') saveGame(); renderSnakeChoices(); });
+    fRow.appendChild(b);
+  });
+  const cLabel = document.createElement('p'); cLabel.className = 'puzzle-msg'; cLabel.textContent = 'Pick your color!';
+  const cRow = document.createElement('div'); cRow.className = 'snake-choices';
+  SNAKE_COLORS.forEach((col, i) => {
+    const b = document.createElement('button'); b.className = 'snake-swatch'; b.title = col.name;
+    b.style.background = `linear-gradient(135deg, ${col.head}, ${col.body})`;
+    b.addEventListener('click', () => { snakeColorIdx = i; if (typeof saveGame === 'function') saveGame(); renderSnakeChoices(); });
+    cRow.appendChild(b);
+  });
+  const startBtn = document.createElement('button'); startBtn.className = 'snake-start'; startBtn.textContent = '▶ Start!';
+  startBtn.addEventListener('click', snakeBeginCountdown);
+  snakeSetupEl.append(fLabel, fRow, cLabel, cRow, startBtn);
+
+  // --- game screen: board + d-pad ---
+  snakeGameEl = document.createElement('div'); snakeGameEl.style.display = 'none';
+  snakeMsg = document.createElement('p'); snakeMsg.className = 'puzzle-msg'; snakeMsg.textContent = 'Eat 5 fruits to win!';
+  const canvasWrap = document.createElement('div'); canvasWrap.className = 'snake-canvas-wrap';
   snakeCanvas = document.createElement('canvas'); snakeCanvas.width = SNK_N * SNK_CELL; snakeCanvas.height = SNK_N * SNK_CELL; snakeCanvas.className = 'tet-canvas'; snakeCtx = snakeCanvas.getContext('2d');
+  snakeCountEl = document.createElement('div'); snakeCountEl.className = 'snake-count'; snakeCountEl.style.display = 'none';
+  canvasWrap.append(snakeCanvas, snakeCountEl);
   const pad = document.createElement('div'); pad.className = 'dpad';
   const mk = (l, dx, dy) => { const b = document.createElement('button'); b.className = 'dpad-btn'; b.textContent = l; b.addEventListener('click', () => snakeTurn([dx, dy])); return b; };
   pad.append(mk('⬅️', -1, 0), mk('⬆️', 0, -1), mk('⬇️', 0, 1), mk('➡️', 1, 0));
+  snakeGameEl.append(snakeMsg, canvasWrap, pad);
+
   const close = document.createElement('button'); close.className = 'puzzle-close'; close.textContent = 'Close'; close.addEventListener('click', closeSnake);
-  panel.append(h, snakeMsg, snakeCanvas, pad, close);
+  panel.append(h, snakeSetupEl, snakeGameEl, close);
   snakeEl.appendChild(panel); document.body.appendChild(snakeEl);
+}
+function renderSnakeChoices() {
+  if (!snakeSetupEl) return;
+  snakeSetupEl.querySelectorAll('.snake-fruit').forEach((b, i) => b.classList.toggle('sel', SNAKE_FRUITS[i] === snakeFruit));
+  snakeSetupEl.querySelectorAll('.snake-swatch').forEach((b, i) => b.classList.toggle('sel', i === snakeColorIdx));
 }
 function startSnake() {
   if (!snakeEl) buildSnake();
   keys.clear();
-  snakeBody = [[6, 6], [5, 6], [4, 6]]; snakeDir = [1, 0]; snakeNext = [1, 0]; snakeScore = 0; snakeOver = false;
-  snakeMsg.textContent = 'Eat 5 apples 🍎 to win!';
-  snakePlaceFood(); snakeDraw();
+  clearSnakeCount();
+  clearInterval(snakeTimer);
+  snakeOver = true; snakeRunning = false; // nothing moves on the setup screen
+  // show the pick-your-fruit-and-color screen — the game does NOT start yet
+  snakeSetupEl.style.display = '';
+  snakeGameEl.style.display = 'none';
+  renderSnakeChoices();
   snakeEl.style.display = 'flex';
-  clearInterval(snakeTimer); snakeTimer = setInterval(snakeStep, 220);
 }
-function closeSnake() { snakeOver = true; clearInterval(snakeTimer); snakeEl.style.display = 'none'; }
+function snakeBeginCountdown() {
+  // reset the board and show it, still, with the food already visible
+  snakeBody = [[6, 6], [5, 6], [4, 6]]; snakeDir = [1, 0]; snakeNext = [1, 0]; snakeScore = 0;
+  snakeOver = false; snakeRunning = false;
+  snakeMsg.textContent = 'Get ready…';
+  snakePlaceFood(); snakeDraw();
+  snakeSetupEl.style.display = 'none';
+  snakeGameEl.style.display = '';
+  // big 3 · 2 · 1 · GO! overlay — the snake stays put until GO
+  clearSnakeCount();
+  const steps = ['3', '2', '1', 'GO!'];
+  snakeCountEl.style.display = 'flex';
+  const show = (i) => {
+    if (i >= steps.length) {
+      snakeCountEl.style.display = 'none';
+      snakeMsg.textContent = `Fruits: 0/5`;
+      snakeRunning = true;
+      clearInterval(snakeTimer); snakeTimer = setInterval(snakeStep, 220);
+      return;
+    }
+    snakeCountEl.textContent = steps[i];
+    snakeCountEl.classList.remove('pop'); void snakeCountEl.offsetWidth; snakeCountEl.classList.add('pop');
+    snakeCountTimers.push(setTimeout(() => show(i + 1), 650));
+  };
+  show(0);
+}
+function clearSnakeCount() { while (snakeCountTimers.length) clearTimeout(snakeCountTimers.pop()); if (snakeCountEl) snakeCountEl.style.display = 'none'; }
+function closeSnake() { snakeOver = true; snakeRunning = false; clearInterval(snakeTimer); clearSnakeCount(); snakeEl.style.display = 'none'; }
 function snakeTurn(d) { if (d[0] === -snakeDir[0] && d[1] === -snakeDir[1]) return; snakeNext = d; } // no reversing
 function snakePlaceFood() {
   do { snakeFood = [Math.floor(Math.random() * SNK_N), Math.floor(Math.random() * SNK_N)]; }
   while (snakeBody.some(([x, y]) => x === snakeFood[0] && y === snakeFood[1]));
 }
 function snakeStep() {
-  if (snakeOver) return;
+  if (snakeOver || !snakeRunning) return; // don't move during the countdown
   snakeDir = snakeNext;
   const head = [snakeBody[0][0] + snakeDir[0], snakeBody[0][1] + snakeDir[1]];
   if (head[0] < 0 || head[1] < 0 || head[0] >= SNK_N || head[1] >= SNK_N || snakeBody.some(([x, y]) => x === head[0] && y === head[1])) {
-    snakeOver = true; clearInterval(snakeTimer); snakeMsg.textContent = 'Oops! Close & retry'; return;
+    snakeOver = true; snakeRunning = false; clearInterval(snakeTimer); snakeMsg.textContent = 'Oops! Close & retry'; return;
   }
   snakeBody.unshift(head);
   if (head[0] === snakeFood[0] && head[1] === snakeFood[1]) {
-    snakeScore++; snakeMsg.textContent = `Apples: ${snakeScore}/5`;
-    if (snakeScore >= 5) { snakeOver = true; clearInterval(snakeTimer); snakeMsg.textContent = '5 apples! 🎉'; winMiniGame('snake'); setTimeout(closeSnake, 1300); return; }
+    snakeScore++; snakeMsg.textContent = `Fruits: ${snakeScore}/5`;
+    if (snakeScore >= 5) { snakeOver = true; snakeRunning = false; clearInterval(snakeTimer); snakeMsg.textContent = '5 fruits! 🎉'; winMiniGame('snake'); setTimeout(closeSnake, 1300); return; }
     snakePlaceFood();
   } else { snakeBody.pop(); }
   snakeDraw();
@@ -2799,9 +2972,18 @@ function snakeStep() {
 function snakeDraw() {
   const ctx = snakeCtx; ctx.clearRect(0, 0, snakeCanvas.width, snakeCanvas.height);
   ctx.fillStyle = 'rgba(255,255,255,0.05)'; ctx.fillRect(0, 0, snakeCanvas.width, snakeCanvas.height);
-  ctx.font = `${SNK_CELL - 2}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText('🍎', snakeFood[0] * SNK_CELL + SNK_CELL / 2, snakeFood[1] * SNK_CELL + SNK_CELL / 2);
-  snakeBody.forEach(([x, y], i) => { ctx.fillStyle = i === 0 ? '#74e08c' : '#4faf54'; ctx.fillRect(x * SNK_CELL + 1, y * SNK_CELL + 1, SNK_CELL - 2, SNK_CELL - 2); });
+  // FOOD: a bright cream circle (always visible, even where color-emoji don't
+  // render on canvas) with the chosen fruit emoji layered on top
+  const fx = snakeFood[0] * SNK_CELL + SNK_CELL / 2, fy = snakeFood[1] * SNK_CELL + SNK_CELL / 2;
+  ctx.beginPath(); ctx.arc(fx, fy, SNK_CELL / 2 - 1, 0, Math.PI * 2);
+  ctx.fillStyle = '#fff6e0'; ctx.fill();
+  ctx.lineWidth = 2; ctx.strokeStyle = '#e0553a'; ctx.stroke();
+  ctx.fillStyle = '#2a1a10'; // opaque, so a monochrome-emoji fallback is still dark & visible
+  ctx.font = `${SNK_CELL - 4}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(snakeFruit, fx, fy);
+  // SNAKE: in the chosen color, head lighter than the body
+  const col = snakeColor();
+  snakeBody.forEach(([x, y], i) => { ctx.fillStyle = i === 0 ? col.head : col.body; ctx.fillRect(x * SNK_CELL + 1, y * SNK_CELL + 1, SNK_CELL - 2, SNK_CELL - 2); });
 }
 
 // ---- Fishing at the pond (players & roaming anglers) ----
@@ -3282,11 +3464,12 @@ for (let i = 0; i < 8; i++) {
   const a1 = (i / 8) * Math.PI * 2, a2 = ((i + 1) / 8) * Math.PI * 2, FR = 2.45;
   wallSegments.push({ x1: Math.cos(a1) * FR, z1: Math.sin(a1) * FR, x2: Math.cos(a2) * FR, z2: Math.sin(a2) * FR });
 }
-// Campsite tents (cones r=1.4, kid tents r=0.77) — a small square of segments each.
-CAMP_TENTS.forEach((c, i) => {
-  const a = (i / CAMP_TENTS.length) * Math.PI * 2 + 0.26;
-  const spots = [{ x: CAMP.x + Math.cos(a) * 10, z: CAMP.z + Math.sin(a) * 10, r: 1.15 }];
-  if (c.kid) spots.push({ x: spots[0].x - Math.sin(a) * 2.1, z: spots[0].z + Math.cos(a) * 2.1, r: 0.63 });
+// Campsite tents — a small square collider per tent, from the SAME horseshoe
+// layout the visuals use (so they line up), and slightly smaller than before so
+// the square doesn't jut past the round cone and cause "bump into nothing".
+campTentLayout().forEach((t) => {
+  const spots = [{ x: t.tx, z: t.tz, r: CAMP_TENT_COLL }];
+  if (t.kid) spots.push({ x: t.kid.x, z: t.kid.z, r: CAMP_KIDTENT_COLL });
   for (const s of spots) {
     addWall(s.x, s.z, 0, -s.r, -s.r, s.r, -s.r);
     addWall(s.x, s.z, 0, -s.r, s.r, s.r, s.r);
