@@ -1121,6 +1121,7 @@ function clickTargets() {
   // world space — so only expose the CURRENT floor's trigger
   if (hospCareTrigger && hospCurrentFloor === HOSP_CARE_FLOOR) list = list.concat(hospCareTrigger);
   if (hospNurseryTrigger && hospCurrentFloor === HOSP_FLOORS.length - 1) list = list.concat(hospNurseryTrigger);
+  if (telescopeTrigger) list = list.concat(telescopeTrigger);
   return list;
 }
 renderer.domElement.addEventListener('pointerup', (e) => {
@@ -1150,6 +1151,8 @@ renderer.domElement.addEventListener('pointerup', (e) => {
     careHeal();
   } else if (obj.userData.isNursery) {        // nursery (Floor 4) → rock a baby for a star
     rockBaby();
+  } else if (obj.userData.isTelescope) {      // campsite telescope → find pictures in the night sky
+    tapTelescope();
   } else if (petDog && obj === petDog.mesh) { // clicked your dog → bark!
     playWoof();
     showBubble(petDog.mesh, petDog.name, 'Woof! 🐶', 1.3);
@@ -2907,6 +2910,7 @@ const quests = [
   { id: 'feed', name: 'Feed 3 friends a snack 🍎', target: 3, prog: 0, reward: 7, done: false },
   { id: 'cafe', name: 'Visit the Cafe by the pond ☕', target: 1, prog: 0, reward: 6, done: false },
   { id: 'hosptour', name: 'Ride the elevator to every hospital floor 🏥', target: HOSP_FLOORS.length, prog: 0, reward: 8, done: false },
+  { id: 'stargaze', name: 'Find 3 pictures in the night sky 🔭', target: 3, prog: 0, reward: 8, done: false },
 ];
 function questBump(id) {
   const q = quests.find((x) => x.id === id);
@@ -2939,12 +2943,13 @@ function resetQuests() {
   for (const q of quests) { q.prog = 0; q.done = false; }
   if (typeof fedFriends !== 'undefined') fedFriends.clear();
   if (typeof hospFloorsVisited !== 'undefined') hospFloorsVisited.clear();
+  if (typeof constellations !== 'undefined') constellations.forEach((c) => { c.revealed = false; }); // hide the star pictures again
   if (sideQuest) { scene.remove(sideQuest.item); scene.remove(sideQuest.animal); sideQuest = null; }
   nextSideQuestAt = 25;
   if (questOpen) refreshQuests();
 }
 function getQuestSave() { return { done: quests.filter((q) => q.done).map((q) => q.id), prog: Object.fromEntries(quests.map((q) => [q.id, q.prog])) }; }
-function setQuestSave(s) { for (const q of quests) { if (s.done && s.done.includes(q.id)) q.done = true; if (s.prog && s.prog[q.id] != null) q.prog = s.prog[q.id]; } if (questOpen) refreshQuests(); }
+function setQuestSave(s) { for (const q of quests) { if (s.done && s.done.includes(q.id)) q.done = true; if (s.prog && s.prog[q.id] != null) q.prog = s.prog[q.id]; } if (typeof applyStargazeReveals === 'function') applyStargazeReveals(); if (questOpen) refreshQuests(); }
 
 // ---- Quest panel UI ----
 let questEl = null, questOpen = false, questListEl = null;
@@ -4189,21 +4194,198 @@ scene.add(moonLight); scene.add(moonLight.target);
 const _moonDir = new THREE.Vector3();
 const _moonTint = new THREE.Color(0x9fb6e8); // cool tint the moon ambient lerps toward
 
-// a starfield that fades in at night
-const starGeo = new THREE.BufferGeometry();
-const STAR_N = 700;
-const starPos = new Float32Array(STAR_N * 3);
-for (let i = 0; i < STAR_N; i++) {
-  const r = 600, u = (i * 2.3999) % (Math.PI * 2), v = (i / STAR_N);
-  const phi = Math.acos(1 - v * 0.9); // upper hemisphere
-  starPos[i * 3] = r * Math.sin(phi) * Math.cos(u);
-  starPos[i * 3 + 1] = r * Math.cos(phi) + 30;
-  starPos[i * 3 + 2] = r * Math.sin(phi) * Math.sin(u);
+// ---------------------------------------------------------------------------
+// 🌌 The NEBULA NIGHT SKY — one rigid, camera-centered group holding a painted
+// nebula dome, three layers of gently twinkling stars, and connect-the-dots
+// constellations you discover through the campsite telescope.
+// One rigid group = no double-parallax tearing; re-centered on the camera every
+// frame = the stars behave as if infinitely far away. Radius 1600 sits beyond
+// the moon (1300) and inside camera.far (2000), so the moon stays IN FRONT.
+// Everything here is fog:false (FogExp2 would paint it fog-gray at this range),
+// toneMapped:false (so the night exposure dip doesn't double-dim it), and
+// depthWrite:false. Painted ONCE at load — never re-uploaded per frame.
+// ---------------------------------------------------------------------------
+const nightSky = new THREE.Group();
+scene.add(nightSky);
+const SKY_R = 1600;
+function paintNebulaTexture() {
+  const W = document.body.classList.contains('touch') ? 1024 : 2048, H = W / 2;
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+  let seed = 31; const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  // NOTE on layout: the chase camera can only see the sky band from the horizon
+  // (v=0.5) up to ~30° above it (v≈0.33) — maxPolarAngle stops the camera at
+  // ground level. So the nebula lives in v 0.16–0.48, thickest right where kids
+  // actually look, and the horizon fade starts BELOW that band (v 0.46).
+  // pastel nebula wisps (purple / pink / teal — clearly there, still below lamp glow)
+  const tints = ['138,108,255', '255,138,212', '111,195,201', '158,130,255', '255,170,190'];
+  for (let i = 0; i < 26; i++) {
+    const x = rnd() * W, y = H * (0.16 + rnd() * 0.30), r = (0.07 + rnd() * 0.13) * W;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    const tint = tints[i % tints.length], a = 0.22 + rnd() * 0.20;
+    g.addColorStop(0, `rgba(${tint},${a})`); g.addColorStop(1, `rgba(${tint},0)`);
+    ctx.fillStyle = g; ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+  // a glowing milky-way band arcing through the visible sky
+  for (let i = 0; i < 56; i++) {
+    const bx = (i / 56) * W, by = H * 0.34 + Math.sin(i * 0.5) * H * 0.08 + (rnd() - 0.5) * H * 0.04;
+    const r = (0.02 + rnd() * 0.035) * W;
+    const g = ctx.createRadialGradient(bx, by, 0, bx, by, r);
+    g.addColorStop(0, 'rgba(225,222,255,0.17)'); g.addColorStop(1, 'rgba(225,222,255,0)');
+    ctx.fillStyle = g; ctx.fillRect(bx - r, by - r, r * 2, r * 2);
+  }
+  // hundreds of baked stars (the twinklers are separate Points layers)
+  for (let i = 0; i < 620; i++) {
+    const x = rnd() * W, y = rnd() * H * 0.48, s = 0.4 + rnd() * 1.3;
+    const warm = rnd();
+    ctx.fillStyle = warm < 0.12 ? 'rgba(255,230,190,0.9)' : warm < 0.24 ? 'rgba(190,215,255,0.9)' : 'rgba(255,255,255,0.85)';
+    ctx.beginPath(); ctx.arc(x, y, s, 0, Math.PI * 2); ctx.fill();
+  }
+  // fade out just under the horizon (hides the dome's lower edge; the ground
+  // covers everything below it anyway)
+  const fade = ctx.createLinearGradient(0, H * 0.46, 0, H * 0.53);
+  fade.addColorStop(0, 'rgba(0,0,0,0)'); fade.addColorStop(1, 'rgba(0,0,0,1)');
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.fillStyle = fade; ctx.fillRect(0, H * 0.46, W, H * 0.07);
+  ctx.fillRect(0, H * 0.53, W, H * 0.47);
+  ctx.globalCompositeOperation = 'source-over';
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }
-starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 2, sizeAttenuation: false, transparent: true, opacity: 0, depthWrite: false });
-const starField = new THREE.Points(starGeo, starMat);
-scene.add(starField);
+const skyDomeMat = new THREE.MeshBasicMaterial({
+  map: paintNebulaTexture(), transparent: true, opacity: 0, side: THREE.BackSide,
+  fog: false, toneMapped: false, depthWrite: false,
+});
+const skyDome = new THREE.Mesh(new THREE.SphereGeometry(SKY_R, 32, 20), skyDomeMat);
+skyDome.renderOrder = -6; // behind every other transparent thing
+nightSky.add(skyDome);
+// a soft round dot texture so twinkling stars aren't hard squares
+function makeDotTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 32;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+  g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.4, 'rgba(255,255,255,0.85)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 32, 32);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; return tex;
+}
+const skyDotTex = makeDotTexture();
+// three star layers with different sizes & twinkle phases (slow gentle sine —
+// never to zero, never a strobe)
+const skyStarLayers = [];
+for (const [count, size, spd, ph] of [[260, 2.2, 1.9, 0], [220, 3.2, 2.4, 2.1], [90, 4.6, 1.5, 4.2]]) {
+  const geo = new THREE.BufferGeometry();
+  const pos = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    const u = Math.random() * Math.PI * 2, v = Math.random();
+    const phi = Math.acos(1 - v * 0.92); // whole sky, right down to the treetops
+    pos[i * 3] = SKY_R * 0.94 * Math.sin(phi) * Math.cos(u);
+    pos[i * 3 + 1] = SKY_R * 0.94 * Math.cos(phi);
+    pos[i * 3 + 2] = SKY_R * 0.94 * Math.sin(phi) * Math.sin(u);
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const mat = new THREE.PointsMaterial({
+    color: 0xffffff, size, sizeAttenuation: false, map: skyDotTex, alphaTest: 0.05,
+    transparent: true, opacity: 0, depthWrite: false, fog: false, toneMapped: false,
+  });
+  const pts = new THREE.Points(geo, mat);
+  pts.renderOrder = -5; pts.userData = { spd, ph };
+  nightSky.add(pts); skyStarLayers.push(pts);
+}
+// ---- Constellations: bright dots + hidden connect-the-dots lines ----
+// az/el in degrees → a point on the sky sphere
+function skyPoint(azDeg, elDeg, r = SKY_R * 0.92) {
+  const az = azDeg * Math.PI / 180, el = elDeg * Math.PI / 180;
+  return new THREE.Vector3(r * Math.cos(el) * Math.cos(az), r * Math.sin(el), r * Math.cos(el) * Math.sin(az));
+}
+// each shape: name, sky position, dot offsets [dAz, dEl], and line pairs.
+// Elevations sit at 20-24° — the chase camera maxes out ~30° above the horizon
+// (maxPolarAngle stops at ground level), so this is the band kids actually see.
+const CONSTELLATION_DEFS = [
+  { key: 'heart', name: 'the Heart', az: 205, el: 22, pts: [[0, 8], [-6, 12], [-10, 8], [-9, 1], [0, -9], [9, 1], [10, 8], [6, 12]], lines: [[0,1],[1,2],[2,3],[3,4],[4,5],[5,6],[6,7],[7,0]] },
+  { key: 'dipper', name: 'the Big Dipper', az: 320, el: 24, pts: [[-14, 6], [-8, 8], [-3, 6], [2, 3], [4, -3], [11, -4], [10, 2]], lines: [[0,1],[1,2],[2,3],[3,4],[4,5],[5,6],[6,3]] },
+  { key: 'cat', name: 'the Kitty', az: 80, el: 20, pts: [[-8, 8], [-5, 3], [5, 3], [8, 8], [4, 6], [-4, 6], [-6, -4], [6, -4], [0, -7]], lines: [[0,1],[0,5],[3,2],[3,4],[1,6],[6,8],[8,7],[7,2],[1,2]] },
+  { key: 'dog', name: 'the Puppy', az: 80, el: 20, pts: [[-9, 6], [-6, 1], [-7, 9], [6, 2], [9, 4], [5, -5], [-5, -5], [0, -2]], lines: [[2,0],[0,1],[1,6],[6,7],[7,5],[5,3],[3,4],[1,3]] },
+];
+const constellations = CONSTELLATION_DEFS.map((def) => {
+  const group = new THREE.Group();
+  const dots = [];
+  for (const [dAz, dEl] of def.pts) dots.push(skyPoint(def.az + dAz, def.el + dEl * 0.7)); // squash vertically to fit the visible band
+  const dotGeo = new THREE.BufferGeometry().setFromPoints(dots);
+  const dotMat = new THREE.PointsMaterial({
+    color: 0xffe9a0, size: 10, sizeAttenuation: false, map: skyDotTex, alphaTest: 0.05,
+    transparent: true, opacity: 0, depthWrite: false, fog: false, toneMapped: false,
+  });
+  const dotPts = new THREE.Points(dotGeo, dotMat); dotPts.renderOrder = -4; group.add(dotPts);
+  const linePts = [];
+  for (const [a, b] of def.lines) { linePts.push(dots[a], dots[b]); }
+  const lineGeo = new THREE.BufferGeometry().setFromPoints(linePts);
+  const lineMat = new THREE.LineBasicMaterial({
+    color: 0xbfe0ff, transparent: true, opacity: 0, depthWrite: false, fog: false, toneMapped: false,
+  });
+  const lines = new THREE.LineSegments(lineGeo, lineMat); lines.renderOrder = -4; group.add(lines);
+  nightSky.add(group);
+  const center = skyPoint(def.az, def.el);
+  return { key: def.key, name: def.name, group, dotMat, lineMat, center, revealed: false };
+});
+// the third picture in the sky matches your pet (a puppy or a kitty)
+function activeConstellations() {
+  const petShape = (typeof petKind !== 'undefined' && petKind === 'dog') ? 'dog' : 'cat';
+  return constellations.filter((c) => c.key === 'heart' || c.key === 'dipper' || c.key === petShape);
+}
+// re-reveal the first N pictures after loading a save (N = quest progress)
+function applyStargazeReveals() {
+  const q = quests.find((x) => x.id === 'stargaze');
+  const n = q ? q.prog : 0;
+  constellations.forEach((c) => { c.revealed = false; });
+  activeConstellations().slice(0, n).forEach((c) => { c.revealed = true; });
+}
+let nightIntroShown = false; // one "look up!" nudge per session, the first time night falls
+// ---- 🔭 the stargazing telescope at the campsite ----
+let telescopeTrigger = null;
+function buildTelescope() {
+  const g = new THREE.Group();
+  const metal = new THREE.MeshStandardMaterial({ color: 0x8892a0, roughness: 0.4, metalness: 0.5 });
+  const brass = new THREE.MeshStandardMaterial({ color: 0xd8b46a, roughness: 0.35, metalness: 0.6 });
+  for (const a of [0, 2.1, 4.2]) { // tripod legs
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.5, 8), metal);
+    leg.position.set(Math.cos(a) * 0.42, 0.72, Math.sin(a) * 0.42);
+    leg.rotation.z = Math.cos(a) * 0.32; leg.rotation.x = -Math.sin(a) * 0.32;
+    leg.castShadow = true; g.add(leg);
+  }
+  const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.19, 1.3, 12), brass);
+  tube.position.y = 1.55; tube.rotation.z = -0.75; // aimed up at the stars
+  tube.castShadow = true; g.add(tube);
+  const eye = makeEmojiSprite('🔭'); eye.visible = true; eye.scale.set(0.9, 0.9, 1); eye.position.set(0, 2.5, 0); g.add(eye);
+  g.position.set(CAMP.x + 6, 0, CAMP.z + 6); // campsite edge, clear of the tents
+  scene.add(g);
+  // a generous flat tap-pad around the tripod
+  telescopeTrigger = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 3.4), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }));
+  telescopeTrigger.rotation.x = -Math.PI / 2; telescopeTrigger.position.set(CAMP.x + 6, 0.6, CAMP.z + 6);
+  telescopeTrigger.userData.isTelescope = true;
+  scene.add(telescopeTrigger);
+}
+buildTelescope();
+// tap the telescope at night → reveal the next star picture (one-time each)
+function tapTelescope() {
+  if (!isNight) { if (typeof questToast === 'function') questToast('The stars come out at night — come back then! 🌙🔭'); return; }
+  const next = activeConstellations().find((c) => !c.revealed);
+  if (!next) { if (typeof questToast === 'function') questToast('You found ALL the pictures in the stars! 🌌✨'); return; }
+  next.revealed = true;
+  if (typeof playDing === 'function') playDing();
+  if (typeof questToast === 'function') questToast(`🔭 You found ${next.name} in the stars! ⭐`);
+  if (typeof questBump === 'function') questBump('stargaze'); // bump BEFORE the save below captures it
+  if (typeof addStars === 'function') addStars(1);            // (addStars also saves)
+  if (typeof saveGame === 'function') saveGame();             // the reveal must survive a reload
+  // gently swing the view toward the discovery: a modest target lift tilts the
+  // camera up without fighting the ground clamp, then eases back to normal
+  if (player) {
+    const dir = next.center.clone().setY(0).normalize(); // face its compass direction
+    const look = player.position.clone().addScaledVector(dir, 10);
+    animate(controls.target, { x: look.x, y: 9, z: look.z, duration: 1400, ease: 'inOut(2)' });
+    setTimeout(() => { if (player) animate(controls.target, { x: player.position.x, y: 1.5, z: player.position.z, duration: 1100, ease: 'inOut(2)' }); }, 4200);
+  }
+}
 
 const _dayFog = new THREE.Color(0xbfd8ef), _nightFog = new THREE.Color(0x0a1326);
 let nextLampSortAt = 0, lampNearest = []; // lamp-pool sort is throttled (allocation-free frames between)
@@ -4215,8 +4397,9 @@ function phaseName(dt) {
   if (dt < 0.84) return ['night', '🌙'];
   return ['midnight', '🌌'];
 }
+let dayTimeSkew = 0; // shifts the day/night clock (tests + a future "sleep to skip night")
 function updateDayNight(t) {
-  const dayT = ((t / DAY_LENGTH) + DAY_START) % 1;
+  const dayT = ((((t / DAY_LENGTH) + DAY_START + dayTimeSkew) % 1) + 1) % 1;
   const sinE = Math.sin(2 * Math.PI * dayT);
   setSun(75 * sinE, 70 + dayT * 220);          // elevation rises & sets; azimuth sweeps
   // biased so daytime is a long bright plateau and night is shorter (gets dark slower)
@@ -4227,8 +4410,28 @@ function updateDayNight(t) {
   // (like Boo) don't blow out; night stays a touch brighter for playability.
   renderer.toneMappingExposure = 0.46 + dayness * 0.17;
   scene.fog.color.copy(_nightFog).lerp(_dayFog, dayness);
-  starMat.opacity = Math.max(0, 1 - dayness * 3);
+  // 🌌 nebula sky: fades in past sunset, hides behind rain clouds, twinkles gently
+  const nightAmt = Math.max(0, 1 - dayness * 3) * (1 - (typeof rainAmt !== 'undefined' ? rainAmt : 0));
+  nightSky.position.copy(camera.position);       // stars are "infinitely far" — never any parallax
+  nightSky.rotation.y = t * 0.000145;            // the whole sky drifts ~0.5°/min, like the real one
+  skyDomeMat.opacity = nightAmt * 0.62;          // pastel wisps stay dimmer than lamps & campfire
+  const twinkleFrozen = (typeof qualityLevel !== 'undefined' && qualityLevel === 0); // low tier: still pretty, just static
+  for (const L of skyStarLayers) {
+    L.material.opacity = nightAmt * (twinkleFrozen ? 0.85 : (0.85 + 0.15 * Math.sin(t * L.userData.spd + L.userData.ph)));
+  }
+  const petShape = (typeof petKind !== 'undefined' && petKind === 'dog') ? 'dog' : 'cat';
+  for (const cst of constellations) {
+    const active = cst.key === 'heart' || cst.key === 'dipper' || cst.key === petShape;
+    cst.group.visible = active;
+    cst.dotMat.opacity = nightAmt * 0.95;
+    cst.lineMat.opacity = cst.revealed ? nightAmt * 0.55 : 0; // hidden until the telescope reveals them
+  }
   isNight = dayness < 0.12;
+  // one gentle nudge the first time night falls, so kids discover the sky at all
+  if (isNight && !nightIntroShown && player && typeof questToast === 'function') {
+    nightIntroShown = true;
+    questToast('🌌 Look up! Drag the view up to see the stars — and try the telescope at camp! 🔭');
+  }
   // moon: opposite the sun, rises at night and casts soft moonlight
   const moonPhi = (90 - (-75 * sinE)) * Math.PI / 180;
   const moonAz = (70 + dayT * 220 + 180) * Math.PI / 180;
