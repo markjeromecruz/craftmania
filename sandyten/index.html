@@ -68,6 +68,19 @@
       #hud .pill { padding: 7px 10px; }
       #fps { display: none; } /* debug readout, not a kid-facing control */
     }
+    /* ---------- Health + Hunger bars ---------- */
+    #stats { position: absolute; top: 62px; left: 16px; display: flex; flex-direction: column; gap: 7px; pointer-events: none; }
+    .statbar { display: flex; align-items: center; gap: 7px; }
+    .staticon { font-size: 20px; filter: drop-shadow(0 1px 2px rgba(0,0,0,.5)); }
+    .stattrack {
+      width: 148px; height: 15px; border-radius: 99px; background: rgba(13,27,42,.6);
+      border: 2px solid rgba(255,255,255,.25); overflow: hidden; backdrop-filter: blur(4px);
+    }
+    .stattrack > i { display: block; height: 100%; width: 100%; border-radius: 99px;
+      background: linear-gradient(90deg, #ff5a6a, #ff8a9a); transition: width .3s ease, background .3s ease; }
+    .stattrack > i.hunger { background: linear-gradient(90deg, #ffa63a, #ffd06b); }
+    .stattrack > i.low { background: linear-gradient(90deg, #d63a3a, #ff6a6a); }
+    @media (max-width: 520px) { .stattrack { width: 108px; } #stats { top: 128px; } }
     #hud .hint {
       position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%);
       font-size: 13px; color: #b9d6f0; background: rgba(13,27,42,.5);
@@ -462,6 +475,11 @@
       </div>
     </div>
     <div class="hint">Click a character to pick who you are!</div>
+    <!-- health + hunger bars (top-left, under the bar) -->
+    <div id="stats" style="display:none;">
+      <div class="statbar"><span class="staticon">❤️</span><div class="stattrack"><i id="healthFill"></i></div></div>
+      <div class="statbar"><span class="staticon">🍗</span><div class="stattrack"><i id="hungerFill" class="hunger"></i></div></div>
+    </div>
   </div>
 
   <!-- Touch joystick (auto-shown on phones/tablets) -->
