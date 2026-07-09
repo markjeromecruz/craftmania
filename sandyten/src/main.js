@@ -306,7 +306,7 @@ function pickRoamTarget(holder) {
   const w = holder.userData;
   // wanderers drift between the city, the park, the neighborhood, the campsite & the pond
   if (w.wander && Math.random() < 0.3) {
-    const zones = [{ x: 0, z: 0, r: 11 }, { x: PARK.x, z: PARK.z, r: 15 }, { x: 0, z: 24, r: 11 }, { x: CAMP.x, z: CAMP.z, r: 11 }, { x: POND.x, z: POND.z, r: 5 }];
+    const zones = [{ x: 0, z: 0, r: 11 }, { x: PARK.x, z: PARK.z, r: 15 }, { x: 0, z: 24, r: 11 }, { x: CAMP.x, z: CAMP.z, r: 11 }, { x: POND.x, z: POND.z, r: 5 }, { x: CAFE.x, z: CAFE.z, r: 6 }];
     const zn = zones[Math.floor(Math.random() * zones.length)];
     w.roamCenter = zn; w.roamRadius = zn.r; w.roamInner = 1;
   }
@@ -847,7 +847,7 @@ function saveGame() {
       }
     }
     const activePet = typeof currentPlayerPet === 'function' ? currentPlayerPet() : null;
-    localStorage.setItem(SAVE_KEY, JSON.stringify({ coins, level, levelStars, starBalance, battleWins, prizes, bagCount, bagValue, itemOwned, owned, playerId: playerCharId, petKind, petName: activePet ? activePet.name : '', hasChild, totalXP, unlockedIds: [...unlockedIds], snakeFruit, snakeColorIdx, outfits, questState: (typeof getQuestSave === 'function' ? getQuestSave() : null) }));
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ coins, level, levelStars, starBalance, battleWins, prizes, bagCount, bagValue, itemOwned, owned, playerId: playerCharId, petKind, petName: activePet ? activePet.name : '', hasChild, totalXP, unlockedIds: [...unlockedIds], snakeFruit, snakeColorIdx, health, hunger, outfits, questState: (typeof getQuestSave === 'function' ? getQuestSave() : null) }));
   } catch (e) { /* storage unavailable */ }
 }
 function hasSave() { try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; } }
@@ -863,6 +863,8 @@ function loadGame() {
     totalXP = s.totalXP ?? 0;
     if (typeof s.snakeFruit === 'string' && SNAKE_FRUITS.includes(s.snakeFruit)) snakeFruit = s.snakeFruit;
     if (Number.isInteger(s.snakeColorIdx) && s.snakeColorIdx >= 0 && s.snakeColorIdx < SNAKE_COLORS.length) snakeColorIdx = s.snakeColorIdx;
+    health = (typeof s.health === 'number' && s.health > 0) ? s.health : 100; // old saves (no stats) start FULL
+    hunger = (typeof s.hunger === 'number' && s.hunger > 0) ? s.hunger : 100;
     unlockedIds.clear(); (Array.isArray(s.unlockedIds) ? s.unlockedIds : []).forEach((id) => unlockedIds.add(id));
     // grandfather clause: if you were already playing as a "locked" character
     // before this update, you keep them — you're not suddenly locked out
@@ -915,6 +917,7 @@ function buildStartMenu() {
     if (typeof removePlayerKid === 'function') removePlayerKid();
     petKind = 'none'; hasChild = false;
     totalXP = 0; unlockedIds.clear(); if (typeof refreshPickerLocks === 'function') refreshPickerLocks();
+    health = 100; hunger = 100; renderStats();
     renderCoins(); renderLevel();
     if (typeof refreshSell === 'function') refreshSell();
     if (typeof refreshPrizes === 'function') refreshPrizes();
@@ -992,6 +995,8 @@ function playAs(id) {
   const move = document.body.classList.contains('touch') ? 'joystick to move · drag to look' : 'arrow keys / WASD to move · drag to look';
   hintEl.replaceChildren('Playing as ', strong, ' — ' + move);
   changeBtn.style.display = '';
+  if (statsEl) statsEl.style.display = 'flex'; // show the health + hunger bars
+  renderStats();
 
   // move Daisy's doghouse next to this character's home
   const spot = (typeof doghouseSpotById !== 'undefined') && doghouseSpotById[id];
@@ -1108,6 +1113,7 @@ function clickTargets() {
   if (pondSurface) list = list.concat(pondSurface);
   if (petParkTrigger) list = list.concat(petParkTrigger);
   if (campfireTrigger) list = list.concat(campfireTrigger);
+  if (cafeCounter) list = list.concat(cafeCounter);
   return list;
 }
 renderer.domElement.addEventListener('pointerup', (e) => {
@@ -1131,6 +1137,8 @@ renderer.domElement.addEventListener('pointerup', (e) => {
     startPetPark();
   } else if (obj.userData.isCampfire) {       // tapped the campfire → toast a marshmallow
     toastMarshmallow();
+  } else if (obj.userData.isCafe) {           // tapped the cafe counter → free snack, and you eat it
+    getCafeFood();
   } else if (petDog && obj === petDog.mesh) { // clicked your dog → bark!
     playWoof();
     showBubble(petDog.mesh, petDog.name, 'Woof! 🐶', 1.3);
@@ -1141,7 +1149,14 @@ renderer.domElement.addEventListener('pointerup', (e) => {
     petCat.reactUntil = timer.getElapsed() + 0.4; // little excited hop
     if (typeof onPetDog === 'function') onPetDog(); // quest progress
   } else {
-    showSpeech(obj);
+    // walk right up to a friend and tap → share a snack (they eat + say thanks);
+    // tap one from across the plaza → they just wave & speak
+    const holder = obj.parent;                       // the roaming group
+    const char = obj.userData && obj.userData.char;  // char data lives on the billboard mesh
+    const isNPC = char && holder && !holder.userData.isPlayer && !holder.userData.isShopkeeper;
+    const near = isNPC && player && Math.hypot(player.position.x - holder.position.x, player.position.z - holder.position.z) < 4.5;
+    if (near) shareFoodWith(holder, obj, char);
+    else showSpeech(obj);
     // petting any other cat/dog around town (neighbors' pets, park cats) counts too
     const holderData = obj.parent && obj.parent.userData;
     if (holderData && holderData.playArea === 'petpark' && typeof onPetDog === 'function') onPetDog();
@@ -1285,6 +1300,146 @@ function addCoins(n) {
 }
 renderCoins();
 renderLevel();
+
+// ---- Health + Hunger: a gentle Tamagotchi-style loop, never a survival nag ----
+let health = 100, hunger = 100;
+const healthFill = document.getElementById('healthFill');
+const hungerFill = document.getElementById('hungerFill');
+const statsEl = document.getElementById('stats');
+function renderStats() {
+  if (healthFill) { healthFill.style.width = Math.max(0, Math.min(100, health)) + '%'; healthFill.classList.toggle('low', health < 30); }
+  if (hungerFill) { hungerFill.style.width = Math.max(0, Math.min(100, hunger)) + '%'; hungerFill.classList.toggle('low', hunger < 20); }
+}
+let statAccum = 0, faintCooldown = 0;
+function statsPaused() {
+  return (typeof uiModalOpen === 'function' && uiModalOpen())
+      || (typeof miniGameActive === 'function' && miniGameActive())
+      || (typeof battleActive !== 'undefined' && battleActive)
+      || !player;
+}
+function updateStats(t, dt) {
+  if (statsPaused()) return;
+  statAccum += dt;
+  if (statAccum < 1) return;            // tick ~once a second
+  const secs = statAccum; statAccum = 0;
+  hunger = Math.max(0, hunger - secs * (100 / 600));               // full → empty in ~10 min of active play
+  if (hunger > 50) health = Math.min(100, health + secs * 2);       // well-fed → slowly heal
+  else if (hunger <= 0) health = Math.max(0, health - secs * 1.5);  // starving → slowly weaken
+  renderStats();
+  if (health <= 0 && t > faintCooldown) faint(t);
+}
+function eatRestore(fill, heal) {
+  hunger = Math.min(100, hunger + fill);
+  health = Math.min(100, health + heal);
+  renderStats();
+  if (typeof saveGame === 'function') saveGame();
+}
+// move the player somewhere and carry the camera + orbit target by the same
+// delta, so a teleport never strands the camera (matches how walking works).
+function teleportPlayer(x, z) {
+  if (!player) return;
+  const ddx = x - player.position.x, ddz = z - player.position.z;
+  player.position.set(x, houseFloorHeight(x, z), z);
+  camera.position.x += ddx; camera.position.z += ddz;
+  controls.target.x += ddx; controls.target.z += ddz;
+  controls.update();
+}
+function faint(t) {
+  faintCooldown = t + 5;
+  keys.clear(); // drop held movement keys (like openBattle does)
+  const mesh = player.userData.mesh || player.children.find((c) => c.isMesh && c.geometry?.type === 'PlaneGeometry');
+  if (mesh) animate(mesh.rotation, { z: [-0.05, -1.4], duration: 500, ease: 'out(2)' }); // gentle tip-over
+  setTimeout(() => {
+    if (mesh) mesh.rotation.z = 0;
+    teleportPlayer(HOSP_BED_POS.x + 2.5, HOSP_BED_POS.z);  // wake in the care room, in the aisle by a bed
+    health = 100; hunger = Math.max(hunger, 70);           // full health + topped-up hunger (no death loop)
+    renderStats();
+    if (typeof questToast === 'function') questToast('😴 You got sleepy — the nurse looked after you! 💗');
+    if (typeof saveGame === 'function') saveGame();
+  }, 650);
+}
+
+// ---- Eating: food values + a juicy chomp animation ----
+// fill = hunger restored, heal = health restored. Cake > pizza > apple.
+const FOOD_VALUES = {
+  Apple: { emoji: '🍎', fill: 15, heal: 3 },
+  Cake: { emoji: '🍰', fill: 35, heal: 12 },
+  Pizza: { emoji: '🍕', fill: 30, heal: 9 },
+  Marshmallow: { emoji: '🍡', fill: 18, heal: 4 },
+  Crop: { emoji: '🥕', fill: 12, heal: 2 },
+  Fish: { emoji: '🐟', fill: 20, heal: 6 },
+  Sandwich: { emoji: '🥪', fill: 28, heal: 8 },
+  IceCream: { emoji: '🍦', fill: 22, heal: 6 },
+};
+const isFood = (name) => !!FOOD_VALUES[name];
+function playChomp() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const now = audioCtx.currentTime;
+    for (const start of [0, 0.16]) { // two little "nom" blips
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = 'sine'; o.frequency.setValueAtTime(300, now + start); o.frequency.exponentialRampToValueAtTime(150, now + start + 0.1);
+      g.gain.setValueAtTime(0.0001, now + start); g.gain.exponentialRampToValueAtTime(0.14, now + start + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, now + start + 0.13);
+      o.connect(g).connect(audioCtx.destination); o.start(now + start); o.stop(now + start + 0.14);
+    }
+  } catch (e) { /* no audio — fine */ }
+}
+// show a character eating: a food emoji pops at the mouth with bites + crumbs,
+// then vanishes. One anime.js timeline per event, so it can't stack or drift.
+function playEat(holder, emoji) {
+  if (!holder) return;
+  const s = makeEmojiSprite(emoji); s.visible = true;
+  s.position.set(0.15, CHAR_HEIGHT * 0.5, 0.2); s.scale.set(0.9, 0.9, 1); holder.add(s);
+  animate(s.scale, { x: [0.9, 1.35, 0.85, 1.35, 0.85, 0.15], y: [0.9, 1.35, 0.85, 1.35, 0.85, 0.15], duration: 950, ease: 'inOut(2)', onComplete: () => holder.remove(s) });
+  for (let i = 0; i < 5; i++) { // crumb sparkles fall away
+    const c = makeEmojiSprite('✨'); c.visible = true; c.scale.set(0.28, 0.28, 1);
+    c.position.set((Math.random() - 0.5) * 0.8, CHAR_HEIGHT * 0.45, 0.3); holder.add(c);
+    animate(c.position, { y: c.position.y - 1.1, duration: 650, delay: 200 + i * 40, ease: 'in(2)', onComplete: () => holder.remove(c) });
+    animate(c.material, { opacity: [1, 0], duration: 650, delay: 200 + i * 40 });
+  }
+  playChomp();
+}
+// the PLAYER eats a food item: animation + restore hunger/health + a Yum bubble.
+function eatFood(name) {
+  const f = FOOD_VALUES[name]; if (!f || !player) return false;
+  playEat(player, f.emoji);
+  eatRestore(f.fill, f.heal);
+  const mesh = player.userData.mesh || player.children.find((c) => c.isMesh && c.geometry?.type === 'PlaneGeometry');
+  if (mesh && typeof showBubble === 'function') showBubble(mesh, player.userData.char?.name || 'Yum', 'Yum! 😋', CHAR_HEIGHT * 0.55);
+  return true;
+}
+// share a snack with a roaming friend you walk up to: they eat, say thanks, and
+// sometimes hand you a thank-you coin. Counts toward the "Feed friends" quest.
+const fedFriends = new Set();
+const SHARE_FOODS = ['🍎', '🍰', '🍕', '🍪', '🍇', '🥪', '🍦'];
+function shareFoodWith(holder, mesh, char) {
+  playEat(holder, SHARE_FOODS[Math.floor(Math.random() * SHARE_FOODS.length)]);
+  if (typeof showBubble === 'function') showBubble(mesh, char.name, 'Yum, thanks! 😋', CHAR_HEIGHT * 0.55);
+  const id = char.id;
+  if (!fedFriends.has(id)) {
+    fedFriends.add(id);
+    if (typeof questBump === 'function') questBump('feed');
+    if (Math.random() < 0.4 && typeof addCoins === 'function') { addCoins(1); if (typeof onCoinCollected === 'function') onCoinCollected(); } // a thank-you coin
+  }
+}
+// ambient life: every couple of seconds, a character hanging out at the cafe
+// takes a bite (so the cafe always looks lively and social)
+let cafeEatAt = 0;
+function updateCafeLife(t) {
+  if (t < cafeEatAt) return;
+  cafeEatAt = t + 2.2;
+  const here = billboards.filter((b) => { const h = b.parent; return h && !h.userData.isPlayer && Math.hypot(h.position.x - CAFE.x, h.position.z - CAFE.z) < 7; });
+  if (here.length) playEat(here[Math.floor(Math.random() * here.length)].parent, SHARE_FOODS[Math.floor(Math.random() * SHARE_FOODS.length)]);
+}
+// tap the cafe counter → a free snack the player eats on the spot
+function getCafeFood() {
+  const menu = ['Cake', 'Pizza', 'Sandwich', 'IceCream', 'Apple'];
+  const name = menu[Math.floor(Math.random() * menu.length)];
+  if (eatFood(name)) {
+    if (typeof questToast === 'function') questToast(`Free ${FOOD_VALUES[name].emoji} at the cafe — yum!`);
+    if (typeof questBump === 'function') questBump('cafe');
+  }
+}
 
 // happy "ding" using the Web Audio API (no sound file needed).
 // Created lazily on first collect, which always follows a user gesture.
@@ -1479,6 +1634,13 @@ function makeSign(text) {
   return board;
 }
 
+// Town building positions — spaced out so there's room to walk between them.
+// Everything about each building (its mesh, wall colliders, standee, sign, sign,
+// paths, no-tree zone) is driven off these so nothing ever drifts apart.
+const STORE_POS = { x: 0, z: -17 };
+const HOSP_POS = { x: 26, z: -19 };  // big hospital, off to the east with elbow room
+const HOSP_W = 20, HOSP_D = 14, HOSP_DOOR = 5; // large multi-room footprint
+const HOSP_BED_POS = { x: 26 - 6, z: -19 - 4.5 }; // a care-room bed = where you wake up after fainting
 function buildStore() {
   const store = new THREE.Group();
   const wallMat = new THREE.MeshStandardMaterial({ color: 0xead9b0, roughness: 0.95 });
@@ -1510,57 +1672,108 @@ function buildStore() {
   sign.position.set(0, H + 1.3, D / 2 - 0.05);                  // on top, facing the courtyard
   store.add(sign);
 
-  store.position.set(0, 0, -16);
+  store.position.set(STORE_POS.x, 0, STORE_POS.z);
   scene.add(store);
-  noTreeZones.push({ x: 0, z: -16, r: 9 });
+  noTreeZones.push({ x: STORE_POS.x, z: STORE_POS.z, r: 9 });
 }
 buildStore();
 
 // The HOSPITAL — on the other (east) side of THE STORE.
+// A big open-plan hospital: six labelled areas down two sides of a central
+// aisle (waiting room, pharmacy, care beds on the left; cafeteria, restrooms,
+// nursery on the right). Only the outer walls get collision (registered
+// separately) — the interior is prop-only + low dividers, so a kid can walk
+// everywhere and never get trapped in a tiny room.
 function buildHospital() {
   const g = new THREE.Group();
   const wallMat = new THREE.MeshStandardMaterial({ color: 0xf2f4f6, roughness: 0.9 });
   const roofMat = new THREE.MeshStandardMaterial({ color: 0xd2d8de, roughness: 0.8 });
   const crossMat = new THREE.MeshStandardMaterial({ color: 0xe23b3b, roughness: 0.5, emissive: 0x4a0000, emissiveIntensity: 0.2 });
-  const floorMat = new THREE.MeshStandardMaterial({ color: 0xe3e8ec, roughness: 1 });
+  const floorMat = new THREE.MeshStandardMaterial({ color: 0xeef3f6, roughness: 1 });
   const bedW = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85 });
   const bedFrame = new THREE.MeshStandardMaterial({ color: 0xb9c0c7, roughness: 0.6 });
+  const wood = new THREE.MeshStandardMaterial({ color: 0xc9a06a, roughness: 0.9 });
+  const teal = new THREE.MeshStandardMaterial({ color: 0x6fc3c9, roughness: 0.7 });
+  const pink = new THREE.MeshStandardMaterial({ color: 0xffb0d0, roughness: 0.8 });
+  const blue = new THREE.MeshStandardMaterial({ color: 0xa9c6ff, roughness: 0.8 });
+  const divMat = new THREE.MeshStandardMaterial({ color: 0xdfe8ee, roughness: 0.95 });
 
-  const W = 9, D = 6, H = 4.8, T = 0.4, DOOR = 4; // tall enough that a 3.4-unit character clears the door lintel
-  const parts = [];
-  const box = (w, h, d, mat, x, y, z) => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-    m.position.set(x, y, z); parts.push(m); return m;
-  };
-  box(W, H, T, wallMat, 0, H / 2, -D / 2);
-  box(T, H, D, wallMat, -W / 2, H / 2, 0);
-  box(T, H, D, wallMat, W / 2, H / 2, 0);
+  const W = HOSP_W, D = HOSP_D, H = 4.8, T = 0.4, DOOR = HOSP_DOOR;
+  const parts = [], props = [];
+  const box = (arr, w, h, d, mat, x, y, z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); arr.push(m); return m; };
+  const cyl = (r1, r2, h, mat, x, y, z) => { const m = new THREE.Mesh(new THREE.CylinderGeometry(r1, r2, h, 12), mat); m.position.set(x, y, z); props.push(m); return m; };
+  // ---- shell: outer walls (occluders), a wide front doorway, roof, floor ----
+  box(parts, W, H, T, wallMat, 0, H / 2, -D / 2);        // back
+  box(parts, T, H, D, wallMat, -W / 2, H / 2, 0);        // left
+  box(parts, T, H, D, wallMat, W / 2, H / 2, 0);         // right
   const fw = (W - DOOR) / 2;
-  box(fw, H, T, wallMat, -(W / 2 - fw / 2), H / 2, D / 2);
-  box(fw, H, T, wallMat, (W / 2 - fw / 2), H / 2, D / 2);
-  box(DOOR, 0.9, T, wallMat, 0, H - 0.45, D / 2);
-  box(W + 0.9, 0.5, D + 0.9, roofMat, 0, H + 0.25, 0);
-  box(W, 0.1, D, floorMat, 0, 0.05, 0);
-  // red crosses on the two front wall pieces
-  for (const cx of [-(W / 2 - fw / 2), (W / 2 - fw / 2)]) {
-    box(0.35, 1.3, 0.1, crossMat, cx, 2.2, D / 2 + 0.06);
-    box(1.0, 0.4, 0.1, crossMat, cx, 2.2, D / 2 + 0.06);
+  box(parts, fw, H, T, wallMat, -(W / 2 - fw / 2), H / 2, D / 2);
+  box(parts, fw, H, T, wallMat, (W / 2 - fw / 2), H / 2, D / 2);
+  box(parts, DOOR, 0.9, T, wallMat, 0, H - 0.45, D / 2); // lintel over the door
+  box(parts, W + 0.9, 0.5, D + 0.9, roofMat, 0, H + 0.25, 0);
+  box(parts, W, 0.1, D, floorMat, 0, 0.05, 0);
+  for (const cx of [-(W / 2 - fw / 2), (W / 2 - fw / 2)]) { // red crosses on the front
+    box(parts, 0.4, 1.5, 0.1, crossMat, cx, 2.4, D / 2 + 0.06);
+    box(parts, 1.2, 0.45, 0.1, crossMat, cx, 2.4, D / 2 + 0.06);
   }
-  // a hospital bed inside
-  box(2.0, 0.5, 1.0, bedFrame, -2.2, 0.3, -D / 2 + 1.6);
-  box(1.9, 0.22, 0.95, bedW, -2.2, 0.6, -D / 2 + 1.6);
-  box(0.55, 0.2, 0.85, bedW, -2.85, 0.78, -D / 2 + 1.6); // pillow
+
+  // ---- room labels + icons floating over each zone ----
+  const roomLabel = (text, emoji, x, z) => {
+    const s = makeSign(text); s.scale.setScalar(0.42); s.position.set(x, 3.6, z); g.add(s);
+    const e = makeEmojiSprite(emoji); e.position.set(x, 2.9, z); e.scale.set(1.1, 1.1, 1); e.visible = true; g.add(e);
+  };
+  // low divider between the aisle and a side zone (waist height, NO collision)
+  const divider = (x, z, w, d) => box(props, w, 1.1, d, divMat, x, 0.55, z);
+
+  const LX = -W / 2 + 3.5, RX = W / 2 - 3.5; // left / right zone centers
+  // ===== LEFT SIDE: Waiting Room (front) · Pharmacy (mid) · Care Beds (back) =====
+  roomLabel('WAITING', '🪑', LX, D / 2 - 3);
+  for (const bz of [-1.2, 1.2]) box(props, 2.6, 0.35, 0.7, wood, LX, 0.45, D / 2 - 3 + bz);  // benches
+  for (const bz of [-1.2, 1.2]) box(props, 2.6, 0.7, 0.15, wood, LX, 0.85, D / 2 - 3 + bz - 0.35);
+  divider(LX + 1.8, D / 2 - 3, 0.2, 4.5);
+
+  roomLabel('PHARMACY', '💊', LX, 0);
+  box(props, 3.2, 1.0, 0.8, teal, LX, 0.5, 1.0);   // counter
+  box(props, 3.2, 1.6, 0.35, wallMat, LX, 1.6, -0.6); // shelf back
+  const pillCols = [0xff6b6b, 0x6bd0ff, 0xffe06b, 0x9d7bff, 0x74e08c];
+  for (let i = 0; i < 5; i++) cyl(0.14, 0.14, 0.5, new THREE.MeshStandardMaterial({ color: pillCols[i], roughness: 0.5 }), LX - 1.3 + i * 0.65, 1.7, -0.55);
+  box(props, 0.3, 0.9, 0.08, crossMat, LX, 2.9, -0.78); box(props, 0.8, 0.3, 0.08, crossMat, LX, 2.9, -0.78); // Rx cross
+  divider(LX + 1.8, 0, 0.2, 3);
+
+  roomLabel('CARE', '🩹', LX, -D / 2 + 3);
+  for (let i = 0; i < 3; i++) { const bz = -D / 2 + 2 + i * 2.0; box(props, 2.2, 0.5, 1.0, bedFrame, LX, 0.3, bz); box(props, 2.1, 0.22, 0.95, bedW, LX, 0.6, bz); box(props, 0.6, 0.22, 0.85, bedW, LX - 0.75, 0.78, bz); } // 3 care beds
+  divider(LX + 1.8, -D / 2 + 3, 0.2, 4.5);
+
+  // ===== RIGHT SIDE: Cafeteria (front) · Restrooms (mid) · Nursery (back) =====
+  roomLabel('CAFETERIA', '🍽️', RX, D / 2 - 3);
+  for (const tz of [-1.3, 1.3]) { box(props, 1.6, 0.12, 1.6, wood, RX, 0.75, D / 2 - 3 + tz); cyl(0.12, 0.12, 0.7, wood, RX, 0.38, D / 2 - 3 + tz); }
+  for (const [fx, fz, fe] of [[RX, D/2-3-1.3, '🍎'], [RX, D/2-3+1.3, '🍰']]) { const s = makeEmojiSprite(fe); s.position.set(fx, 1.15, fz); s.scale.set(0.7,0.7,1); s.visible = true; g.add(s); }
+  divider(RX - 1.8, D / 2 - 3, 0.2, 4.5);
+
+  roomLabel('RESTROOMS', '🚻', RX, 0);
+  for (const [sx, se] of [[RX - 1.0, '🚹'], [RX + 1.0, '🚺']]) { // two stalls
+    box(props, 1.6, 2.4, 0.15, divMat, sx, 1.2, -1.4);
+    box(props, 0.15, 2.4, 1.6, divMat, sx - 0.75, 1.2, -0.6);
+    box(props, 0.15, 2.4, 1.6, divMat, sx + 0.75, 1.2, -0.6);
+    const e = makeEmojiSprite(se); e.position.set(sx, 2.6, -0.4); e.scale.set(0.8, 0.8, 1); e.visible = true; g.add(e);
+  }
+  divider(RX - 1.8, 0, 0.2, 3);
+
+  roomLabel('NURSERY', '🍼', RX, -D / 2 + 3);
+  for (let i = 0; i < 3; i++) { const cz = -D / 2 + 2 + i * 2.0; const cm = i === 1 ? blue : pink; box(props, 1.4, 0.7, 1.0, cm, RX, 0.5, cz); box(props, 1.5, 0.14, 1.1, bedW, RX, 0.9, cz); } // 3 cribs
+  divider(RX - 1.8, -D / 2 + 3, 0.2, 4.5);
 
   parts.forEach((m) => { m.castShadow = true; m.receiveShadow = true; g.add(m); });
   parts.forEach((m) => { if (m.position.y > 0.2) registerOccluder(m); }); // walls/roof fade when they hide you
+  props.forEach((m) => { m.castShadow = true; m.receiveShadow = true; g.add(m); }); // interior props: no collision, no occlusion
 
   const sign = makeSign('HOSPITAL');
   sign.position.set(0, H + 1.3, D / 2 - 0.05);
   g.add(sign);
 
-  g.position.set(14, 0, -14);
+  g.position.set(HOSP_POS.x, 0, HOSP_POS.z);
   scene.add(g);
-  noTreeZones.push({ x: 14, z: -14, r: 9 });
+  noTreeZones.push({ x: HOSP_POS.x, z: HOSP_POS.z, r: Math.max(W, D) / 2 + 3 });
 }
 buildHospital();
 
@@ -1587,9 +1800,9 @@ function addStandee(file, name, pos) {
   scene.add(holder);
   billboards.push(mesh);
 }
-const SHOPKEEPER_POS = new THREE.Vector3(0, 0, -17.6);
+const SHOPKEEPER_POS = new THREE.Vector3(STORE_POS.x, 0, STORE_POS.z - 1.6);
 addStandee('shopkeeper.png', 'Shopkeeper', SHOPKEEPER_POS);
-addStandee('doctor.png', 'Doctor', new THREE.Vector3(14, 0, -15.8)); // inside the hospital
+addStandee('doctor.png', 'Doctor', new THREE.Vector3(HOSP_POS.x - 6, 0, HOSP_POS.z - 4.5)); // inside the hospital (by the care beds)
 
 // ---------------------------------------------------------------------------
 // Campfire in the middle of town — stones, logs, flickering flames + warm light.
@@ -1655,7 +1868,7 @@ function buildCampfire(x, z) {
 
 // Campsite behind THE STORE & the hospital: the campfire, log seats, and a
 // teepee tent for each of the six characters.
-const CAMP = { x: 6, z: -31 };
+const CAMP = { x: 6, z: -40 }; // pushed south so there's open ground between town & camp
 function buildTent(x, z, color, scale = 1) {
   const g = new THREE.Group(); g.position.set(x, 0, z); g.scale.setScalar(scale);
   const tent = new THREE.Mesh(new THREE.ConeGeometry(1.4, 2.6, 12), new THREE.MeshStandardMaterial({ color, roughness: 0.85 }));
@@ -2056,6 +2269,7 @@ function updateDoghouse(dt) {
 const PARK = { x: -30, z: -8 };
 const POND = { x: -30, z: -22 };    // duck pond on the SOUTH side of the park
 const PETPARK = { x: -47, z: -16 }; // pet park near the SW end, between the playground and the pond
+const CAFE = { x: -30, z: -34 };    // cozy food shop behind the pond — a free-food social hub
 let merryGoRound = null; // the spinning park roundabout
 let pondSurface = null;  // the pond water mesh (tap it to fish)
 let petParkTrigger = null; // invisible tap-target over the pet park (send your pet to play)
@@ -2429,10 +2643,51 @@ let totalXP = 0;                 // lifetime stars earned — a milestone counte
 const unlockedIds = new Set();   // ids of locked characters unlocked so far
 function isCharUnlocked(id) { return !LOCKED_CHARS.some((c) => c.id === id) || unlockedIds.has(id); }
 
+// A cozy open-front cafe behind the pond: warm walls, a striped awning, tables
+// with food, and a counter you tap for a free snack. A social hub where roaming
+// characters gather to eat. Only the back + side walls collide (open front).
+let cafeCounter = null;
+function buildCafe() {
+  const g = new THREE.Group();
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0xffe6c2, roughness: 0.9 });
+  const woodMat = new THREE.MeshStandardMaterial({ color: 0xb5794a, roughness: 0.9 });
+  const roofMat = new THREE.MeshStandardMaterial({ color: 0xd85a5a, roughness: 0.7 });
+  const cream = new THREE.MeshStandardMaterial({ color: 0xfff4e2, roughness: 0.9 });
+  const floorMat = new THREE.MeshStandardMaterial({ color: 0xe8d4b0, roughness: 1 });
+  const W = 12, D = 8, H = 4.2, T = 0.4;
+  const box = (w, h, d, mat, x, y, z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; g.add(m); return m; };
+  box(W, 0.1, D, floorMat, 0, 0.05, 0);                       // patio floor
+  [box(W, H, T, wallMat, 0, H / 2, -D / 2), box(T, H, D, wallMat, -W / 2, H / 2, 0), box(T, H, D, wallMat, W / 2, H / 2, 0)].forEach(registerOccluder); // back + sides fade when they hide you
+  for (let i = 0; i < 6; i++) box(W / 6, 0.3, D + 0.6, i % 2 ? roofMat : cream, -W / 2 + (i + 0.5) * (W / 6), H + 0.15, 0); // striped awning
+  for (const px of [-W / 2 + 0.4, W / 2 - 0.4]) box(0.25, H, 0.25, woodMat, px, H / 2, D / 2 - 0.2); // front posts
+  box(W - 3, 1.1, 1.0, woodMat, 0, 0.55, -D / 2 + 1.2);       // counter (tap it for free food)
+  const menu = makeSign('MENU'); menu.scale.setScalar(0.32); menu.position.set(0, 2.7, -D / 2 + 0.3); g.add(menu);
+  for (const [tx, tz, fe] of [[-3.5, 1.6, '🍔'], [3.5, 1.6, '🍰'], [0, -0.4, '🍦']]) { // tables + stools + food
+    box(0.15, 0.75, 0.15, woodMat, tx, 0.38, tz);
+    const top = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.85, 0.12, 16), cream); top.position.set(tx, 0.8, tz); top.castShadow = true; g.add(top);
+    for (const cx of [-1.1, 1.1]) box(0.5, 0.45, 0.5, woodMat, tx + cx, 0.23, tz);
+    const s = makeEmojiSprite(fe); s.visible = true; s.scale.set(0.7, 0.7, 1); s.position.set(tx, 1.2, tz); g.add(s);
+  }
+  const sign = makeSign('CAFE'); sign.position.set(0, H + 1.2, D / 2 - 0.05); g.add(sign);
+  const hint = makeEmojiSprite('☕'); hint.visible = true; hint.scale.set(1.3, 1.3, 1); hint.position.set(0, 3.4, D / 2 + 0.6); g.add(hint);
+  g.position.set(CAFE.x, 0, CAFE.z); scene.add(g);
+  noTreeZones.push({ x: CAFE.x, z: CAFE.z, r: 11 });
+  // colliders: back + two sides only (open front so you walk right in)
+  addWall(CAFE.x, CAFE.z, 0, -W / 2, -D / 2, W / 2, -D / 2);
+  addWall(CAFE.x, CAFE.z, 0, -W / 2, -D / 2, -W / 2, D / 2);
+  addWall(CAFE.x, CAFE.z, 0, W / 2, -D / 2, W / 2, D / 2);
+  // free-food tap target over the counter
+  const trigger = new THREE.Mesh(new THREE.PlaneGeometry(W - 3, 2.4), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }));
+  trigger.rotation.x = -Math.PI / 2; trigger.position.set(CAFE.x, 0.6, CAFE.z - D / 2 + 1.4); trigger.userData.isCafe = true;
+  scene.add(trigger); cafeCounter = trigger;
+  buildPath(POND.x, POND.z - 5.8, CAFE.x, CAFE.z + D / 2, 2.4);  // a path from the pond down to the cafe
+  makeLampPost(CAFE.x - W / 2 - 2, CAFE.z + 2); makeLampPost(CAFE.x + W / 2 + 2, CAFE.z + 2); // warm evening light
+}
 function buildNeighborhood() {
   // path from the courtyard out to the park
   buildPath(-6, 0, -18, -4); buildPath(-18, -4, PARK.x + 2, PARK.z);
   buildPark();
+  buildCafe();
   const R2 = 28;                         // neighbor homes BEHIND the six houses
   const angs = [42, 90, 138];
   NEIGHBORS.forEach((n, i) => {
@@ -2512,6 +2767,8 @@ const quests = [
   { id: 'prize', name: 'Buy a prize from the shop 🎁', target: 1, prog: 0, reward: 6, done: false },
   { id: 'petpark', name: 'Send your pet to play 🐾', target: 1, prog: 0, reward: 6, done: false },
   { id: 'mallow', name: 'Toast a marshmallow at the fire 🔥', target: 2, prog: 0, reward: 7, done: false },
+  { id: 'feed', name: 'Feed 3 friends a snack 🍎', target: 3, prog: 0, reward: 7, done: false },
+  { id: 'cafe', name: 'Visit the Cafe by the pond ☕', target: 1, prog: 0, reward: 6, done: false },
 ];
 function questBump(id) {
   const q = quests.find((x) => x.id === id);
@@ -2542,6 +2799,7 @@ function onPetParkPlay() { questBump('petpark'); }
 function onToastMarshmallow() { questBump('mallow'); }
 function resetQuests() {
   for (const q of quests) { q.prog = 0; q.done = false; }
+  if (typeof fedFriends !== 'undefined') fedFriends.clear();
   if (sideQuest) { scene.remove(sideQuest.item); scene.remove(sideQuest.animal); sideQuest = null; }
   nextSideQuestAt = 25;
   if (questOpen) refreshQuests();
@@ -3215,7 +3473,13 @@ function buyItem(item) {
   }
   addCoins(-item.price);
   owned[item.name] = (owned[item.name] || 0) + 1;
-  shopMsgEl.textContent = `You bought ${item.emoji} ${item.name}!`;
+  // food is eaten right away (restores hunger + health with a chomp animation)
+  if (typeof isFood === 'function' && isFood(item.name)) {
+    eatFood(item.name);
+    shopMsgEl.textContent = `Yum! You ate ${item.emoji} ${item.name} 😋`;
+  } else {
+    shopMsgEl.textContent = `You bought ${item.emoji} ${item.name}!`;
+  }
   animate(shopMsgEl, { scale: [1.2, 1], opacity: [0.4, 1], duration: 300, ease: 'out(3)' });
   updateOwned();
   refreshShop();
@@ -3433,8 +3697,8 @@ function updateShop() {
 // DRESSING ROOM — walk in to buy accessories and style your character.
 // Accessories are little sprites layered over the character's head/face.
 // ---------------------------------------------------------------------------
-const DRESS_CENTER = new THREE.Vector3(-14, 0, -13);
-const DRESS_POS = new THREE.Vector3(-14, 0, -10.5); // where you stand to style
+const DRESS_CENTER = new THREE.Vector3(-22, 0, -16); // spaced out to the west
+const DRESS_POS = new THREE.Vector3(-22, 0, -12.5);  // where you stand to style
 
 function buildDressingRoom() {
   const room = new THREE.Group();
@@ -3530,9 +3794,9 @@ function resolveWalls(x, z, fromX, fromZ, radius = PLAYER_RADIUS) {
 // 5-segment doorway pattern the houses use. These are registered here (not in
 // their build functions) because those run before wallSegments exists above.
 for (const b of [
-  { x: 0, z: -16, W: 9, D: 6, DOOR: 4 },                        // THE STORE
-  { x: 14, z: -14, W: 9, D: 6, DOOR: 4 },                       // HOSPITAL
-  { x: DRESS_CENTER.x, z: DRESS_CENTER.z, W: 8, D: 6, DOOR: 4 }, // DRESSING ROOM
+  { x: STORE_POS.x, z: STORE_POS.z, W: 9, D: 6, DOOR: 4 },                    // THE STORE
+  { x: HOSP_POS.x, z: HOSP_POS.z, W: HOSP_W, D: HOSP_D, DOOR: HOSP_DOOR },    // HOSPITAL (big)
+  { x: DRESS_CENTER.x, z: DRESS_CENTER.z, W: 8, D: 6, DOOR: 4 },              // DRESSING ROOM
 ]) {
   addWall(b.x, b.z, 0, -b.W / 2, -b.D / 2, b.W / 2, -b.D / 2);   // back
   addWall(b.x, b.z, 0, -b.W / 2, -b.D / 2, -b.W / 2, b.D / 2);   // left
@@ -3749,9 +4013,9 @@ function placeHouses(roster) {
     buildPath(cs * 3, sn * 3, cs * (R - 3.6), sn * (R - 3.6));    // path out to this house (stops at the wider wall)
   });
   // paths to THE STORE, the DRESSING ROOM, and the HOSPITAL
-  buildPath(0, -3, 0, -13);
+  buildPath(0, -3, STORE_POS.x, STORE_POS.z + 3);
   buildPath(-2.8, -2.1, DRESS_POS.x, DRESS_POS.z);
-  buildPath(2.8, -2.1, 14, -11);
+  buildPath(3, -3, HOSP_POS.x, HOSP_POS.z + HOSP_D / 2);   // out to the big hospital's front door
 }
 
 // ---------------------------------------------------------------------------
@@ -4471,6 +4735,7 @@ function tick() {
 
   updateCollectibles(t, dt);
   updateTrail(t, dt);
+  updateStats(t, dt);
   updateShop();
   updateDress();
   updateTrades(t);
@@ -4481,6 +4746,8 @@ function tick() {
   // lantern prize: a warm light that follows you (brightest at night)
   if (player) { lanternLight.position.set(player.position.x, 2.4, player.position.z); lanternLight.intensity = prizeLantern ? (isNight ? 5 : 1.5) : 0; }
   if (player && Math.hypot(player.position.x - CAMP.x, player.position.z - CAMP.z) < 13) onVisitCamp(); // campsite quest
+  if (player && Math.hypot(player.position.x - CAFE.x, player.position.z - CAFE.z) < 8 && typeof questBump === 'function') questBump('cafe'); // visit-the-cafe quest
+  updateCafeLife(t); // roaming characters nibble a snack when they gather at the cafe
   if (merryGoRound) merryGoRound.rotation.y += dt * 0.7; // roundabout slowly spins
 
   // Characters: wander around, face the camera (upright billboard), and bob/hop.
