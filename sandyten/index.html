@@ -317,6 +317,36 @@
       background: linear-gradient(180deg, #3a2d6b, #20183f);
       border: 1px solid rgba(186, 160, 255, .45); box-shadow: 0 10px 30px rgba(0, 0, 0, .5);
     }
+    /* ---------- Hospital elevator floor-picker (opens near the pad) ---------- */
+    #elevator {
+      position: fixed; z-index: 61; right: 14px; top: 50%; transform: translateY(-50%);
+      display: none; flex-direction: column; gap: 8px; pointer-events: none;
+    }
+    #elevator .elev-title { text-align: center; font-weight: 800; color: #fff; font-size: 13px;
+      text-shadow: 0 2px 6px rgba(0,0,0,.6); margin-bottom: 2px; }
+    .elev-btn {
+      pointer-events: auto; display: flex; align-items: center; gap: 8px; cursor: pointer;
+      min-width: 168px; padding: 9px 12px; border-radius: 14px; font-weight: 700; color: #fff;
+      background: linear-gradient(180deg, #2b6cb0, #1c4a7e); border: 2px solid rgba(255,255,255,.28);
+      box-shadow: 0 6px 18px rgba(0,0,0,.4); transition: transform .1s, box-shadow .15s, background .15s;
+    }
+    .elev-btn:hover { transform: scale(1.04); }
+    .elev-btn.here { background: linear-gradient(180deg, #34c06a, #1f8a4a); border-color: #a9f5c4;
+      box-shadow: 0 0 20px rgba(80,240,140,.6); }
+    .elev-btn .elev-num { font-size: 18px; width: 26px; height: 26px; flex: 0 0 26px; border-radius: 50%;
+      background: rgba(255,255,255,.22); display: flex; align-items: center; justify-content: center; }
+    .elev-btn .elev-emoji { font-size: 18px; margin-left: auto; }
+    @media (max-width: 520px) {
+      #elevator { right: 50%; top: auto; bottom: 122px; transform: translateX(50%); }
+      .elev-btn { min-width: 150px; padding: 11px 12px; }
+    }
+    /* prominent floor-change banner */
+    #floorbanner {
+      position: fixed; z-index: 62; left: 50%; top: 34%; transform: translateX(-50%);
+      display: none; padding: 12px 26px; border-radius: 18px; font-weight: 900; font-size: 22px; color: #fff;
+      background: linear-gradient(180deg, #2b6cb0, #163a63); border: 2px solid rgba(255,255,255,.4);
+      box-shadow: 0 14px 40px rgba(0,0,0,.55); white-space: nowrap; text-shadow: 0 2px 6px rgba(0,0,0,.5);
+    }
     #puzzle {
       position: fixed; inset: 0; z-index: 70; display: none;
       align-items: center; justify-content: center; background: rgba(8, 10, 22, .55);

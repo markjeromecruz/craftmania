@@ -1114,6 +1114,10 @@ function clickTargets() {
   if (petParkTrigger) list = list.concat(petParkTrigger);
   if (campfireTrigger) list = list.concat(campfireTrigger);
   if (cafeCounter) list = list.concat(cafeCounter);
+  // three.js raycasts invisible meshes too, and these two triggers overlap in
+  // world space — so only expose the CURRENT floor's trigger
+  if (hospCareTrigger && hospCurrentFloor === HOSP_CARE_FLOOR) list = list.concat(hospCareTrigger);
+  if (hospNurseryTrigger && hospCurrentFloor === HOSP_FLOORS.length - 1) list = list.concat(hospNurseryTrigger);
   return list;
 }
 renderer.domElement.addEventListener('pointerup', (e) => {
@@ -1139,6 +1143,10 @@ renderer.domElement.addEventListener('pointerup', (e) => {
     toastMarshmallow();
   } else if (obj.userData.isCafe) {           // tapped the cafe counter → free snack, and you eat it
     getCafeFood();
+  } else if (obj.userData.isCareBed) {        // care beds (Floor 3) → the doctor checks you up
+    careHeal();
+  } else if (obj.userData.isNursery) {        // nursery (Floor 4) → rock a baby for a star
+    rockBaby();
   } else if (petDog && obj === petDog.mesh) { // clicked your dog → bark!
     playWoof();
     showBubble(petDog.mesh, petDog.name, 'Woof! 🐶', 1.3);
@@ -1351,7 +1359,8 @@ function faint(t) {
   if (mesh) animate(mesh.rotation, { z: [-0.05, -1.4], duration: 500, ease: 'out(2)' }); // gentle tip-over
   setTimeout(() => {
     if (mesh) mesh.rotation.z = 0;
-    teleportPlayer(HOSP_BED_POS.x + 2.5, HOSP_BED_POS.z);  // wake in the care room, in the aisle by a bed
+    if (typeof setHospitalFloor === 'function') setHospitalFloor(HOSP_CARE_FLOOR, true); // wake on the CARE floor so the beds + doctor are there
+    teleportPlayer(HOSP_BED_POS.x + 2.5, HOSP_BED_POS.z);  // wake in the care room, by a bed
     health = 100; hunger = Math.max(hunger, 70);           // full health + topped-up hunger (no death loop)
     renderStats();
     if (typeof questToast === 'function') questToast('😴 You got sleepy — the nurse looked after you! 💗');
@@ -1430,6 +1439,24 @@ function updateCafeLife(t) {
   cafeEatAt = t + 2.2;
   const here = billboards.filter((b) => { const h = b.parent; return h && !h.userData.isPlayer && Math.hypot(h.position.x - CAFE.x, h.position.z - CAFE.z) < 7; });
   if (here.length) playEat(here[Math.floor(Math.random() * here.length)].parent, SHARE_FOODS[Math.floor(Math.random() * SHARE_FOODS.length)]);
+}
+// Floor 3 care beds → the doctor tops you up to full health
+function careHeal() {
+  if (health >= 100 && hunger >= 100) { if (typeof questToast === 'function') questToast('You feel great already! 💪'); return; }
+  health = 100; hunger = Math.min(100, hunger + 10); renderStats();
+  if (typeof questToast === 'function') questToast('🩺 The doctor checked you up — full health! ❤️');
+  if (typeof playDing === 'function') playDing();
+  if (typeof saveGame === 'function') saveGame();
+}
+// Floor 4 nursery → rock a baby to sleep for a star (gentle cooldown so it's not farmable)
+let rockBabyAt = 0;
+function rockBaby() {
+  const t = timer.getElapsed();
+  if (t < rockBabyAt) { if (typeof questToast === 'function') questToast('Shhh… the baby is sleeping 😴'); return; }
+  rockBabyAt = t + 12;
+  if (typeof questToast === 'function') questToast('👶 You rocked the baby to sleep! 😴✨');
+  if (typeof addStars === 'function') addStars(1);
+  if (typeof playDing === 'function') playDing();
 }
 // tap the cafe counter → a free snack the player eats on the spot
 function getCafeFood() {
@@ -1640,7 +1667,23 @@ function makeSign(text) {
 const STORE_POS = { x: 0, z: -17 };
 const HOSP_POS = { x: 26, z: -19 };  // big hospital, off to the east with elbow room
 const HOSP_W = 20, HOSP_D = 14, HOSP_DOOR = 5; // large multi-room footprint
-const HOSP_BED_POS = { x: 26 - 6, z: -19 - 4.5 }; // a care-room bed = where you wake up after fainting
+const HOSP_BED_POS = { x: 26 - 5, z: -19 - 3.5 }; // a care-room bed = where you wake up after fainting
+// A tall multi-story hospital done with an ELEVATOR that swaps the interior per
+// floor (real stacked floors are impossible with single-valued floor height +
+// height-less 2D wall colliders + an overhead camera — confirmed by review).
+const HOSP_FLOORS = [
+  { name: 'RECEPTION', emoji: '🛎️' },
+  { name: 'PHARMACY', emoji: '💊' },
+  { name: 'CARE BEDS', emoji: '🩹' },
+  { name: 'NURSERY & CAFE', emoji: '🍼' },
+];
+const HOSP_CARE_FLOOR = 2;       // 0-indexed floor with the care beds (faint wake)
+let hospFloorGroups = [];         // one THREE.Group of props per floor; only the current one is visible
+let hospCurrentFloor = 0;
+let hospDoctor = null;            // doctor standee — visible only on the care floor
+let hospFloorNumSprite = null;    // the lit floor number over the front door
+let hospElevatorPos = null;       // world pos of the elevator pad (proximity opens the picker)
+let hospCareTrigger = null, hospNurseryTrigger = null; // tap the beds to heal / rock a baby (per-floor)
 function buildStore() {
   const store = new THREE.Group();
   const wallMat = new THREE.MeshStandardMaterial({ color: 0xead9b0, roughness: 0.95 });
@@ -1687,7 +1730,9 @@ buildStore();
 function buildHospital() {
   const g = new THREE.Group();
   const wallMat = new THREE.MeshStandardMaterial({ color: 0xf2f4f6, roughness: 0.9 });
+  const bandMat = new THREE.MeshStandardMaterial({ color: 0xcdd6dc, roughness: 0.85 });
   const roofMat = new THREE.MeshStandardMaterial({ color: 0xd2d8de, roughness: 0.8 });
+  const winMat = new THREE.MeshStandardMaterial({ color: 0x8fc4e8, roughness: 0.3, metalness: 0.1, emissive: 0x1a3a4a, emissiveIntensity: 0.25 });
   const crossMat = new THREE.MeshStandardMaterial({ color: 0xe23b3b, roughness: 0.5, emissive: 0x4a0000, emissiveIntensity: 0.2 });
   const floorMat = new THREE.MeshStandardMaterial({ color: 0xeef3f6, roughness: 1 });
   const bedW = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85 });
@@ -1697,85 +1742,161 @@ function buildHospital() {
   const pink = new THREE.MeshStandardMaterial({ color: 0xffb0d0, roughness: 0.8 });
   const blue = new THREE.MeshStandardMaterial({ color: 0xa9c6ff, roughness: 0.8 });
   const divMat = new THREE.MeshStandardMaterial({ color: 0xdfe8ee, roughness: 0.95 });
+  const metal = new THREE.MeshStandardMaterial({ color: 0xaab4bd, roughness: 0.4, metalness: 0.5 });
 
-  const W = HOSP_W, D = HOSP_D, H = 4.8, T = 0.4, DOOR = HOSP_DOOR;
-  const parts = [], props = [];
-  const box = (arr, w, h, d, mat, x, y, z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); arr.push(m); return m; };
-  const cyl = (r1, r2, h, mat, x, y, z) => { const m = new THREE.Mesh(new THREE.CylinderGeometry(r1, r2, h, 12), mat); m.position.set(x, y, z); props.push(m); return m; };
-  // ---- shell: outer walls (occluders), a wide front doorway, roof, floor ----
-  box(parts, W, H, T, wallMat, 0, H / 2, -D / 2);        // back
-  box(parts, T, H, D, wallMat, -W / 2, H / 2, 0);        // left
-  box(parts, T, H, D, wallMat, W / 2, H / 2, 0);         // right
+  const W = HOSP_W, D = HOSP_D, GH = 4.8, T = 0.4, DOOR = HOSP_DOOR;
+  const NFLOORS = HOSP_FLOORS.length, BANDH = 3.0, EXT_H = NFLOORS * BANDH; // tall multi-story facade
+  const shell = [];
+  const sink = (arr, m) => { if (Array.isArray(arr)) arr.push(m); else if (arr && arr.add) arr.add(m); }; // array → collect; group → add
+  const box = (arr, w, h, d, mat, x, y, z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); sink(arr, m); return m; };
+  const cyl = (arr, r1, r2, h, mat, x, y, z) => { const m = new THREE.Mesh(new THREE.CylinderGeometry(r1, r2, h, 12), mat); m.position.set(x, y, z); sink(arr, m); return m; };
+
+  // ---- TALL SHELL: outer walls up the full height, a ground doorway, roof, floor ----
+  box(shell, W, EXT_H, T, wallMat, 0, EXT_H / 2, -D / 2);   // back
+  box(shell, T, EXT_H, D, wallMat, -W / 2, EXT_H / 2, 0);   // left
+  box(shell, T, EXT_H, D, wallMat, W / 2, EXT_H / 2, 0);    // right
   const fw = (W - DOOR) / 2;
-  box(parts, fw, H, T, wallMat, -(W / 2 - fw / 2), H / 2, D / 2);
-  box(parts, fw, H, T, wallMat, (W / 2 - fw / 2), H / 2, D / 2);
-  box(parts, DOOR, 0.9, T, wallMat, 0, H - 0.45, D / 2); // lintel over the door
-  box(parts, W + 0.9, 0.5, D + 0.9, roofMat, 0, H + 0.25, 0);
-  box(parts, W, 0.1, D, floorMat, 0, 0.05, 0);
-  for (const cx of [-(W / 2 - fw / 2), (W / 2 - fw / 2)]) { // red crosses on the front
-    box(parts, 0.4, 1.5, 0.1, crossMat, cx, 2.4, D / 2 + 0.06);
-    box(parts, 1.2, 0.45, 0.1, crossMat, cx, 2.4, D / 2 + 0.06);
+  box(shell, fw, EXT_H, T, wallMat, -(W / 2 - fw / 2), EXT_H / 2, D / 2);
+  box(shell, fw, EXT_H, T, wallMat, (W / 2 - fw / 2), EXT_H / 2, D / 2);
+  box(shell, DOOR, EXT_H - GH, T, wallMat, 0, GH + (EXT_H - GH) / 2, D / 2); // facade above the ground door
+  box(shell, W + 0.9, 0.5, D + 0.9, roofMat, 0, EXT_H + 0.25, 0);           // roof
+  box(shell, W, 0.1, D, floorMat, 0, 0.05, 0);                              // floor (flat, y≈0)
+  // floor bands wrapping the building (reads as separate storeys)
+  for (let f = 1; f < NFLOORS; f++) box(shell, W + 0.35, 0.3, D + 0.35, bandMat, 0, f * BANDH, 0);
+  // rows of windows on the front + sides, one row per storey
+  for (let f = 0; f < NFLOORS; f++) {
+    const wy = f * BANDH + BANDH * 0.55;
+    for (const wx of [-6.5, -2.2, 2.2, 6.5]) if (f > 0 || Math.abs(wx) > DOOR / 2 + 1) box(shell, 1.5, 1.3, 0.12, winMat, wx, wy, D / 2 + 0.06);
+    for (const wz of [-4, 0, 4]) { box(shell, 0.12, 1.3, 1.5, winMat, -W / 2 - 0.06, wy, wz); box(shell, 0.12, 1.3, 1.5, winMat, W / 2 + 0.06, wy, wz); }
   }
+  for (const cx of [-(W / 2 - fw / 2), (W / 2 - fw / 2)]) { box(shell, 0.5, 1.8, 0.1, crossMat, cx, EXT_H - 2, D / 2 + 0.06); box(shell, 1.4, 0.55, 0.1, crossMat, cx, EXT_H - 2, D / 2 + 0.06); } // red crosses up high
+  shell.forEach((m) => { m.castShadow = true; m.receiveShadow = true; g.add(m); });
+  shell.forEach((m) => { if (m.position.y > 0.2 && m.material !== winMat) registerOccluder(m); }); // walls fade when they hide you
 
-  // ---- room labels + icons floating over each zone ----
-  const roomLabel = (text, emoji, x, z) => {
-    const s = makeSign(text); s.scale.setScalar(0.42); s.position.set(x, 3.6, z); g.add(s);
-    const e = makeEmojiSprite(emoji); e.position.set(x, 2.9, z); e.scale.set(1.1, 1.1, 1); e.visible = true; g.add(e);
+  // ---- ELEVATOR (fixed front-left corner, same on every floor) ----
+  const EX = -W / 2 + 2.4, EZ = D / 2 - 2.4;
+  box(g, 2.6, GH, 0.3, metal, EX, GH / 2, EZ - 1.3);            // shaft back
+  box(g, 0.3, GH, 2.6, metal, EX - 1.3, GH / 2, EZ);           // shaft left
+  box(g, 1.1, GH - 0.4, 0.2, new THREE.MeshStandardMaterial({ color: 0x9aa4ad, roughness: 0.4, metalness: 0.6 }), EX, (GH - 0.4) / 2, EZ - 1.15); // sliding doors panel
+  cyl(g, 1.4, 1.4, 0.06, new THREE.MeshStandardMaterial({ color: 0xffe08a, roughness: 0.6, emissive: 0x3a2e00, emissiveIntensity: 0.3 }), EX, 0.08, EZ); // glowing floor pad
+  const padSign = makeEmojiSprite('🛗'); padSign.visible = true; padSign.scale.set(1.2, 1.2, 1); padSign.position.set(EX, 2.4, EZ); g.add(padSign);
+  hospElevatorPos = { x: HOSP_POS.x + EX, z: HOSP_POS.z + EZ };
+
+  // ---- helpers for per-floor content ----
+  const label = (fg, text, emoji) => {
+    const s = makeSign(text); s.scale.setScalar(0.5); s.position.set(0, 4.0, D / 2 - 2.5); fg.add(s);
+    const e = makeEmojiSprite(emoji); e.visible = true; e.scale.set(1.3, 1.3, 1); e.position.set(0, 3.1, D / 2 - 2.5); fg.add(e);
   };
-  // low divider between the aisle and a side zone (waist height, NO collision)
-  const divider = (x, z, w, d) => box(props, w, 1.1, d, divMat, x, 0.55, z);
+  const RRX = W / 2 - 2.2, RRZ = -D / 2 + 2.2; // a restroom in the same back-right corner on EVERY floor
+  const restroom = (fg) => {
+    for (const [sx, se] of [[RRX - 1.0, '🚹'], [RRX + 1.0, '🚺']]) {
+      box(fg, 1.6, 2.4, 0.15, divMat, sx, 1.2, RRZ - 1.0);
+      box(fg, 0.15, 2.4, 1.6, divMat, sx - 0.75, 1.2, RRZ - 0.2);
+      box(fg, 0.15, 2.4, 1.6, divMat, sx + 0.75, 1.2, RRZ - 0.2);
+      const e = makeEmojiSprite(se); e.visible = true; e.scale.set(0.8, 0.8, 1); e.position.set(sx, 2.6, RRZ); fg.add(e);
+    }
+    const rs = makeEmojiSprite('🚻'); rs.visible = true; rs.scale.set(1.0, 1.0, 1); rs.position.set(RRX, 3.2, RRZ); fg.add(rs);
+  };
 
-  const LX = -W / 2 + 3.5, RX = W / 2 - 3.5; // left / right zone centers
-  // ===== LEFT SIDE: Waiting Room (front) · Pharmacy (mid) · Care Beds (back) =====
-  roomLabel('WAITING', '🪑', LX, D / 2 - 3);
-  for (const bz of [-1.2, 1.2]) box(props, 2.6, 0.35, 0.7, wood, LX, 0.45, D / 2 - 3 + bz);  // benches
-  for (const bz of [-1.2, 1.2]) box(props, 2.6, 0.7, 0.15, wood, LX, 0.85, D / 2 - 3 + bz - 0.35);
-  divider(LX + 1.8, D / 2 - 3, 0.2, 4.5);
-
-  roomLabel('PHARMACY', '💊', LX, 0);
-  box(props, 3.2, 1.0, 0.8, teal, LX, 0.5, 1.0);   // counter
-  box(props, 3.2, 1.6, 0.35, wallMat, LX, 1.6, -0.6); // shelf back
-  const pillCols = [0xff6b6b, 0x6bd0ff, 0xffe06b, 0x9d7bff, 0x74e08c];
-  for (let i = 0; i < 5; i++) cyl(0.14, 0.14, 0.5, new THREE.MeshStandardMaterial({ color: pillCols[i], roughness: 0.5 }), LX - 1.3 + i * 0.65, 1.7, -0.55);
-  box(props, 0.3, 0.9, 0.08, crossMat, LX, 2.9, -0.78); box(props, 0.8, 0.3, 0.08, crossMat, LX, 2.9, -0.78); // Rx cross
-  divider(LX + 1.8, 0, 0.2, 3);
-
-  roomLabel('CARE', '🩹', LX, -D / 2 + 3);
-  for (let i = 0; i < 3; i++) { const bz = -D / 2 + 2 + i * 2.0; box(props, 2.2, 0.5, 1.0, bedFrame, LX, 0.3, bz); box(props, 2.1, 0.22, 0.95, bedW, LX, 0.6, bz); box(props, 0.6, 0.22, 0.85, bedW, LX - 0.75, 0.78, bz); } // 3 care beds
-  divider(LX + 1.8, -D / 2 + 3, 0.2, 4.5);
-
-  // ===== RIGHT SIDE: Cafeteria (front) · Restrooms (mid) · Nursery (back) =====
-  roomLabel('CAFETERIA', '🍽️', RX, D / 2 - 3);
-  for (const tz of [-1.3, 1.3]) { box(props, 1.6, 0.12, 1.6, wood, RX, 0.75, D / 2 - 3 + tz); cyl(0.12, 0.12, 0.7, wood, RX, 0.38, D / 2 - 3 + tz); }
-  for (const [fx, fz, fe] of [[RX, D/2-3-1.3, '🍎'], [RX, D/2-3+1.3, '🍰']]) { const s = makeEmojiSprite(fe); s.position.set(fx, 1.15, fz); s.scale.set(0.7,0.7,1); s.visible = true; g.add(s); }
-  divider(RX - 1.8, D / 2 - 3, 0.2, 4.5);
-
-  roomLabel('RESTROOMS', '🚻', RX, 0);
-  for (const [sx, se] of [[RX - 1.0, '🚹'], [RX + 1.0, '🚺']]) { // two stalls
-    box(props, 1.6, 2.4, 0.15, divMat, sx, 1.2, -1.4);
-    box(props, 0.15, 2.4, 1.6, divMat, sx - 0.75, 1.2, -0.6);
-    box(props, 0.15, 2.4, 1.6, divMat, sx + 0.75, 1.2, -0.6);
-    const e = makeEmojiSprite(se); e.position.set(sx, 2.6, -0.4); e.scale.set(0.8, 0.8, 1); e.visible = true; g.add(e);
+  hospFloorGroups = [];
+  for (let f = 0; f < NFLOORS; f++) {
+    const fg = new THREE.Group();
+    label(fg, HOSP_FLOORS[f].name, HOSP_FLOORS[f].emoji);
+    restroom(fg); // every floor has a restroom (a cute running gag)
+    if (f === 0) { // RECEPTION / WAITING
+      box(fg, 4.5, 1.1, 1.2, wood, 0, 0.55, -2.5);               // reception desk
+      box(fg, 0.4, 1.4, 0.3, teal, -1.8, 0.7, -2.5); box(fg, 0.4, 1.4, 0.3, teal, 1.8, 0.7, -2.5);
+      const bell = makeEmojiSprite('🛎️'); bell.visible = true; bell.scale.set(0.6, 0.6, 1); bell.position.set(0, 1.4, -2.5); fg.add(bell);
+      for (const bx of [-4, 4]) { box(fg, 2.6, 0.35, 0.7, wood, bx, 0.45, 3); box(fg, 2.6, 0.7, 0.15, wood, bx, 0.85, 2.65); } // waiting benches
+    } else if (f === 1) { // PHARMACY
+      box(fg, 3.6, 1.0, 0.9, teal, -2, 0.5, -1);                 // counter
+      box(fg, 3.6, 2.0, 0.35, wallMat, -2, 1.6, -2.2);           // shelf
+      const pillCols = [0xff6b6b, 0x6bd0ff, 0xffe06b, 0x9d7bff, 0x74e08c, 0xff9ec7];
+      for (let i = 0; i < 6; i++) cyl(fg, 0.15, 0.15, 0.55, new THREE.MeshStandardMaterial({ color: pillCols[i], roughness: 0.5 }), -3.5 + i * 0.6, 1.75, -2.15);
+      box(fg, 0.35, 1.0, 0.08, crossMat, -2, 3.0, -2.35); box(fg, 0.95, 0.35, 0.08, crossMat, -2, 3.0, -2.35); // Rx
+    } else if (f === 2) { // CARE BEDS (faint wake floor)
+      for (let i = 0; i < 3; i++) { const bx = -5 + i * 3.4; box(fg, 2.2, 0.5, 1.1, bedFrame, bx, 0.3, -3.2); box(fg, 2.1, 0.22, 1.0, bedW, bx, 0.6, -3.2); box(fg, 0.6, 0.22, 0.9, bedW, bx - 0.75, 0.78, -3.2); }
+      const heart = makeEmojiSprite('❤️'); heart.visible = true; heart.scale.set(1.0, 1.0, 1); heart.position.set(0, 2.4, -3.2); fg.add(heart);
+      hospCareTrigger = new THREE.Mesh(new THREE.PlaneGeometry(9, 2.6), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }));
+      hospCareTrigger.rotation.x = -Math.PI / 2; hospCareTrigger.position.set(-1.5, 0.7, -3.2); hospCareTrigger.userData.isCareBed = true; fg.add(hospCareTrigger);
+    } else { // NURSERY + CAFE
+      for (let i = 0; i < 3; i++) { const cx = -6 + i * 2.0; const cm = i === 1 ? blue : pink; box(fg, 1.4, 0.7, 1.0, cm, cx, 0.5, -3.4); box(fg, 1.5, 0.14, 1.1, bedW, cx, 0.9, -3.4); const baby = makeEmojiSprite(['👶','🍼','🧸'][i]); baby.visible = true; baby.scale.set(0.55,0.55,1); baby.position.set(cx, 1.15, -3.4); fg.add(baby); }
+      for (const tx of [2, 5]) { box(fg, 1.6, 0.12, 1.6, wood, tx, 0.75, 2.5); cyl(fg, 0.12, 0.12, 0.7, wood, tx, 0.38, 2.5); const food = makeEmojiSprite(tx === 2 ? '🍰' : '🍎'); food.visible = true; food.scale.set(0.7,0.7,1); food.position.set(tx, 1.2, 2.5); fg.add(food); }
+      hospNurseryTrigger = new THREE.Mesh(new THREE.PlaneGeometry(6.5, 2.6), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }));
+      hospNurseryTrigger.rotation.x = -Math.PI / 2; hospNurseryTrigger.position.set(-4, 0.7, -3.4); hospNurseryTrigger.userData.isNursery = true; fg.add(hospNurseryTrigger);
+    }
+    fg.traverse((m) => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } });
+    fg.visible = false;
+    g.add(fg); hospFloorGroups.push(fg);
   }
-  divider(RX - 1.8, 0, 0.2, 3);
 
-  roomLabel('NURSERY', '🍼', RX, -D / 2 + 3);
-  for (let i = 0; i < 3; i++) { const cz = -D / 2 + 2 + i * 2.0; const cm = i === 1 ? blue : pink; box(props, 1.4, 0.7, 1.0, cm, RX, 0.5, cz); box(props, 1.5, 0.14, 1.1, bedW, RX, 0.9, cz); } // 3 cribs
-  divider(RX - 1.8, -D / 2 + 3, 0.2, 4.5);
-
-  parts.forEach((m) => { m.castShadow = true; m.receiveShadow = true; g.add(m); });
-  parts.forEach((m) => { if (m.position.y > 0.2) registerOccluder(m); }); // walls/roof fade when they hide you
-  props.forEach((m) => { m.castShadow = true; m.receiveShadow = true; g.add(m); }); // interior props: no collision, no occlusion
-
-  const sign = makeSign('HOSPITAL');
-  sign.position.set(0, H + 1.3, D / 2 - 0.05);
-  g.add(sign);
+  const sign = makeSign('HOSPITAL'); sign.position.set(0, EXT_H + 1.2, D / 2 - 0.05); g.add(sign);
+  // the current floor number, lit over the door
+  hospFloorNumSprite = makeEmojiSprite('1'); hospFloorNumSprite.visible = true; hospFloorNumSprite.scale.set(1.4, 1.4, 1); hospFloorNumSprite.position.set(0, GH + 1.0, D / 2 + 0.4); g.add(hospFloorNumSprite);
 
   g.position.set(HOSP_POS.x, 0, HOSP_POS.z);
   scene.add(g);
   noTreeZones.push({ x: HOSP_POS.x, z: HOSP_POS.z, r: Math.max(W, D) / 2 + 3 });
 }
 buildHospital();
+// swap the hospital interior to a floor (only that floor's props are visible)
+const hospFloorsVisited = new Set();
+function setHospitalFloor(n, silent) {
+  n = Math.max(0, Math.min(HOSP_FLOORS.length - 1, n));
+  hospCurrentFloor = n;
+  hospFloorGroups.forEach((fg, i) => { if (fg) fg.visible = (i === n); });
+  if (hospDoctor) hospDoctor.visible = (n === HOSP_CARE_FLOOR);
+  if (hospFloorNumSprite && typeof setEmoji === 'function') setEmoji(hospFloorNumSprite, String(n + 1));
+  if (typeof refreshElevatorButtons === 'function') refreshElevatorButtons(); // keep the panel's highlight in sync
+  if (!silent) {
+    if (typeof playDing === 'function') playDing();
+    if (typeof showFloorBanner === 'function') showFloorBanner(n);
+    markFloorVisited(n);
+  }
+}
+function markFloorVisited(n) { // "Hospital Tour" quest — one bump per NEW floor
+  if (hospFloorsVisited.has(n)) return;
+  hospFloorsVisited.add(n);
+  if (typeof questBump === 'function') questBump('hosptour');
+}
+// ---- Elevator floor-picker: opens while you stand on the pad ----
+let elevatorEl = null, elevatorOpen = false, floorBannerEl = null;
+function buildElevatorPanel() {
+  elevatorEl = document.createElement('div'); elevatorEl.id = 'elevator';
+  const title = document.createElement('div'); title.className = 'elev-title'; title.textContent = '🛗 Pick a floor'; elevatorEl.appendChild(title);
+  HOSP_FLOORS.forEach((f, i) => {
+    const b = document.createElement('div'); b.className = 'elev-btn';
+    const num = document.createElement('span'); num.className = 'elev-num'; num.textContent = i + 1;
+    const name = document.createElement('span'); name.textContent = f.name;
+    const em = document.createElement('span'); em.className = 'elev-emoji'; em.textContent = f.emoji + '🚻';
+    b.append(num, name, em);
+    b.addEventListener('click', () => { if (i !== hospCurrentFloor) setHospitalFloor(i); refreshElevatorButtons(); });
+    elevatorEl.appendChild(b);
+  });
+  document.body.appendChild(elevatorEl);
+}
+function refreshElevatorButtons() {
+  if (!elevatorEl) return;
+  [...elevatorEl.querySelectorAll('.elev-btn')].forEach((b, i) => b.classList.toggle('here', i === hospCurrentFloor));
+}
+function openElevator() { if (!elevatorEl) buildElevatorPanel(); elevatorOpen = true; markFloorVisited(hospCurrentFloor); refreshElevatorButtons(); elevatorEl.style.display = 'flex'; animate(elevatorEl, { opacity: [0, 1], duration: 200 }); }
+function closeElevator() { if (!elevatorEl) return; elevatorOpen = false; elevatorEl.style.display = 'none'; }
+function updateElevator() {
+  if (!player || !hospElevatorPos) return;
+  const dBldg = Math.hypot(player.position.x - HOSP_POS.x, player.position.z - HOSP_POS.z);
+  if (dBldg > 14 && hospCurrentFloor !== 0) setHospitalFloor(0, true); // walked out → reset to Floor 1
+  const near = Math.hypot(player.position.x - hospElevatorPos.x, player.position.z - hospElevatorPos.z) < 3.2;
+  const blocked = (typeof miniGameActive === 'function' && miniGameActive()) || (typeof battleActive !== 'undefined' && battleActive) || (typeof uiModalOpen === 'function' && uiModalOpen());
+  if (near && !elevatorOpen && !blocked) openElevator();
+  else if ((!near || blocked) && elevatorOpen) closeElevator();
+}
+function showFloorBanner(n) {
+  if (!floorBannerEl) { floorBannerEl = document.createElement('div'); floorBannerEl.id = 'floorbanner'; document.body.appendChild(floorBannerEl); }
+  floorBannerEl.textContent = `FLOOR ${n + 1} · ${HOSP_FLOORS[n].name} ${HOSP_FLOORS[n].emoji}`;
+  floorBannerEl.style.display = 'block';
+  animate(floorBannerEl, { opacity: [0, 1], scale: [0.8, 1], duration: 260, ease: 'out(3)' });
+  clearTimeout(floorBannerEl._t); floorBannerEl._t = setTimeout(() => animate(floorBannerEl, { opacity: 0, duration: 400, onComplete: () => { floorBannerEl.style.display = 'none'; } }), 1600);
+}
 
 // A standing billboard NPC (shopkeeper, doctor, …) that never roams.
 function addStandee(file, name, pos) {
@@ -1799,10 +1920,13 @@ function addStandee(file, name, pos) {
   holder.add(label);
   scene.add(holder);
   billboards.push(mesh);
+  return holder;
 }
 const SHOPKEEPER_POS = new THREE.Vector3(STORE_POS.x, 0, STORE_POS.z - 1.6);
 addStandee('shopkeeper.png', 'Shopkeeper', SHOPKEEPER_POS);
-addStandee('doctor.png', 'Doctor', new THREE.Vector3(HOSP_POS.x - 6, 0, HOSP_POS.z - 4.5)); // inside the hospital (by the care beds)
+// the Doctor stands by the care beds; only shown on the care floor
+hospDoctor = addStandee('doctor.png', 'Doctor', new THREE.Vector3(HOSP_POS.x - 4.5, 0, HOSP_POS.z - 3.5));
+if (typeof setHospitalFloor === 'function') setHospitalFloor(0, true); // start on Floor 1, silently (also hides the doctor)
 
 // ---------------------------------------------------------------------------
 // Campfire in the middle of town — stones, logs, flickering flames + warm light.
@@ -2769,6 +2893,7 @@ const quests = [
   { id: 'mallow', name: 'Toast a marshmallow at the fire 🔥', target: 2, prog: 0, reward: 7, done: false },
   { id: 'feed', name: 'Feed 3 friends a snack 🍎', target: 3, prog: 0, reward: 7, done: false },
   { id: 'cafe', name: 'Visit the Cafe by the pond ☕', target: 1, prog: 0, reward: 6, done: false },
+  { id: 'hosptour', name: 'Ride the elevator to every hospital floor 🏥', target: HOSP_FLOORS.length, prog: 0, reward: 8, done: false },
 ];
 function questBump(id) {
   const q = quests.find((x) => x.id === id);
@@ -2800,6 +2925,7 @@ function onToastMarshmallow() { questBump('mallow'); }
 function resetQuests() {
   for (const q of quests) { q.prog = 0; q.done = false; }
   if (typeof fedFriends !== 'undefined') fedFriends.clear();
+  if (typeof hospFloorsVisited !== 'undefined') hospFloorsVisited.clear();
   if (sideQuest) { scene.remove(sideQuest.item); scene.remove(sideQuest.animal); sideQuest = null; }
   nextSideQuestAt = 25;
   if (questOpen) refreshQuests();
@@ -3737,7 +3863,17 @@ function buildDressingRoom() {
 
   room.position.copy(DRESS_CENTER);
   scene.add(room);
-  noTreeZones.push({ x: DRESS_CENTER.x, z: DRESS_CENTER.z, r: 9 });
+  // smaller no-tree zone so trees can nestle close (footprint half-diagonal ≈5)
+  noTreeZones.push({ x: DRESS_CENTER.x, z: DRESS_CENTER.z, r: 6.5 });
+  // plant a cozy grove hugging the SIDES & BACK of the dressing room — the door
+  // faces +z and the path comes from the NE, so keep the front (+z) & NE clear
+  const DC = DRESS_CENTER;
+  const grove = [
+    [-6.5, 2.5], [-6, -0.5], [-6, -3.5],  // west side (front-corner back to rear)
+    [-2.5, -5.5], [1, -6], [4.5, -5.5],   // back (behind the room, -z)
+    [6.3, -1.5], [6, -4.5],               // east side toward the back
+  ];
+  grove.forEach(([dx, dz], i) => loadModel(TREE_FILES[i % TREE_FILES.length], { position: [DC.x + dx, 0, DC.z + dz], rotationY: i * 1.3, scale: 1.9 + (i % 3) * 0.3 }));
 }
 buildDressingRoom();
 
@@ -4737,6 +4873,7 @@ function tick() {
   updateTrail(t, dt);
   updateStats(t, dt);
   updateShop();
+  updateElevator();
   updateDress();
   updateTrades(t);
   updateSideQuests(t);
