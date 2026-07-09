@@ -281,6 +281,7 @@
       #questpanel, #prizepanel, #tradepanel { max-height: calc(100vh - 196px); }
       .swatch { width: 34px; height: 34px; }
       .swatches { gap: 8px; }
+      .panel-close { width: 44px; height: 44px; font-size: 18px; } /* fat-finger-friendly ✕ (44px touch minimum) */
     }
     body.touch #dressroom { top: 12px; transform: none; max-height: calc(100vh - 196px); }
     /* on phones, drop the panels below the (wrapped, up-to-3-row) top bar so its
@@ -337,7 +338,7 @@
       background: rgba(255,255,255,.22); display: flex; align-items: center; justify-content: center; }
     .elev-btn .elev-emoji { font-size: 18px; margin-left: auto; }
     @media (max-width: 520px) {
-      #elevator { right: 50%; top: auto; bottom: 122px; transform: translateX(50%); }
+      #elevator { right: 50%; top: auto; bottom: 196px; transform: translateX(50%); } /* clears the 156px joystick so a thumb-flick can't hit a floor button */
       .elev-btn { min-width: 150px; padding: 11px 12px; }
     }
     /* prominent floor-change banner */
@@ -357,6 +358,8 @@
       background: linear-gradient(180deg, #2d2350, #15102b);
       border: 1px solid rgba(186, 160, 255, .35); border-radius: 22px;
       box-shadow: 0 20px 60px rgba(0, 0, 0, .6);
+      /* short/landscape phones: scroll inside the panel so the Close button is always reachable */
+      max-height: calc(100vh - 20px); overflow-y: auto; -webkit-overflow-scrolling: touch;
     }
     .puzzle-msg { color: #cdbcff; margin: 6px 0 14px; min-height: 20px; }
     .puzzle-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
