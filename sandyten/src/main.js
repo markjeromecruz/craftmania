@@ -443,7 +443,7 @@ function playerTradeWith(holder) {
   refreshTradePanel();
   if (typeof saveGame === 'function') saveGame();
 }
-function openTrade() { if (typeof questOpen !== 'undefined' && questOpen) closeQuests(); if (typeof prizeOpen !== 'undefined' && prizeOpen) closePrizes(); tradeOpen = true; refreshTradePanel(); tradeEl.style.display = 'block'; animate(tradeEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' }); }
+function openTrade() { if (typeof questOpen !== 'undefined' && questOpen) closeQuests(); if (typeof prizeOpen !== 'undefined' && prizeOpen) closePrizes(); if (typeof shopOpen !== 'undefined' && shopOpen) { shopDismissed = true; closeShop(); } tradeOpen = true; refreshTradePanel(); tradeEl.style.display = 'block'; animate(tradeEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' }); }
 function closeTrade() { tradeOpen = false; animate(tradeEl, { opacity: [1, 0], duration: 200, onComplete: () => { tradeEl.style.display = 'none'; } }); }
 buildTradePanel();
 
@@ -1037,11 +1037,14 @@ function updatePlayer(dt) {
   // camera follows by the same amount, keeping your view steady
   camera.position.x += ddx; camera.position.z += ddz;
   controls.target.x += ddx; controls.target.z += ddz;
-  // vertical: rise/lower with the stairs & loft inside houses
+  // vertical: rise/lower with the stairs & loft inside houses. Rate-limited so
+  // Boo phasing straight through a wall into the loft zone glides up instead of
+  // teleporting 4.3 units in one frame (24 u/s still beats the fastest stair climb)
   const fy = houseFloorHeight(nx, nz);
-  const ddy = fy - player.position.y;
+  const maxStep = 24 * dt;
+  const ddy = Math.max(-maxStep, Math.min(maxStep, fy - player.position.y));
   if (Math.abs(ddy) > 1e-4) {
-    player.position.y = fy;
+    player.position.y += ddy;
     camera.position.y += ddy;
     controls.target.y += ddy;
   }
@@ -1183,6 +1186,7 @@ function tapBlockedByWall(hit) {
 
 // Show a pointer cursor when hovering a character or the puppy.
 renderer.domElement.addEventListener('pointermove', (e) => {
+  if (e.pointerType !== 'mouse') return; // a hover cursor is meaningless on touch — skip the double raycast during camera drags
   pointerNDC.x = (e.clientX / window.innerWidth) * 2 - 1;
   pointerNDC.y = -(e.clientY / window.innerHeight) * 2 + 1;
   raycaster.setFromCamera(pointerNDC, camera);
@@ -2129,6 +2133,10 @@ function updateAmbulance(t, dt) {
     const maxStep = AMB_R * AMB_SPEED * dt + 0.08;
     if (stepLen > maxStep) { nx = prevX + (stepX / stepLen) * maxStep; nz = prevZ + (stepZ / stepLen) * maxStep; }
     [nx, nz] = resolveWalls(nx, nz, prevX, prevZ, 0.45); // safety net — the road already clears everything
+    // the van politely WAITS instead of driving through anyone crossing the road
+    if (player && Math.hypot(nx - player.position.x, nz - player.position.z) < 2.4) return;
+    const petH = (typeof petDog !== 'undefined' && petDog && petDog.holder) || (typeof petCat !== 'undefined' && petCat && petCat.holder);
+    if (petH && Math.hypot(nx - petH.position.x, nz - petH.position.z) < 2.0) return;
     const mx = nx - prevX, mz = nz - prevZ;
     ambulance.position.set(nx, 0, nz);
     if (Math.hypot(mx, mz) > 1e-3) ambulance.rotation.y = Math.atan2(-mz, mx); // face travel direction
@@ -2255,12 +2263,17 @@ function throwBall() {
 function updateBall(dt) {
   if (ballState === 'flying') {
     ballVel.y -= 18 * dt;            // gravity — the same for every toy
+    const fromX = ball.position.x, fromZ = ball.position.z;
     ball.position.addScaledVector(ballVel, dt);
+    // toys respect walls too — a throw at a house slides along it and lands
+    // where the pet can actually reach it (instead of tunneling inside)
+    const [bx, bz] = resolveWalls(ball.position.x, ball.position.z, fromX, fromZ, BALL_R);
+    ball.position.x = bx; ball.position.z = bz;
     const groundY = houseFloorHeight(ball.position.x, ball.position.z) + BALL_R;
     if (ball.position.y <= groundY) { ball.position.y = groundY; ballState = 'onground'; ballWaitingSince = timer.getElapsed(); }
-  } else if (ballState !== 'idle' && timer.getElapsed() - ballWaitingSince > 10) {
-    // the toy landed somewhere your pet couldn't reach (e.g. behind a wall) —
-    // don't leave the throw button stuck disabled forever, just let it go
+  } else if (ballState === 'onground' && timer.getElapsed() - ballWaitingSince > 4) {
+    // the toy landed somewhere your pet couldn't reach — don't leave the throw
+    // button stuck disabled, just let it go (4s: quick enough to feel responsive)
     ballState = 'idle'; ball.visible = false;
   }
 }
@@ -2967,7 +2980,7 @@ function refreshQuests() {
     questListEl.appendChild(row);
   }
 }
-function openQuests() { if (typeof tradeOpen !== 'undefined' && tradeOpen) closeTrade(); if (typeof prizeOpen !== 'undefined' && prizeOpen) closePrizes(); questOpen = true; refreshQuests(); questEl.style.display = 'block'; animate(questEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' }); }
+function openQuests() { if (typeof tradeOpen !== 'undefined' && tradeOpen) closeTrade(); if (typeof prizeOpen !== 'undefined' && prizeOpen) closePrizes(); if (typeof shopOpen !== 'undefined' && shopOpen) { shopDismissed = true; closeShop(); } questOpen = true; refreshQuests(); questEl.style.display = 'block'; animate(questEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' }); }
 function closeQuests() { questOpen = false; animate(questEl, { opacity: [1, 0], duration: 200, onComplete: () => { questEl.style.display = 'none'; } }); }
 let toastEl = null;
 function questToast(msg) {
@@ -3613,6 +3626,10 @@ function buyItem(item) {
 }
 
 function openShop() {
+  // the side panels share the right edge — close them so the shop never paints on top of an open one
+  if (typeof questOpen !== 'undefined' && questOpen) closeQuests();
+  if (typeof prizeOpen !== 'undefined' && prizeOpen) closePrizes();
+  if (typeof tradeOpen !== 'undefined' && tradeOpen) closeTrade();
   shopOpen = true;
   refreshShop(); refreshSell();
   shopEl.style.display = 'block';
@@ -3673,7 +3690,7 @@ function buyPrize(p) {
   if (typeof onBuyPrize === 'function') onBuyPrize(); // quest: buy a prize
   refreshPrizes(); if (typeof saveGame === 'function') saveGame();
 }
-function openPrizes() { if (typeof questOpen !== 'undefined' && questOpen) closeQuests(); if (typeof tradeOpen !== 'undefined' && tradeOpen) closeTrade(); prizeOpen = true; refreshPrizes(); prizeEl.style.display = 'block'; animate(prizeEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' }); }
+function openPrizes() { if (typeof questOpen !== 'undefined' && questOpen) closeQuests(); if (typeof tradeOpen !== 'undefined' && tradeOpen) closeTrade(); if (typeof shopOpen !== 'undefined' && shopOpen) { shopDismissed = true; closeShop(); } prizeOpen = true; refreshPrizes(); prizeEl.style.display = 'block'; animate(prizeEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' }); }
 function closePrizes() { prizeOpen = false; animate(prizeEl, { opacity: [1, 0], duration: 200, onComplete: () => { prizeEl.style.display = 'none'; } }); }
 buildPrizes();
 const lanternLight = new THREE.PointLight(0xfff0c0, 0, 16, 1.6); scene.add(lanternLight);
@@ -4189,6 +4206,7 @@ const starField = new THREE.Points(starGeo, starMat);
 scene.add(starField);
 
 const _dayFog = new THREE.Color(0xbfd8ef), _nightFog = new THREE.Color(0x0a1326);
+let nextLampSortAt = 0, lampNearest = []; // lamp-pool sort is throttled (allocation-free frames between)
 function phaseName(dt) {
   if (dt < 0.05) return ['dawn', '🌅'];
   if (dt < 0.20) return ['morning', '🌄'];
@@ -4227,11 +4245,16 @@ function updateDayNight(t) {
   const lampOn = Math.max(0, 1 - dayness * 2.4);
   for (const lp of lampPosts) lp.orbMat.emissiveIntensity = 0.2 + lampOn * 3.2; // every orb glows brightly (free)
   // and the shared point-light pool follows the lamps nearest the camera
+  // (re-sorted twice a second, not every frame — .map().sort() allocates)
   if (lampOn > 0.01 && lampPosts.length) {
-    const cx = controls.target.x, cz = controls.target.z;
-    const nearest = lampPosts
-      .map((lp) => ({ lp, d: (lp.x - cx) ** 2 + (lp.z - cz) ** 2 }))
-      .sort((a, b) => a.d - b.d);
+    if (t >= nextLampSortAt) {
+      nextLampSortAt = t + 0.5;
+      const cx = controls.target.x, cz = controls.target.z;
+      lampNearest = lampPosts
+        .map((lp) => ({ lp, d: (lp.x - cx) ** 2 + (lp.z - cz) ** 2 }))
+        .sort((a, b) => a.d - b.d);
+    }
+    const nearest = lampNearest;
     for (let i = 0; i < lampLightPool.length; i++) {
       const l = lampLightPool[i];
       if (i < nearest.length) { l.position.set(nearest[i].lp.x, 2.95, nearest[i].lp.z); l.intensity = lampOn * 6.5; }
@@ -4548,7 +4571,7 @@ function buildDress() {
   dressMsgEl = document.createElement('p');
   dressMsgEl.className = 'shop-msg';
   const x = document.createElement('button'); x.className = 'panel-close'; x.textContent = '✕';
-  x.addEventListener('click', () => closeDress());
+  x.addEventListener('click', () => { dressDismissed = true; closeDress(); }); // stays closed until you walk away & back (same as the shop)
   dressEl.append(x, h, sub, dressListEl, dressMsgEl);
   document.body.appendChild(dressEl);
 }
@@ -4614,6 +4637,7 @@ function openDress() { dressOpen = true; refreshDress(); dressEl.style.display =
 function closeDress() { dressOpen = false; animate(dressEl, { opacity: [1, 0], duration: 200, onComplete: () => { dressEl.style.display = 'none'; } }); }
 buildDress();
 
+let dressDismissed = false; // ✕ was tapped — don't auto-reopen until they leave and come back
 function updateDress() {
   let near = false;
   if (player) {
@@ -4621,7 +4645,8 @@ function updateDress() {
     const dz = player.position.z - DRESS_POS.z;
     near = (dx * dx + dz * dz) < 5.5 * 5.5;
   }
-  if (near && !dressOpen) openDress();
+  if (!near) dressDismissed = false;
+  if (near && !dressOpen && !dressDismissed) openDress();
   else if (!near && dressOpen) closeDress();
 }
 
@@ -4753,8 +4778,9 @@ const joyVec = { x: 0, y: 0, active: false };
     const len = Math.hypot(dx, dy) || 1;
     const k = Math.min(len, R) / len;
     dx *= k; dy *= k;
-    knob.style.transform = `translate(${dx}px, ${dy}px)`;
-    joyVec.x = dx / R; joyVec.y = dy / R;
+    knob.style.transform = `translate(${dx}px, ${dy}px)`; // the knob still tracks the thumb…
+    if (len < R * 0.18) { joyVec.x = 0; joyVec.y = 0; }    // …but a resting thumb (deadzone) doesn't jitter-walk
+    else { joyVec.x = dx / R; joyVec.y = dy / R; }
   }
   el.addEventListener('pointerdown', (e) => {
     e.preventDefault(); id = e.pointerId;
