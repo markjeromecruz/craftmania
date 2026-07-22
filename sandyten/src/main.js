@@ -322,7 +322,9 @@ function pickRoamTarget(holder) {
       const d = (s.position.x - holder.position.x) ** 2 + (s.position.z - holder.position.z) ** 2;
       if (d < bestD) { bestD = d; best = s; }
     }
-    if (best) { w.target.set(best.position.x, 0, best.position.z); return; }
+    // jittered — several characters share the "nearest" star at session start,
+    // and identical targets stacked them (and their name pills) on one spot
+    if (best) { w.target.set(best.position.x + (Math.random() - 0.5) * 2.5, 0, best.position.z + (Math.random() - 0.5) * 2.5); return; }
   }
   const a = Math.random() * Math.PI * 2;
   const r = inner + Math.random() * (outer - inner);
@@ -443,7 +445,7 @@ function playerTradeWith(holder) {
   refreshTradePanel();
   if (typeof saveGame === 'function') saveGame();
 }
-function openTrade() { if (typeof questOpen !== 'undefined' && questOpen) closeQuests(); if (typeof prizeOpen !== 'undefined' && prizeOpen) closePrizes(); if (typeof shopOpen !== 'undefined' && shopOpen) { shopDismissed = true; closeShop(); } tradeOpen = true; refreshTradePanel(); tradeEl.style.display = 'block'; animate(tradeEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' }); }
+function openTrade() { if (typeof questOpen !== 'undefined' && questOpen) closeQuests(); if (typeof prizeOpen !== 'undefined' && prizeOpen) closePrizes(); if (typeof shopOpen !== 'undefined' && shopOpen) { shopDismissed = true; closeShop(); } tradeOpen = true; refreshTradePanel(); tradeEl.style.display = 'block'; placeSidePanel(tradeEl); animate(tradeEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' }); }
 function closeTrade() { tradeOpen = false; animate(tradeEl, { opacity: [1, 0], duration: 200, onComplete: () => { tradeEl.style.display = 'none'; } }); }
 buildTradePanel();
 
@@ -452,10 +454,14 @@ function makeNameLabel(text) {
   const canvas = document.createElement('canvas');
   canvas.width = 256; canvas.height = 64;
   const ctx = canvas.getContext('2d');
-  ctx.font = 'bold 38px -apple-system, Segoe UI, sans-serif';
+  // shrink to fit (same idea as makeSign) — long free-text pet names like
+  // "Marshmallow" used to clip mid-glyph at the canvas edges
+  let fontSize = 38;
+  do { ctx.font = `bold ${fontSize}px -apple-system, Segoe UI, sans-serif`; fontSize -= 2; }
+  while (fontSize > 18 && ctx.measureText(text).width + 36 > 250);
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  // pill background
-  const w = ctx.measureText(text).width + 36;
+  // pill background (clamped so it can never exceed the canvas)
+  const w = Math.min(ctx.measureText(text).width + 36, 250);
   ctx.fillStyle = 'rgba(13,27,42,0.78)';
   const x = 128 - w / 2;
   ctx.beginPath(); ctx.roundRect(x, 10, w, 44, 22); ctx.fill();
@@ -558,6 +564,7 @@ function placeCharacter(char, index, total) {
   const label = makeNameLabel(char.name);
   label.position.set(0, CHAR_HEIGHT + 0.5, 0);
   holder.add(label);
+  holder.userData.nameLabel = label; // so trades/bubbles/cluster checks can hide it
 
   const zzz = makeZzzSprite();
   zzz.position.set(1.05, CHAR_HEIGHT + 1.0, 0);
@@ -1068,13 +1075,42 @@ bubbleWho.className = 'who';
 const bubbleText = document.createTextNode('');
 bubbleEl.append(bubbleWho, bubbleText);
 document.body.appendChild(bubbleEl);
-let activeBubble = null; // { mesh, hideAt }
+let activeBubble = null; // { mesh, hideAt, offsetY, label }
+let nextLabelDeclutterAt = 0; // the 0.5s label de-stacker timer
+
+// Side panels sit just BELOW the real topbar (its height varies wildly — 1 row
+// on desktop, 2-3 on tablets, brand+stats+3 pill rows on phones). Hardcoded
+// tops kept landing panels on the pills → App Store Guideline 4 rejection.
+function placeSidePanel(el) {
+  if (!el) return;
+  if (!document.body.classList.contains('touch')) return; // desktop keeps its designed layout (one short pill row — nothing to clear)
+  const tb = document.querySelector('#hud .topbar');
+  if (!tb) return;
+  const top = Math.round(tb.getBoundingClientRect().bottom + 8);
+  el.style.top = top + 'px';
+  el.style.transform = 'none'; // some panels center via translateY — top-anchor instead
+  // narrow phones: a near-full-width panel must also stop above the joystick;
+  // wide tablets/landscape: the right/left-edge panel never reaches it
+  const clear = window.innerWidth <= 560 ? 172 : 24;
+  el.style.maxHeight = Math.max(140, window.innerHeight - top - clear) + 'px';
+}
+window.addEventListener('resize', () => { // keep any open panel placed on rotation
+  for (const id of ['questpanel', 'prizepanel', 'tradepanel', 'dressroom', 'shop']) {
+    const el = document.getElementById(id);
+    if (el && el.style.display !== 'none' && el.style.top) placeSidePanel(el);
+  }
+});
 
 function showBubble(mesh, name, text, offsetY) {
   bubbleWho.textContent = name;            // safe: no HTML injection
   bubbleText.textContent = text;
   bubbleEl.style.display = 'block';
-  activeBubble = { mesh, hideAt: timer.getElapsed() + 3.4, offsetY };
+  // the bubble repeats the name and rises straight through the name-pill band —
+  // hide the speaker's pill while their bubble is up (restore any previous speaker's)
+  if (activeBubble && activeBubble.label) activeBubble.label.userData.hideBubble = false;
+  const label = mesh.parent && mesh.parent.userData && mesh.parent.userData.nameLabel;
+  if (label) label.userData.hideBubble = true;
+  activeBubble = { mesh, hideAt: timer.getElapsed() + 3.4, offsetY, label };
   positionBubble(mesh);                    // place it before fading in
   animate(bubbleEl, { opacity: [0, 1], duration: 260, ease: 'out(3)' });
 }
@@ -1092,8 +1128,15 @@ function positionBubble(mesh) {
   _headPos.project(camera);
   if (_headPos.z > 1) { bubbleEl.style.display = 'none'; return; } // behind camera
   bubbleEl.style.display = 'block'; // …and back again when the speaker returns into view
-  bubbleEl.style.left = ((_headPos.x * 0.5 + 0.5) * window.innerWidth) + 'px';
-  bubbleEl.style.top = ((-_headPos.y * 0.5 + 0.5) * window.innerHeight) + 'px';
+  // clamp inside the viewport — a speaker near a screen edge used to push the
+  // bubble half off-screen or up over the topbar text
+  let x = (_headPos.x * 0.5 + 0.5) * window.innerWidth;
+  let y = (-_headPos.y * 0.5 + 0.5) * window.innerHeight;
+  const hw = bubbleEl.offsetWidth / 2;
+  x = Math.min(Math.max(x, hw + 8), window.innerWidth - hw - 8);
+  y = Math.max(y, bubbleEl.offsetHeight + 16);
+  bubbleEl.style.left = x + 'px';
+  bubbleEl.style.top = y + 'px';
 }
 
 // Tap detection: only count it as a click if the pointer barely moved
@@ -1886,14 +1929,18 @@ function refreshElevatorButtons() {
   if (!elevatorEl) return;
   [...elevatorEl.querySelectorAll('.elev-btn')].forEach((b, i) => b.classList.toggle('here', i === hospCurrentFloor));
 }
-function openElevator() { if (!elevatorEl) buildElevatorPanel(); elevatorOpen = true; markFloorVisited(hospCurrentFloor); refreshElevatorButtons(); elevatorEl.style.display = 'flex'; animate(elevatorEl, { opacity: [0, 1], duration: 200 }); }
-function closeElevator() { if (!elevatorEl) return; elevatorOpen = false; elevatorEl.style.display = 'none'; }
+function openElevator() { if (!elevatorEl) buildElevatorPanel(); elevatorOpen = true; if (typeof updateThrowBtnVisibility === 'function') updateThrowBtnVisibility(); markFloorVisited(hospCurrentFloor); refreshElevatorButtons(); elevatorEl.style.display = 'flex'; animate(elevatorEl, { opacity: [0, 1], duration: 200 }); }
+function closeElevator() { if (!elevatorEl) return; elevatorOpen = false; elevatorEl.style.display = 'none'; if (typeof updateThrowBtnVisibility === 'function') updateThrowBtnVisibility(); }
 function updateElevator() {
   if (!player || !hospElevatorPos) return;
   const dBldg = Math.hypot(player.position.x - HOSP_POS.x, player.position.z - HOSP_POS.z);
   if (dBldg > 14 && hospCurrentFloor !== 0) setHospitalFloor(0, true); // walked out → reset to Floor 1
   const near = Math.hypot(player.position.x - hospElevatorPos.x, player.position.z - hospElevatorPos.z) < 3.2;
-  const blocked = (typeof miniGameActive === 'function' && miniGameActive()) || (typeof battleActive !== 'undefined' && battleActive) || (typeof uiModalOpen === 'function' && uiModalOpen());
+  const blocked = (typeof miniGameActive === 'function' && miniGameActive()) || (typeof battleActive !== 'undefined' && battleActive) || (typeof uiModalOpen === 'function' && uiModalOpen())
+    // the elevator YIELDS to any open right-edge panel (they share the same screen
+    // space on tablets) — opening a panel auto-closes it; closing brings it back
+    || (typeof questOpen !== 'undefined' && questOpen) || (typeof prizeOpen !== 'undefined' && prizeOpen)
+    || (typeof tradeOpen !== 'undefined' && tradeOpen) || (typeof shopOpen !== 'undefined' && shopOpen);
   if (near && !elevatorOpen && !blocked) openElevator();
   else if ((!near || blocked) && elevatorOpen) closeElevator();
 }
@@ -2448,6 +2495,7 @@ function spawnRoamer({ id, name, sprite, x, z, scale = 1, roamCenter, roamRadius
   label.position.set(0, size + 0.5, 0);
   if (child) label.scale.set(1.6, 0.42, 1);
   holder.add(label);
+  holder.userData.nameLabel = label; // so trades/bubbles/cluster checks can hide it
   const zzz = makeZzzSprite(); zzz.position.set(size * 0.3, size + 0.6, 0); holder.add(zzz); holder.userData.zzz = zzz;
   const ts = makeEmojiSprite('🎁'); ts.position.set(-size * 0.28, size + 0.25, 0); holder.add(ts); holder.userData.tradeSprite = ts;
   const um = makeEmojiSprite('☂️'); um.position.set(0, size * 0.95, 0.06); um.scale.set(size * 0.45, size * 0.45, 1); holder.add(um); holder.userData.umbrella = um;
@@ -2985,11 +3033,15 @@ function refreshQuests() {
     questListEl.appendChild(row);
   }
 }
-function openQuests() { if (typeof tradeOpen !== 'undefined' && tradeOpen) closeTrade(); if (typeof prizeOpen !== 'undefined' && prizeOpen) closePrizes(); if (typeof shopOpen !== 'undefined' && shopOpen) { shopDismissed = true; closeShop(); } questOpen = true; refreshQuests(); questEl.style.display = 'block'; animate(questEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' }); }
+function openQuests() { if (typeof tradeOpen !== 'undefined' && tradeOpen) closeTrade(); if (typeof prizeOpen !== 'undefined' && prizeOpen) closePrizes(); if (typeof shopOpen !== 'undefined' && shopOpen) { shopDismissed = true; closeShop(); } questOpen = true; refreshQuests(); questEl.style.display = 'block'; placeSidePanel(questEl); animate(questEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' }); }
 function closeQuests() { questOpen = false; animate(questEl, { opacity: [1, 0], duration: 200, onComplete: () => { questEl.style.display = 'none'; } }); }
 let toastEl = null;
 function questToast(msg) {
   if (!toastEl) { toastEl = document.createElement('div'); toastEl.id = 'questtoast'; document.body.appendChild(toastEl); }
+  // sit just BELOW the real topbar — its height varies (pills wrap to 2-3 rows
+  // on tablets/phones), so a fixed 64px landed under the pills on iPad
+  const tb = document.querySelector('#hud .topbar');
+  if (tb) toastEl.style.top = Math.round(tb.getBoundingClientRect().bottom + 8) + 'px';
   toastEl.textContent = msg; toastEl.style.display = 'block';
   animate(toastEl, { opacity: [0, 1], translateY: [12, 0], duration: 300, ease: 'out(3)' });
   clearTimeout(toastEl._t); toastEl._t = setTimeout(() => { animate(toastEl, { opacity: 0, duration: 400, onComplete: () => { toastEl.style.display = 'none'; } }); }, 2600);
@@ -3636,7 +3688,9 @@ function openShop() {
   if (typeof prizeOpen !== 'undefined' && prizeOpen) closePrizes();
   if (typeof tradeOpen !== 'undefined' && tradeOpen) closeTrade();
   shopOpen = true;
+  if (typeof updateThrowBtnVisibility === 'function') updateThrowBtnVisibility();
   refreshShop(); refreshSell();
+  placeSidePanel(shopEl);
   shopEl.style.display = 'block';
   // opacity only — the panel's vertical centering uses CSS transform, so we
   // must not animate transform here or it would jump.
@@ -3644,6 +3698,7 @@ function openShop() {
 }
 function closeShop() {
   shopOpen = false;
+  if (typeof updateThrowBtnVisibility === 'function') updateThrowBtnVisibility();
   animate(shopEl, { opacity: [1, 0], duration: 200, onComplete: () => { shopEl.style.display = 'none'; } });
 }
 buildShop();
@@ -3695,7 +3750,7 @@ function buyPrize(p) {
   if (typeof onBuyPrize === 'function') onBuyPrize(); // quest: buy a prize
   refreshPrizes(); if (typeof saveGame === 'function') saveGame();
 }
-function openPrizes() { if (typeof questOpen !== 'undefined' && questOpen) closeQuests(); if (typeof tradeOpen !== 'undefined' && tradeOpen) closeTrade(); if (typeof shopOpen !== 'undefined' && shopOpen) { shopDismissed = true; closeShop(); } prizeOpen = true; refreshPrizes(); prizeEl.style.display = 'block'; animate(prizeEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' }); }
+function openPrizes() { if (typeof questOpen !== 'undefined' && questOpen) closeQuests(); if (typeof tradeOpen !== 'undefined' && tradeOpen) closeTrade(); if (typeof shopOpen !== 'undefined' && shopOpen) { shopDismissed = true; closeShop(); } prizeOpen = true; refreshPrizes(); prizeEl.style.display = 'block'; placeSidePanel(prizeEl); animate(prizeEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' }); }
 function closePrizes() { prizeOpen = false; animate(prizeEl, { opacity: [1, 0], duration: 200, onComplete: () => { prizeEl.style.display = 'none'; } }); }
 buildPrizes();
 const lanternLight = new THREE.PointLight(0xfff0c0, 0, 16, 1.6); scene.add(lanternLight);
@@ -3747,8 +3802,14 @@ function buildBattlePrompt() {
   run.addEventListener('click', () => { battlePromptCool = timer.getElapsed() + 6; hideBattlePrompt(); });
   battlePromptEl.append(txt, fight, run); document.body.appendChild(battlePromptEl);
 }
-function showBattlePrompt(holder) { battlePromptFor = holder; battlePromptEl._txt.textContent = `A wild ${holder.userData.enemy.name} appears! `; battlePromptEl.style.display = 'flex'; }
-function hideBattlePrompt() { battlePromptFor = null; if (battlePromptEl) battlePromptEl.style.display = 'none'; }
+function showBattlePrompt(holder) {
+  battlePromptFor = holder; battlePromptEl._txt.textContent = `A wild ${holder.userData.enemy.name} appears! `; battlePromptEl.style.display = 'flex';
+  if (hintEl) hintEl.style.visibility = 'hidden'; // the how-to-play hint shares the same spot on touch — yield to the prompt
+}
+function hideBattlePrompt() {
+  battlePromptFor = null; if (battlePromptEl) battlePromptEl.style.display = 'none';
+  if (hintEl) hintEl.style.visibility = '';
+}
 function updateEnemies(t) {
   if (!player || battleActive) { hideBattlePrompt(); return; }
   if (typeof uiModalOpen === 'function' && uiModalOpen()) { hideBattlePrompt(); return; } // don't pop a Fight prompt over a choice modal
@@ -4836,7 +4897,7 @@ function buyDressItem(item) {
   refreshDress();
   if (typeof saveGame === 'function') saveGame();
 }
-function openDress() { dressOpen = true; refreshDress(); dressEl.style.display = 'block'; animate(dressEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' }); }
+function openDress() { dressOpen = true; refreshDress(); dressEl.style.display = 'block'; placeSidePanel(dressEl); animate(dressEl, { opacity: [0, 1], duration: 240, ease: 'out(3)' }); }
 function closeDress() { dressOpen = false; animate(dressEl, { opacity: [1, 0], duration: 200, onComplete: () => { dressEl.style.display = 'none'; } }); }
 buildDress();
 
@@ -4935,7 +4996,10 @@ const throwBtnEl = document.getElementById('throwBtn');
 if (throwBtnEl) throwBtnEl.addEventListener('click', throwBall);
 function updateThrowBtnVisibility() {
   if (!throwBtnEl) return;
-  throwBtnEl.style.display = currentPlayerPet() ? '' : 'none';
+  // hide while the shop or elevator panel occupies the bottom-right (short
+  // screens: the 🎾 floated on top of their text)
+  const panelUp = (typeof shopOpen !== 'undefined' && shopOpen) || (typeof elevatorOpen !== 'undefined' && elevatorOpen);
+  throwBtnEl.style.display = (currentPlayerPet() && !panelUp) ? '' : 'none';
   throwBtnEl.textContent = petCat ? '🧶' : '🎾';
   throwBtnEl.title = petCat ? 'Throw the toy (Space)' : 'Throw the ball (Space)';
 }
@@ -5231,12 +5295,37 @@ function tick() {
       const trading = w.tradeUntil && t < w.tradeUntil;
       holder.userData.tradeSprite.visible = !!trading;
       if (trading) holder.userData.tradeSprite.position.y = (CHAR_HEIGHT + 0.35) + Math.sin(t * 3 + b.userData.bobPhase) * 0.1;
+      if (holder.userData.nameLabel) holder.userData.nameLabel.userData.hideTrade = !!trading; // two traders stand nose-to-nose — their pills stacked exactly
+    }
+    // apply the label's combined visibility (trade huddles, open speech bubble,
+    // and the cluster de-stacker below can each hide it)
+    if (holder.userData.nameLabel) {
+      const lu = holder.userData.nameLabel.userData;
+      holder.userData.nameLabel.visible = !(lu.hideTrade || lu.hideBubble || lu.hideCluster);
+    }
+  }
+  // 🏷️ label de-stacker: when two characters bunch up (cafe, pet park, star
+  // chasing), hide the FARTHER one's name pill so text never paints over text.
+  // Cheap O(n²) over ~25 labels, twice a second.
+  if (t >= nextLabelDeclutterAt) {
+    nextLabelDeclutterAt = t + 0.5;
+    const lh = [];
+    for (const b of billboards) { const h = b.parent; if (h && h.userData.nameLabel && h.visible) lh.push(h); }
+    for (const h of lh) h.userData.nameLabel.userData.hideCluster = false;
+    for (let i = 0; i < lh.length; i++) for (let j = i + 1; j < lh.length; j++) {
+      const A = lh[i], B = lh[j];
+      const d = (A.position.x - B.position.x) ** 2 + (A.position.z - B.position.z) ** 2;
+      if (d < 2.4 * 2.4) {
+        const da = A.position.distanceToSquared(camera.position), db = B.position.distanceToSquared(camera.position);
+        (da > db ? A : B).userData.nameLabel.userData.hideCluster = true;
+      }
     }
   }
 
   // Keep an open speech bubble glued above its character, and auto-hide it.
   if (activeBubble) {
     if (t >= activeBubble.hideAt) {
+      if (activeBubble.label) activeBubble.label.userData.hideBubble = false; // speaker gets their name pill back
       activeBubble = null;
       animate(bubbleEl, { opacity: 0, duration: 240, onComplete: () => {
         if (!activeBubble) bubbleEl.style.display = 'none';
