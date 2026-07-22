@@ -44,10 +44,13 @@
     #hud { position: fixed; inset: 0; z-index: 20; pointer-events: none; opacity: 0; }
     #hud .topbar {
       position: absolute; top: 0; left: 0; right: 0;
-      display: flex; align-items: center; justify-content: space-between;
+      display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
       padding: 14px 18px;
       background: linear-gradient(180deg, rgba(5,7,13,.55), transparent);
     }
+    /* logo + health/hunger bars stack in one column — layout guarantees they never overlap */
+    #hud .brandcol { display: flex; flex-direction: column; gap: 8px; flex: 0 0 auto; }
+    #hud .pillrow { display: flex; gap: 8px; align-items: center; }
     #hud .brand { font-weight: 800; letter-spacing: 1px; font-size: 18px; }
     #hud .brand span { color: var(--accent); }
     #hud .pill {
@@ -57,19 +60,23 @@
       white-space: nowrap;
     }
     /* on phones the 9 pills can't fit one row — wrap them instead of crushing/clipping */
-    #hud .topbar > div:last-child { flex-wrap: wrap; justify-content: flex-end; row-gap: 6px; min-width: 0; }
+    #hud .pillrow { flex-wrap: wrap; justify-content: flex-end; row-gap: 6px; min-width: 0; }
     @media (pointer: coarse) {
       #hud .pill { min-height: 40px; display: inline-flex; align-items: center; }
       /* early readers: bump the instructional text that tells a kid what to do next */
       #hud .pill, #hud .hint, .shop-sub, .lock-label { font-size: 15px; }
     }
     @media (max-width: 520px) {
-      #hud .topbar { padding: 8px 10px; }
+      #hud .topbar { padding: 8px 10px; flex-wrap: wrap; }
+      /* narrow phones: brand + stat bars share one full-width ROW (a tall left
+         column would squeeze the pills into 5-6 wrapped rows) */
+      #hud .brandcol { flex-direction: row; align-items: center; gap: 10px; width: 100%; }
+      #hud .pillrow { width: 100%; }
       #hud .pill { padding: 7px 10px; }
       #fps { display: none; } /* debug readout, not a kid-facing control */
     }
-    /* ---------- Health + Hunger bars ---------- */
-    #stats { position: absolute; top: 62px; left: 16px; display: flex; flex-direction: column; gap: 7px; pointer-events: none; }
+    /* ---------- Health + Hunger bars (in-flow under the logo — no magic offsets) ---------- */
+    #stats { display: flex; flex-direction: column; gap: 7px; pointer-events: none; }
     .statbar { display: flex; align-items: center; gap: 7px; }
     .staticon { font-size: 20px; filter: drop-shadow(0 1px 2px rgba(0,0,0,.5)); }
     .stattrack {
@@ -80,7 +87,7 @@
       background: linear-gradient(90deg, #ff5a6a, #ff8a9a); transition: width .3s ease, background .3s ease; }
     .stattrack > i.hunger { background: linear-gradient(90deg, #ffa63a, #ffd06b); }
     .stattrack > i.low { background: linear-gradient(90deg, #d63a3a, #ff6a6a); }
-    @media (max-width: 520px) { .stattrack { width: 108px; } #stats { top: 128px; } }
+    @media (max-width: 520px) { .stattrack { width: 108px; } }
     #hud .hint {
       position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%);
       font-size: 13px; color: #b9d6f0; background: rgba(13,27,42,.5);
@@ -199,6 +206,9 @@
       background: linear-gradient(180deg, #16314d, #0c1d30);
       border: 1px solid rgba(127, 209, 255, .25); border-radius: 18px;
       padding: 16px 16px 14px; box-shadow: 0 16px 44px rgba(0, 0, 0, .5);
+      /* short screens (landscape phones): scroll inside instead of clipping the
+         title + ✕ off-screen — same pattern as every other side panel */
+      max-height: calc(100vh - 24px); overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
     }
     #shop h3 { text-align: center; font-size: 20px; margin-bottom: 2px; }
     #shop .shop-sub { text-align: center; font-size: 12px; color: #ffd166; margin-bottom: 12px; }
@@ -277,13 +287,17 @@
     }
     /* keep scrolling panels clear of the touch joystick (bottom-left) */
     @media (hover: none) and (pointer: coarse) {
-      #dressroom { top: 12px; transform: none; max-height: calc(100vh - 196px); }
-      #questpanel, #prizepanel, #tradepanel { max-height: calc(100vh - 196px); }
+      /* top:136 clears the wrapped 2-3 row topbar on EVERY touch width (the old
+         top:12/16 painted panels straight over the pills & the new stats column
+         on iPads — width > 520px so the phone override never fired) */
+      #dressroom { top: 136px; transform: none; max-height: calc(100vh - 300px); }
+      #questpanel, #prizepanel, #tradepanel { top: 136px; max-height: calc(100vh - 300px); }
       .swatch { width: 34px; height: 34px; }
       .swatches { gap: 8px; }
       .panel-close { width: 44px; height: 44px; font-size: 18px; } /* fat-finger-friendly ✕ (44px touch minimum) */
+      #fps { display: none; } /* debug readout — not for kid-facing touch devices */
     }
-    body.touch #dressroom { top: 12px; transform: none; max-height: calc(100vh - 196px); }
+    body.touch #dressroom { top: 136px; transform: none; max-height: calc(100vh - 300px); }
     /* on phones, drop the panels below the (wrapped, up-to-3-row) top bar so its
        buttons stay tappable, and stop above the joystick (declared after the
        coarse-pointer rules so this tighter cap wins on portrait phones) */
@@ -303,6 +317,19 @@
     @media (hover: none) and (pointer: coarse) { #battleprompt { bottom: 170px; } #hud .hint { bottom: 170px; } }
     body.touch #battleprompt { bottom: 170px; }
     body.touch #hud .hint { bottom: 170px; } /* the how-to-play hint clears the joystick too */
+    /* short landscape screens: the centered hint can't reach the left joystick anyway,
+       so keep it low — otherwise it collides with two-line toasts mid-screen */
+    @media (max-height: 480px) {
+      body.touch #hud .hint { bottom: 26px; }
+      @media (hover: none) and (pointer: coarse) { #hud .hint { bottom: 26px; } }
+      /* compact mini-games so board + controls + Close fit one short screen */
+      .puzzle-panel { padding: 12px 16px; }
+      .merge-grid, .match-grid, .bb-grid { width: 216px; }
+      .tet-canvas { width: 216px; height: 216px; }
+      .bb-tray { margin-top: 8px; min-height: 40px; }
+      .dpad { margin-top: 8px; }
+      .puzzle-close { margin-top: 10px; }
+    }
     .bp-btn { padding: 8px 14px; border-radius: 12px; cursor: pointer; color: #fff; font-weight: 700;
       background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.3); }
     .bp-btn.fight { background: #e0556a; border-color: #ff8a9a; }
@@ -313,10 +340,11 @@
     .hpfill { height: 100%; width: 100%; background: linear-gradient(90deg,#74e08c,#4faf54); transition: width .25s; }
     .hpfill.enemy { background: linear-gradient(90deg,#ff7a7a,#e0556a); }
     #questtoast {
-      position: fixed; z-index: 60; left: 50%; transform: translateX(-50%); top: 64px;
+      position: fixed; z-index: 60; left: 50%; transform: translateX(-50%); top: 64px; /* JS re-positions below the real topbar */
       display: none; padding: 10px 18px; border-radius: 16px; font-weight: 700; color: #fff;
       background: linear-gradient(180deg, #3a2d6b, #20183f);
       border: 1px solid rgba(186, 160, 255, .45); box-shadow: 0 10px 30px rgba(0, 0, 0, .5);
+      max-width: 92vw; text-align: center; /* long messages wrap instead of running off narrow screens */
     }
     /* ---------- Hospital elevator floor-picker (opens near the pad) ---------- */
     #elevator {
@@ -494,8 +522,18 @@
   <!-- HUD overlay (faded in by anime.js) -->
   <div id="hud">
     <div class="topbar">
-      <div class="brand">Sandy<span>ten</span></div>
-      <div style="display:flex; gap:8px; align-items:center;">
+      <!-- brand + stat bars share one flowing column, so they can NEVER overlap
+           (they used to be absolutely positioned with per-device magic offsets —
+           iPad landed between the phone and desktop numbers and the health bar
+           painted right over the logo → App Store Guideline 4 rejection) -->
+      <div class="brandcol">
+        <div class="brand">Sandy<span>ten</span></div>
+        <div id="stats" style="display:none;">
+          <div class="statbar"><span class="staticon">❤️</span><div class="stattrack"><i id="healthFill"></i></div></div>
+          <div class="statbar"><span class="staticon">🍗</span><div class="stattrack"><i id="hungerFill" class="hunger"></i></div></div>
+        </div>
+      </div>
+      <div class="pillrow">
         <button class="pill" id="changeBtn" style="display:none; cursor:pointer;">⟳ Change character</button>
         <div class="pill" id="timephase">☀️ day</div>
         <button class="pill" id="tradeBtn" style="cursor:pointer;">🤝 Trade</button>
@@ -508,11 +546,6 @@
       </div>
     </div>
     <div class="hint">Click a character to pick who you are!</div>
-    <!-- health + hunger bars (top-left, under the bar) -->
-    <div id="stats" style="display:none;">
-      <div class="statbar"><span class="staticon">❤️</span><div class="stattrack"><i id="healthFill"></i></div></div>
-      <div class="statbar"><span class="staticon">🍗</span><div class="stattrack"><i id="hungerFill" class="hunger"></i></div></div>
-    </div>
   </div>
 
   <!-- Touch joystick (auto-shown on phones/tablets) -->
